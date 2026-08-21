@@ -1,0 +1,347 @@
+import type {
+  ExecutionDocument,
+  ExecutionValidation,
+  Phase,
+  Task,
+  ValidationIssue,
+} from "./types.js";
+
+const CONTRACT = "rb-execution/v1" as const;
+const PHASE_HEADING = /^## Phase ([0-9]+):\s+(.+)$/;
+const TASK_HEADING = /^- \[([ x])\] (T[0-9]{3,}) —\s+(.+)$/;
+const PHASE_FIELD = /^\*\*(Phase ID|Goal|Depends on):\*\*\s*(.*)$/;
+const TASK_FIELD = /^  - \*\*(Scope|Change|Covers|Depends on|Parallel safe|Acceptance criteria|Validation|Expected evidence):\*\*\s*(.*)$/;
+
+export interface ValidationInstruction {
+  kind: "command" | "manual";
+  value: string;
+}
+
+export function parseValidationInstruction(value: string): ValidationInstruction | undefined {
+  if (value.includes("\t") || value.includes("\r") || value.includes("\n")) return undefined;
+  const command = value.match(/^`([^`]+)`$/);
+  if (command?.[1]?.trim()) return { kind: "command", value: command[1].trim() };
+  const manual = value.match(/^manual:\s+(.+)$/i);
+  if (manual?.[1]?.trim()) return { kind: "manual", value: manual[1].trim() };
+  return undefined;
+}
+
+function issue(
+  issues: ValidationIssue[],
+  code: string,
+  message: string,
+  line?: number,
+): void {
+  issues.push({ code, message, severity: "error", ...(line ? { line } : {}) });
+}
+
+function parseList(value: string): string[] {
+  if (value.trim().toLowerCase() === "none") return [];
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function findMarker(lines: string[], name: string): { values: string[]; lines: number[] } {
+  const pattern = new RegExp(`^<!--\\s*${name}:\\s*([^>]+?)\\s*-->$`);
+  const values: string[] = [];
+  const markerLines: number[] = [];
+  lines.forEach((line, index) => {
+    const match = line.match(pattern);
+    if (match?.[1]) {
+      values.push(match[1].trim());
+      markerLines.push(index + 1);
+    }
+  });
+  return { values, lines: markerLines };
+}
+
+function phaseField(lines: string[], name: string): { value: string; line?: number } {
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index]?.match(PHASE_FIELD);
+    if (match?.[1] === name) return { value: match[2]?.trim() ?? "", line: index + 1 };
+  }
+  return { value: "" };
+}
+
+function parseContext(lines: string[]): string[] {
+  const start = lines.findIndex((line) => line === "**Context:**");
+  if (start < 0) return [];
+  const result: string[] = [];
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    if (TASK_HEADING.test(line) || /^\*\*/.test(line)) break;
+    const item = line.match(/^-\s+(.+)$/);
+    if (item?.[1]) result.push(item[1].trim());
+  }
+  return result;
+}
+
+function parseTask(
+  lines: string[],
+  offset: number,
+  match: RegExpMatchArray,
+  issues: ValidationIssue[],
+): Task {
+  const values = new Map<string, string>();
+  const lists = new Map<string, string[]>();
+
+  for (let index = 1; index < lines.length; index += 1) {
+    const field = lines[index]?.match(TASK_FIELD);
+    if (!field?.[1]) continue;
+    const name = field[1];
+    const inline = field[2]?.trim() ?? "";
+    if (name === "Acceptance criteria" || name === "Validation") {
+      const entries: string[] = [];
+      if (inline) entries.push(inline);
+      for (let nested = index + 1; nested < lines.length; nested += 1) {
+        const nestedLine = lines[nested] ?? "";
+        if (TASK_FIELD.test(nestedLine)) break;
+        const listItem = nestedLine.match(/^    -\s+(.+)$/);
+        if (listItem?.[1]) entries.push(listItem[1].trim());
+      }
+      lists.set(name, entries);
+    } else {
+      values.set(name, inline);
+    }
+  }
+
+  const id = match[2] ?? "";
+  const required = ["Scope", "Change", "Covers", "Depends on", "Parallel safe", "Expected evidence"];
+  for (const field of required) {
+    if (!values.get(field)) issue(issues, "task.field.missing", `${id} is missing ${field}`, offset);
+  }
+  const acceptanceCriteria = lists.get("Acceptance criteria") ?? [];
+  const validation = lists.get("Validation") ?? [];
+  if (acceptanceCriteria.length === 0) {
+    issue(issues, "task.acceptance.empty", `${id} has no acceptance criteria`, offset);
+  }
+  if (validation.length === 0) {
+    issue(issues, "task.validation.empty", `${id} has no validation entries`, offset);
+  }
+  validation.forEach((entry) => {
+    if (!parseValidationInstruction(entry)) {
+      issue(
+        issues,
+        "task.validation.format",
+        `${id} validation must be a backtick-delimited command or manual: <inspection>`,
+        offset,
+      );
+    }
+  });
+  acceptanceCriteria.forEach((criterion) => {
+    const expected = new RegExp(`^AC-${id}-[0-9]{2}:\\s+.+`);
+    if (!expected.test(criterion)) {
+      issue(
+        issues,
+        "task.acceptance.id",
+        `${id} acceptance criterion must match AC-${id}-NN: <criterion>`,
+        offset,
+      );
+    }
+  });
+  const parallel = values.get("Parallel safe")?.toLowerCase();
+  if (parallel !== "true" && parallel !== "false") {
+    issue(issues, "task.parallel.invalid", `${id} Parallel safe must be true or false`, offset);
+  }
+
+  return {
+    id,
+    title: match[3]?.trim() ?? "",
+    done: match[1] === "x",
+    scope: values.get("Scope") ?? "",
+    change: values.get("Change") ?? "",
+    covers: values.get("Covers") ?? "",
+    dependsOn: parseList(values.get("Depends on") ?? ""),
+    parallelSafe: parallel === "true",
+    acceptanceCriteria,
+    validation,
+    expectedEvidence: values.get("Expected evidence") ?? "",
+    line: offset,
+  };
+}
+
+function parsePhase(
+  lines: string[],
+  offset: number,
+  number: number,
+  title: string,
+  issues: ValidationIssue[],
+): Phase {
+  const idField = phaseField(lines, "Phase ID");
+  const goalField = phaseField(lines, "Goal");
+  const dependsField = phaseField(lines, "Depends on");
+  const context = parseContext(lines);
+  const expectedId = `P${String(number).padStart(2, "0")}`;
+
+  if (!idField.value) issue(issues, "phase.id.missing", `Phase ${number} is missing Phase ID`, offset);
+  if (idField.value && idField.value !== expectedId) {
+    issue(issues, "phase.id.invalid", `Phase ${number} ID must be ${expectedId}`, offset + (idField.line ?? 1) - 1);
+  }
+  if (!goalField.value) issue(issues, "phase.goal.missing", `Phase ${number} is missing Goal`, offset);
+  if (dependsField.line === undefined) {
+    issue(issues, "phase.depends.missing", `Phase ${number} is missing Depends on`, offset);
+  }
+  if (context.length === 0) {
+    issue(issues, "phase.context.empty", `Phase ${number} must list at least one context path`, offset);
+  }
+
+  const starts: Array<{ index: number; match: RegExpMatchArray }> = [];
+  lines.forEach((line, index) => {
+    const match = line.match(TASK_HEADING);
+    if (match) starts.push({ index, match });
+  });
+  if (starts.length === 0) issue(issues, "phase.tasks.empty", `Phase ${number} has no tasks`, offset);
+
+  const tasks = starts.map(({ index, match }, taskIndex) => {
+    const end = starts[taskIndex + 1]?.index ?? lines.length;
+    return parseTask(lines.slice(index, end), offset + index, match, issues);
+  });
+
+  return {
+    number,
+    id: idField.value,
+    title,
+    goal: goalField.value,
+    dependsOn: parseList(dependsField.value),
+    context,
+    tasks,
+    line: offset,
+  };
+}
+
+export function validateExecutionMarkdown(source: string): ExecutionValidation {
+  const normalized = source.replace(/\r\n/g, "\n");
+  const lines = normalized.split("\n");
+  const issues: ValidationIssue[] = [];
+  const firstIndex = lines.findIndex((line) => line.trim().length > 0);
+  const titleMatch = firstIndex >= 0 ? lines[firstIndex]?.match(/^# RB Execution Plan:\s+(.+)$/) : undefined;
+  if (!titleMatch?.[1]) {
+    issue(issues, "document.title", "First non-empty line must be # RB Execution Plan: <name>", firstIndex + 1);
+  }
+
+  const contractMarker = findMarker(lines, "rb-execution-contract");
+  if (contractMarker.values.length !== 1 || contractMarker.values[0] !== CONTRACT) {
+    issue(issues, "document.contract", `Document must contain exactly one ${CONTRACT} marker`);
+  }
+  const artifactMarker = findMarker(lines, "rb-artifact-id");
+  if (artifactMarker.values.length !== 1 || !/^[a-z0-9][a-z0-9-]*$/.test(artifactMarker.values[0] ?? "")) {
+    issue(issues, "document.artifact-id", "Document must contain one valid rb-artifact-id marker");
+  }
+
+  const phaseStarts: Array<{ index: number; number: number; title: string }> = [];
+  lines.forEach((line, index) => {
+    if (!line.startsWith("## ")) return;
+    const match = line.match(PHASE_HEADING);
+    if (!match?.[1] || !match[2]) {
+      issue(issues, "document.heading.h2", "Only ## Phase N: <title> level-2 headings are allowed", index + 1);
+      return;
+    }
+    phaseStarts.push({ index, number: Number(match[1]), title: match[2].trim() });
+  });
+  if (phaseStarts.length === 0) issue(issues, "document.phases.empty", "Document must contain at least one phase");
+
+  const phases = phaseStarts.map((start, index) => {
+    const expected = index + 1;
+    if (start.number !== expected) {
+      issue(issues, "phase.sequence", `Expected Phase ${expected}, found Phase ${start.number}`, start.index + 1);
+    }
+    const end = phaseStarts[index + 1]?.index ?? lines.length;
+    return parsePhase(lines.slice(start.index + 1, end), start.index + 2, start.number, start.title, issues);
+  });
+
+  const seenTasks = new Set<string>();
+  let previousTask = 0;
+  const knownPhases = new Set<string>();
+  for (const phase of phases) {
+    for (const dependency of phase.dependsOn) {
+      if (!knownPhases.has(dependency)) {
+        issue(issues, "phase.dependency.invalid", `${phase.id || `Phase ${phase.number}`} depends on unknown or later ${dependency}`, phase.line);
+      }
+    }
+    knownPhases.add(phase.id);
+    for (const task of phase.tasks) {
+      const numeric = Number(task.id.slice(1));
+      if (seenTasks.has(task.id)) issue(issues, "task.duplicate", `Duplicate task ID ${task.id}`, task.line);
+      if (numeric <= previousTask) issue(issues, "task.sequence", `${task.id} is not in ascending order`, task.line);
+      for (const dependency of task.dependsOn) {
+        if (!seenTasks.has(dependency)) {
+          issue(issues, "task.dependency.invalid", `${task.id} depends on unknown or later ${dependency}`, task.line);
+        }
+      }
+      seenTasks.add(task.id);
+      previousTask = numeric;
+    }
+  }
+
+  const document: ExecutionDocument | undefined = titleMatch?.[1] && artifactMarker.values[0]
+    ? {
+        contract: CONTRACT,
+        artifactId: artifactMarker.values[0],
+        title: titleMatch[1].trim(),
+        phases,
+      }
+    : undefined;
+
+  return { valid: issues.length === 0, issues, ...(document ? { document } : {}) };
+}
+
+export function extractExecutionPhaseMarkdown(source: string, phaseId: string): string {
+  const validation = validateExecutionMarkdown(source);
+  if (!validation.valid || !validation.document) {
+    const details = validation.issues.map((entry) => `${entry.code}: ${entry.message}`).join("; ");
+    throw new Error(`Execution document is invalid: ${details}`);
+  }
+
+  const phase = validation.document.phases.find((entry) => entry.id === phaseId);
+  if (!phase) throw new Error(`Unknown phase ${phaseId}`);
+
+  const lines = source.replace(/\r\n/g, "\n").split("\n");
+  const phaseHeadings = lines
+    .map((line, index) => ({ index, match: line.match(PHASE_HEADING) }))
+    .filter((entry): entry is { index: number; match: RegExpMatchArray } => Boolean(entry.match));
+  const selectedIndex = phaseHeadings.findIndex((entry) => Number(entry.match[1]) === phase.number);
+  const selected = phaseHeadings[selectedIndex];
+  if (!selected) throw new Error(`Could not locate phase heading for ${phaseId}`);
+
+  const preambleEnd = phaseHeadings[0]?.index ?? 0;
+  const phaseEnd = phaseHeadings[selectedIndex + 1]?.index ?? lines.length;
+  const preamble = lines.slice(0, preambleEnd);
+  const phaseLines = lines.slice(selected.index, phaseEnd);
+  return `${[...preamble, ...phaseLines].join("\n").trimEnd()}\n`;
+}
+
+export function extractExecutionTaskMarkdown(source: string, taskId: string): string {
+  const validation = validateExecutionMarkdown(source);
+  if (!validation.valid || !validation.document) {
+    const details = validation.issues.map((entry) => `${entry.code}: ${entry.message}`).join("; ");
+    throw new Error(`Execution document is invalid: ${details}`);
+  }
+
+  const phase = validation.document.phases.find((entry) => entry.tasks.some((task) => task.id === taskId));
+  if (!phase) throw new Error(`Unknown task ${taskId}`);
+
+  const lines = source.replace(/\r\n/g, "\n").split("\n");
+  const phaseHeadings = lines
+    .map((line, index) => ({ index, match: line.match(PHASE_HEADING) }))
+    .filter((entry): entry is { index: number; match: RegExpMatchArray } => Boolean(entry.match));
+  const phaseIndex = phaseHeadings.findIndex((entry) => Number(entry.match[1]) === phase.number);
+  const phaseHeading = phaseHeadings[phaseIndex];
+  if (!phaseHeading) throw new Error(`Could not locate phase heading for ${phase.id}`);
+  const phaseEnd = phaseHeadings[phaseIndex + 1]?.index ?? lines.length;
+  const taskHeadings = lines
+    .slice(phaseHeading.index, phaseEnd)
+    .map((line, index) => ({ index: phaseHeading.index + index, match: line.match(TASK_HEADING) }))
+    .filter((entry): entry is { index: number; match: RegExpMatchArray } => Boolean(entry.match));
+  const taskIndex = taskHeadings.findIndex((entry) => entry.match[2] === taskId);
+  const taskHeading = taskHeadings[taskIndex];
+  if (!taskHeading) throw new Error(`Could not locate task heading for ${taskId}`);
+
+  const preambleEnd = phaseHeadings[0]?.index ?? 0;
+  const taskEnd = taskHeadings[taskIndex + 1]?.index ?? phaseEnd;
+  const preamble = lines.slice(0, preambleEnd);
+  const phaseContext = lines.slice(phaseHeading.index, taskHeadings[0]?.index ?? phaseEnd);
+  const taskLines = lines.slice(taskHeading.index, taskEnd);
+  return `${[...preamble, ...phaseContext, ...taskLines].join("\n").trimEnd()}\n`;
+}

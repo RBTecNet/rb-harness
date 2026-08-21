@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rb-harness.dev/contracts/rb-manifest-v1.schema.json",
+  "title": "RB Artifact Manifest v1",
+  "type": "object",
+  "required": ["manifestVersion", "project", "artifactRoot", "generatedAt", "artifacts"],
+  "properties": {
+    "manifestVersion": { "const": "rb-manifest/v1" },
+    "project": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "name": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "artifactRoot": { "const": ".rb" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "path", "status", "sha256"],
+        "properties": {
+          "id": { "type": "string" },
+          "kind": { "type": "string" },
+          "path": { "type": "string" },
+          "status": { "enum": ["draft", "ready", "blocked", "invalid"] },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "contract": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

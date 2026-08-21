@@ -1,0 +1,4 @@
+interface:
+  display_name: "RB AI Context"
+  short_description: "Map an existing codebase into grounded context"
+  default_prompt: "Use $rb-ai-context to document this existing codebase from verified evidence."

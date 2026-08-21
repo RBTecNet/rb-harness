@@ -1,0 +1,4 @@
+interface:
+  display_name: "RB Plan"
+  short_description: "Plan features fixes refactors and migrations"
+  default_prompt: "Use $rb-plan to turn this change request into an executable validated plan."

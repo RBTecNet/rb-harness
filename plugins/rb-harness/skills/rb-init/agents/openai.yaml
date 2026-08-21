@@ -1,0 +1,4 @@
+interface:
+  display_name: "RB Init"
+  short_description: "Document a new project from idea to execution"
+  default_prompt: "Use $rb-init to turn my project idea into validated implementation documentation."
