@@ -38,3 +38,9 @@ Acceptance criteria must state the observable result directly. A criterion that
 only says a task satisfies, implements, or matches an RF/RNF/UI/CT ID is
 circular and invalid, as is an undefined qualifier such as "appropriately" or
 "when possible".
+
+`Parallel safe: true` means the task has no dependency on another pending task
+and owns disjoint paths, interfaces, migrations, generated artifacts, shared
+state, and validation surfaces. If independence cannot be demonstrated, write
+`false`. Never encode the number of agents in PHASES; RB Ralph bounds concurrency
+at execution time and must isolate parallel task work before integration.

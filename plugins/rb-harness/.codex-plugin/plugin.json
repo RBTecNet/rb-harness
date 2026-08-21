@@ -1,7 +1,7 @@
 {
   "name": "rb-harness",
   "version": "0.1.0+codex.20260821051457",
-  "description": "Provider-neutral project context, specification, and execution-plan documentation.",
+  "description": "Provider-neutral project context, product review, evolution, specification, and execution-plan documentation.",
   "author": {
     "name": "RB Harness contributors"
   },
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "RB Harness",
     "shortDescription": "Grounded project docs and executable plans.",
-    "longDescription": "Document new or existing projects, clarify only material gaps, and produce provider-neutral plans compatible with RB Ralph.",
+    "longDescription": "Document new or existing projects, audit whole products, safely evolve established behavior, and produce grounded provider-neutral plans compatible with RB Ralph.",
     "developerName": "RB Harness contributors",
     "category": "Productivity",
     "capabilities": [
@@ -19,7 +19,9 @@
     "defaultPrompt": [
       "Initialize a new project from my idea.",
       "Document this existing codebase.",
-      "Plan a feature or bug fix."
+      "Audit this application for grounded product and engineering findings.",
+      "Safely evolve this existing feature without breaking current behavior.",
+      "Plan an isolated feature or bug fix."
     ]
   }
 }

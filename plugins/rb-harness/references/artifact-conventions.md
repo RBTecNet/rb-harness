@@ -11,6 +11,8 @@ Write under `.rb/` except for the compact root `AGENTS.md` index:
   init/
   context/
   features/<slug>/
+  reviews/<review-id>/
+  evolutions/<slug>/
   handoffs/
   manifests/
 ```
@@ -20,8 +22,8 @@ the project root or store secrets.
 
 ## Stable identity and provenance
 
-- Project, requirement, contract, phase, task, decision, question, and artifact
-  IDs stay stable across re-runs.
+- Project, review, finding, evolution, requirement, contract, phase, task,
+  decision, question, and artifact IDs stay stable across re-runs.
 - Source manifests store path plus full SHA-256.
 - Classify knowledge as `OBSERVED`, `CONFIRMED`, `INFERRED`, `UNKNOWN`, or
   `CONFLICT`.
@@ -62,3 +64,12 @@ branch strategy, agent topology, RB Ralph, or RB Memory.
 `rb-operational/v1`. It describes product behavior and real consumer entrypoints,
 not an orchestration implementation. Never assume that the product is web-based
 or that one operating system represents every claimed platform.
+
+## Parallel safety
+
+Mark a task parallel-safe only after checking its dependency order and owned
+files/directories, interfaces, migrations, generated artifacts, shared state,
+and validation surfaces. Any plausible overlap or pending dependency makes it
+non-parallel. Parallel tasks must remain correct when started from the same
+immutable snapshot and integrated in any order; executor count is an operator
+choice, not a requirement embedded in the plan.

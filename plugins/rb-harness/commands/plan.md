@@ -12,7 +12,8 @@ Plan documentation only. Never edit application code or commit.
    `artifact-conventions.md`, `execution-template.md`, and
    `operational-template.md` completely.
 2. Resolve and hash input. Detect request type rather than forcing feature
-   semantics on bugs, refactors, or migrations.
+   semantics on bugs, refactors, or migrations. Route to `/rb-harness:evolve`
+   when the requested result changes established behavior or its consumers.
 3. Load the RB manifest and relevant init/context sources. Inspect the affected
    code/test slice directly because generated context may be stale.
 4. Normalize current/expected behavior, objective, scope, non-goals,

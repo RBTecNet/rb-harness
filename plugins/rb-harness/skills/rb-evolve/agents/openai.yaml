@@ -1,0 +1,4 @@
+interface:
+  display_name: "RB Evolve"
+  short_description: "Safely evolve existing product behavior"
+  default_prompt: "Use $rb-evolve to plan a safe change to this existing feature."

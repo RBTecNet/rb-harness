@@ -31,9 +31,13 @@ const required = [
   "commands/init.md",
   "commands/ai-context.md",
   "commands/plan.md",
+  "commands/review.md",
+  "commands/evolve.md",
   "skills/rb-init/SKILL.md",
   "skills/rb-ai-context/SKILL.md",
   "skills/rb-plan/SKILL.md",
+  "skills/rb-review/SKILL.md",
+  "skills/rb-evolve/SKILL.md",
   "references/interview-policy.md",
   "references/artifact-conventions.md",
   "references/execution-template.md",
@@ -50,7 +54,7 @@ for (const path of pluginFiles.filter((value) => /\.(?:md|json|yaml|yml)$/.test(
   assert(!source.includes("[TODO:"), `Placeholder remains in ${path}`);
 }
 
-for (const skill of ["rb-init", "rb-ai-context", "rb-plan"]) {
+for (const skill of ["rb-init", "rb-ai-context", "rb-plan", "rb-review", "rb-evolve"]) {
   const source = await readFile(resolve(plugin, `skills/${skill}/SKILL.md`), "utf8");
   assert(source.startsWith(`---\nname: ${skill}\ndescription:`), `Invalid skill frontmatter: ${skill}`);
 }

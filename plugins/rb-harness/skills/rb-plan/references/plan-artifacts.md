@@ -34,3 +34,7 @@ Under `.rb/features/<slug>/` create:
 Every RIGID requirement maps to at least one task. Every task maps to one or
 more requirements, declares affected scope, and owns a focused validation.
 Tasks touching the same files or tight shared interface are not parallel-safe.
+The same applies to overlapping directories, migrations, generated artifacts,
+shared state, or validation surfaces. A parallel-safe task has no dependency on
+another pending task and remains correct from the same snapshot in any
+integration order.

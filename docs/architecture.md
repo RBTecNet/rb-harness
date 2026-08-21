@@ -5,7 +5,7 @@
 | Component | Responsibility |
 |---|---|
 | Core CLI | Deterministic parsing, validation, hashing, evidence, and discovery |
-| Codex adapter | Skills for `/init`, `/ai-context`, and `/plan` workflows |
+| Codex adapter | Skills for init, context, review, evolution, and scoped planning workflows |
 | Claude adapter | Commands and agents implementing the same workflows |
 | Contract | Provider-neutral `PHASES.md` grammar and artifact manifest |
 | RB Ralph | Optional Bash executor with manager review, deterministic gates, bounded provider waits, and isolated task parallelism |
@@ -20,6 +20,8 @@
   init/                  greenfield project intent and initial execution plan
   context/               AS IS evidence and implemented-code documentation
   features/<slug>/       scoped requests, specs, plans, and execution plans
+  reviews/<review-id>/   whole-product findings, baselines, design authority, and selected remediation
+  evolutions/<slug>/     AS IS/TO BE delta, impact, preservation, migration, regression, and execution
   handoffs/              resumable interview state and temporary handoffs
   manifests/             source hashes and auxiliary provenance
   runs/                  Ralph prompts, logs, phase snapshots, patches, and append-only run events
@@ -34,8 +36,9 @@ format consumable by a pure Bash loop.
 
 | Concern | Authority |
 |---|---|
-| Intended behavior | Versioned `.rb/init` and `.rb/features` documents |
+| Intended behavior | Versioned `.rb/init`, `.rb/features`, and `.rb/evolutions` documents |
 | Implemented behavior | Code, tests, manifests, CI, and `.rb/context` evidence |
+| Review findings | Current evidence plus `.rb/reviews` provenance and baseline |
 | Execution discovery | `.rb/rb-manifest.json` |
 | Execution grammar | `rb-execution/v1` |
 | Active run state | `.rb/runs/<artifact-id>-<plan-sha12>/` |
@@ -97,7 +100,8 @@ turn into an unbounded wait loop.
 - Provider sessions are disposable; durable context lives in reviewed artifacts
   and run evidence.
 - An isolated parallel patch may not change `.rb/` and may reach the primary
-  tree only after all sibling patches pass integration checks.
+  tree only after all sibling patches pass integration checks. Parallel tasks
+  may not modify the same path even when Git could merge both edits cleanly.
 - A manager decision is necessary but insufficient when deterministic
   validation fails.
 

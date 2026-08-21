@@ -34,10 +34,20 @@ function artifactKind(relativePath: string): string {
   if (name === "OPERATIONS.JSON") return "operational-verification";
   if (name === "PLAN.MD") return "implementation-plan";
   if (["SPEC.MD", "REQUIREMENTS.MD"].includes(name)) return "specification";
-  if (name === "REQUEST.MD") return "request";
+  if (["REQUEST.MD", "CHANGE_REQUEST.MD"].includes(name)) return "request";
   if (relativePath.startsWith(".rb/context/")) return name === "EVIDENCE.JSON" ? "evidence" : "context-document";
   if (relativePath.startsWith(".rb/init/")) return "project-document";
   if (relativePath.startsWith(".rb/features/")) return "feature-document";
+  if (relativePath.startsWith(".rb/reviews/")) {
+    if (name === "FINDINGS.MD") return "review-findings";
+    if (name === "DESIGN_SYSTEM.MD") return "design-system";
+    if (name === "BASELINE.JSON") return "review-baseline";
+    return "review-document";
+  }
+  if (relativePath.startsWith(".rb/evolutions/")) {
+    if (name === "REGRESSION_MATRIX.MD") return "regression-specification";
+    return "evolution-document";
+  }
   if (relativePath.startsWith(".rb/manifests/")) return "provenance";
   return "artifact";
 }
@@ -77,7 +87,7 @@ export async function initializeProject(
   id = slugify(name),
 ): Promise<ArtifactManifest> {
   const absoluteRoot = resolve(root);
-  for (const directory of ["init", "context", "features", "handoffs", "manifests"]) {
+  for (const directory of ["init", "context", "features", "reviews", "evolutions", "handoffs", "manifests"]) {
     await mkdir(resolve(absoluteRoot, ".rb", directory), { recursive: true });
   }
   try {

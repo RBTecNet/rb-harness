@@ -2,8 +2,9 @@
 
 RB Harness is a provider-neutral documentation harness for new and existing
 software projects. It turns project evidence and short developer interviews
-into grounded context, specifications, plans, and execution documents that can
-be handed directly to an LLM or consumed by RB Ralph.
+into grounded context, whole-product reviews, safe existing-feature evolutions,
+specifications, plans, and execution documents that can be handed directly to
+an LLM or consumed by RB Ralph.
 
 The repository contains:
 
@@ -22,13 +23,16 @@ only when evidence or the developer requires them.
 
 ## Workflows
 
-The conceptual workflows are `init`, `ai-context`, and `plan`. Host adapters
+The conceptual workflows are `init`, `ai-context`, `review`, `evolve`, and
+`plan`. Host adapters
 expose them using their native command conventions:
 
 | Workflow | Codex skill | Claude Code command | Result |
 |---|---|---|---|
 | New project | `$rb-init <text or @file>` | `/rb-harness:init <text or @file>` | Project intent and initial plan under `.rb/init/` |
 | Existing project | `$rb-ai-context [path]` | `/rb-harness:ai-context [path]` | Evidence-grounded AS IS context under `.rb/context/` |
+| Whole-product audit | `$rb-review [path]` | `/rb-harness:review [path]` | Grounded findings and optional selected remediation under `.rb/reviews/<id>/` |
+| Existing behavior evolution | `$rb-evolve <text or @file>` | `/rb-harness:evolve <text or @file>` | AS IS/TO BE delta, impact, preservation, regression, and execution under `.rb/evolutions/<slug>/` |
 | Scoped change | `$rb-plan <text or @file>` | `/rb-harness:plan <text or @file>` | Request, spec, plan, and execution view under `.rb/features/<slug>/` |
 
 `init` and `plan` accept free text, `@path`, `--file path`, or an existing bare
@@ -110,8 +114,9 @@ rb-ralph --project /path/to/project --plan <artifact-id> --dry-run
 The execution loop includes Codex and Claude adapters, supports different
 providers for implementation and management, and runs deterministic validation
 commands before accepting manager approval. Independent parallel-safe tasks can
-use bounded concurrent agents; optional Git worktrees isolate their changes and
-fail closed when patches conflict. Provider-limit waits do not consume logical
+use a configurable bounded number of concurrent agents; Git worktree isolation
+is required for parallel execution, and overlapping or conflicting task patches
+fail closed before the primary tree changes. Provider-limit waits do not consume logical
 attempts, prompts have a configurable byte guard, and accepted phases resume
 only for the unchanged plan hash. Unsafe or interdependent work falls back to a
 sequential phase agent. Custom executable adapters remain available through the

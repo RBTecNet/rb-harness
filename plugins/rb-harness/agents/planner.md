@@ -14,7 +14,10 @@ into atomic tasks with scope, dependencies, risks, focused validations, and
 binary criteria. Do not make a task more precise than its traced requirement;
 return unresolved material ambiguity to the specifier instead of choosing an
 implementation. Build a dependency DAG. Mark parallel safety conservatively:
-shared files or tight interfaces are not parallel-safe. Derive PHASES exactly
+pending dependencies or shared files/directories, interfaces, migrations,
+generated artifacts, state, or validation surfaces are not parallel-safe. A
+parallel task must remain correct from the same snapshot in any integration
+order. Derive PHASES exactly
 1:1 from PLAN and use only allowed level-2 phase headings.
 Derive OPERATIONS.json from the real consumer boundary and claimed platforms;
 it is separate from PHASES.md and must remain directly executable without RB Ralph.

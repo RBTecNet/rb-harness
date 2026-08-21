@@ -25,6 +25,8 @@ as namespaced slash commands:
 |---|---|---|
 | New project | `$rb-init` | `/rb-harness:init` |
 | Existing project | `$rb-ai-context` | `/rb-harness:ai-context` |
+| Whole-product audit | `$rb-review` | `/rb-harness:review` |
+| Evolve existing behavior | `$rb-evolve` | `/rb-harness:evolve` |
 | Feature, fix, refactor, or migration | `$rb-plan` | `/rb-harness:plan` |
 
 ## Start a new project
@@ -96,6 +98,40 @@ Material partial or ambiguous answers are asked again more narrowly; if they
 remain unresolved, the documentation preserves the uncertainty instead of
 choosing an interpretation. The raw response and normalized decision remain in
 the source manifest for auditability.
+
+## Audit the whole product
+
+Use review when the goal is discovery rather than one already-scoped change:
+
+```text
+$rb-review . --balanced --focus frontend,security,tenancy,tests
+```
+
+The audit records evidence-grounded findings, reviewed journeys, runtime/static
+limitations, baseline changes, and—when UI exists without sufficient authority—
+a grounded design-system document under `.rb/reviews/<review-id>/`. It checks
+product completeness, security and tenant isolation, frontend/backend request
+behavior, loading and feedback states, responsiveness/accessibility, data and
+operations, and whether tests meaningfully exercise behavior.
+
+Review does not repair code. Select stable finding IDs explicitly before asking
+it to generate remediation `PLAN.md`, `PHASES.md`, and optional
+`OPERATIONS.json`; unselected findings never leak into the execution plan.
+
+## Evolve existing behavior
+
+Use evolve when the request changes an established flow or its consumers:
+
+```text
+$rb-evolve Vincular materiais de estoque à abertura da ordem de serviço.
+```
+
+The workflow proves AS IS behavior first, then documents TO BE, readers/writers,
+impact, preservation, migration, compatibility, and a regression matrix under
+`.rb/evolutions/<slug>/`. It routes by impact rather than the phrase "new
+feature" and preserves existing behavior that the accepted delta does not
+change. Use ordinary `rb-plan` for genuinely isolated new behavior or a scoped
+fix that does not need this transition analysis.
 
 ## Plan a change
 
@@ -249,11 +285,12 @@ RB Ralph only parallelizes when all pending tasks are marked `Parallel safe:
 true` and have no dependencies among themselves. Otherwise it automatically
 falls back to a sequential phase agent.
 
-`--isolation worktree` is recommended for parallel execution. It requires Git
+`--isolation worktree` is required for parallel execution. It requires Git
 and an initial commit, gives every task agent an independent detached worktree,
 and checks all patches together before applying anything to the primary tree.
 The snapshot includes current tracked changes and non-ignored untracked files;
-it does not alter the current index, branch, or commit. Conflicting patches fail
+it does not alter the current index, branch, or commit. Patches that touch the
+same path are rejected even when Git could merge them; other conflicts also fail
 without partially changing the primary tree.
 
 RB Ralph uses fresh provider calls and reconstructs only the context needed for
@@ -299,7 +336,7 @@ rb-init -> review PHASES.md + OPERATIONS.json -> validate -> execute
 For an existing project:
 
 ```text
-rb-ai-context -> review AS IS docs -> rb-plan -> review PHASES.md + OPERATIONS.json -> validate -> execute
+rb-ai-context -> rb-review for discovery, rb-evolve for established-flow changes, or rb-plan for isolated work -> validate -> execute
 ```
 
 Commit generated documentation only after reviewing the scope, assumptions,

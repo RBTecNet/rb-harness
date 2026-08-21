@@ -1,4 +1,4 @@
-import { cp, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -23,6 +23,12 @@ async function project(): Promise<string> {
 }
 
 describe("artifact manifest", () => {
+  it("initializes review and evolution artifact roots", async () => {
+    const root = await project();
+    await expect(access(resolve(root, ".rb/reviews"))).resolves.toBeUndefined();
+    await expect(access(resolve(root, ".rb/evolutions"))).resolves.toBeUndefined();
+  });
+
   it("indexes execution plans with stable contract metadata", async () => {
     const root = await project();
     const manifest = await loadManifest(root);
@@ -60,6 +66,25 @@ describe("artifact manifest", () => {
       status: "ready",
       contract: "rb-operational/v1",
     })]));
+    expect((await validateManifestTree(root)).valid).toBe(true);
+  });
+
+  it("classifies review and evolution artifacts without consumer path guessing", async () => {
+    const root = await project();
+    await mkdir(resolve(root, ".rb/reviews/security-2026"), { recursive: true });
+    await mkdir(resolve(root, ".rb/evolutions/service-order-stock"), { recursive: true });
+    await writeFile(resolve(root, ".rb/reviews/security-2026/FINDINGS.md"), "# Findings\n", "utf8");
+    await writeFile(resolve(root, ".rb/reviews/security-2026/DESIGN_SYSTEM.md"), "# Design system\n", "utf8");
+    await writeFile(resolve(root, ".rb/evolutions/service-order-stock/CHANGE_REQUEST.md"), "# Change request\n", "utf8");
+    await writeFile(resolve(root, ".rb/evolutions/service-order-stock/REGRESSION_MATRIX.md"), "# Regressions\n", "utf8");
+
+    const manifest = await syncManifest(root);
+    expect(manifest.artifacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "review-findings", path: ".rb/reviews/security-2026/FINDINGS.md" }),
+      expect.objectContaining({ kind: "design-system", path: ".rb/reviews/security-2026/DESIGN_SYSTEM.md" }),
+      expect.objectContaining({ kind: "request", path: ".rb/evolutions/service-order-stock/CHANGE_REQUEST.md" }),
+      expect.objectContaining({ kind: "regression-specification", path: ".rb/evolutions/service-order-stock/REGRESSION_MATRIX.md" }),
+    ]));
     expect((await validateManifestTree(root)).valid).toBe(true);
   });
 

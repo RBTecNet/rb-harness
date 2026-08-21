@@ -22,7 +22,10 @@ Read these files completely before writing artifacts:
 
 1. Resolve free text, `@file`, or `--file` input. Hash source files.
 2. Detect request type: feature, bug, refactor, migration, performance,
-   contract, dependency, or debt. Do not force feature terminology on fixes.
+   contract, dependency, or debt. Do not force feature terminology on fixes. If
+   the request changes an established journey, state transition, stored shape,
+   permission boundary, public contract, or downstream consumer, route to
+   `rb-evolve` even when the developer calls it a new feature.
 3. Load `.rb/rb-manifest.json`, relevant init/context documents, and source
    hashes. Inspect the affected code and tests directly; context docs may be
    stale and are navigation, not proof.

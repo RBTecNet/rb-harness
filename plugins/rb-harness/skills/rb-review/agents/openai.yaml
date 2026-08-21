@@ -1,0 +1,4 @@
+interface:
+  display_name: "RB Review"
+  short_description: "Audit a whole product with grounded findings"
+  default_prompt: "Use $rb-review to audit this application and produce grounded review artifacts."

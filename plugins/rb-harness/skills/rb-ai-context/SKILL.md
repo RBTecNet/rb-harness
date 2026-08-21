@@ -58,6 +58,10 @@ Read these files completely before writing artifacts:
     changed artifacts, and validation. Never write application code, intent
     specs, or commits.
 
+After context is current, route an open-ended whole-product audit to
+`rb-review`, a requested change to established behavior to `rb-evolve`, and a
+genuinely isolated feature or fix to `rb-plan`.
+
 Resolve `<plugin-root>` as 2 directories above this skill directory. Pass the
 project root explicitly to CLI commands when the current directory differs.
 
