@@ -25,7 +25,9 @@ Create conditional context documents:
 - `testing-quality.md`: exact verified commands, layout, runners, enforcement.
 - `known-gaps.md`: conflicts, unknowns, skipped areas, legacy accidents, and
   developer-confirmed risks.
-- `source-manifest.json`: source hashes and claim-to-evidence index.
+- `source-manifest.json`: source hashes, claim-to-evidence index, and for every
+  developer response its raw text, normalized decision, answer disposition,
+  affected topics, and remaining uncertainty.
 
 Every document begins with the generated marker and an `AS IS` section. Omit a
 document when its subject is irrelevant; use evidence-based N/A only when a

@@ -33,13 +33,18 @@ Read these files completely before writing artifacts:
    assuming API, UI, database, auth, queue, or deployment needs.
 4. Build a gap map and interview using the shared policy. Ask only questions
    whose answers materially change scope, observable behavior, contracts,
-   security, data, or architecture.
-5. Present a concise normalized summary and corrections in 1 checkpoint.
+   security, data, or architecture. Apply the answer acceptance gate; follow up
+   on material partial or ambiguous responses rather than inventing a precise
+   requirement from them.
+5. Run the pre-write ambiguity audit, then present a concise normalized summary
+   and corrections in 1 checkpoint. Separate accepted decisions, assumptions,
+   deferred choices, and unresolved ambiguity.
 6. Initialize the artifact tree with the bundled CLI if it is absent:
    `node <plugin-root>/scripts/rb-harness.cjs project init <target> --name <name>`.
 7. Write the conditional artifacts defined in `init-artifacts.md`. Preserve
    stable IDs and confirmed manual edits on re-runs; update only impacted
-   sections and source hashes.
+   sections and source hashes. Only `ACCEPTED` responses become confirmed
+   intent; unresolved material meaning stays out of RIGID requirements.
 8. Derive `PLAN.md`, then derive `PHASES.md` 1:1. `PHASES.md` must not introduce
    requirements or implementation choices absent from the richer artifacts.
    Also derive `.rb/init/OPERATIONS.json` from the confirmed product form,
@@ -52,8 +57,9 @@ Read these files completely before writing artifacts:
    - `operations validate .rb/init/OPERATIONS.json` when emitted
    - `manifest sync .`
    - `tree validate .`
-10. Report paths, readiness, assumptions, unresolved questions, phase/task
-    counts, and validation results. Never write application code or commit.
+10. Report paths, readiness, answer dispositions, assumptions, unresolved
+    questions, phase/task counts, and validation results. Never write
+    application code or commit.
 
 Resolve `<plugin-root>` as 2 directories above this skill directory. Pass the
 project root explicitly to CLI commands when the current directory differs.

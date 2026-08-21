@@ -17,11 +17,15 @@ Document implemented reality only. Never plan or implement a change.
 4. Delegate to `rb-harness:context-inspector`. It returns a compact evidence
    digest and gap map; it writes nothing.
 5. Present discoveries first. Ask only high-impact business/operational gaps
-   from the digest using the selected interview depth.
-6. Delegate digest plus confirmed answers to `rb-harness:context-writer`.
+   from the digest using the selected interview depth. Classify every response
+   with the shared answer acceptance gate; follow up on material partial or
+   ambiguous answers instead of silently normalizing them.
+6. Run the shared pre-write ambiguity audit. Delegate the digest plus raw
+   responses, normalized decisions, dispositions, and remaining uncertainty to
+   `rb-harness:context-writer`; only `ACCEPTED` answers are confirmed.
 7. Validate `OPERATIONS.json` when emitted, then run `manifest sync` and
    `tree validate`; return failures to the writer.
-8. Report coverage, classifications, conflicts, unknowns, skipped areas,
-   artifact statuses, and checks.
+8. Report coverage, classifications, answer dispositions, conflicts, unknowns,
+   skipped areas, artifact statuses, and checks.
 
 Every material claim is OBSERVED, CONFIRMED, INFERRED, UNKNOWN, or CONFLICT.

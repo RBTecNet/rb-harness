@@ -26,6 +26,32 @@ export function parseValidationInstruction(value: string): ValidationInstruction
   return undefined;
 }
 
+function ambiguousAcceptanceCriterion(value: string): string | undefined {
+  const body = value.replace(/^AC-T[0-9]{3,}-[0-9]{2}:\s*/i, "").trim();
+  const requirementId = "(?:RF|RNF|UI|CT)-[0-9]+";
+  const circularPatterns = [
+    new RegExp(`\\b(?:satisf(?:y|ies)|meet(?:s)?|fulfill(?:s)?|implement(?:s)?)\\s+(?:the\\s+)?(?:requirements?\\s+)?${requirementId}\\b`, "i"),
+    new RegExp(`\\b(?:behavior|behaviour|contract|interface|change)\\s+(?:required|described|defined|specified)\\s+(?:by|in)\\s+${requirementId}\\b`, "i"),
+    new RegExp(`\\bmatches\\s+(?:every\\s+)?(?:field(?:s)?(?:\\s+and\\s+errors?)?\\s+)?(?:in\\s+)?${requirementId}\\b`, "i"),
+    new RegExp(`\\b(?:according to|as (?:defined|described|documented|specified) in)\\s+${requirementId}\\b`, "i"),
+  ];
+  if (circularPatterns.some((pattern) => pattern.test(body))) {
+    return "must state the observable result instead of delegating meaning to a requirement ID";
+  }
+
+  const vaguePatterns = [
+    /\b(?:appropriate(?:ly)?|adequate(?:ly)?|reasonable|reasonably|proper(?:ly)?|correctly|fast|securely)\b/i,
+    /\b(?:as needed|when possible|if appropriate|works? as expected|handles? errors?)\b/i,
+    /\b(?:adequad[ao]s?|apropriad[ao]s?|corretamente|razoavelmente)\b/i,
+    /\b(?:conforme necess[aá]rio|quando poss[ií]vel|funciona conforme esperado|trata (?:os )?erros?)\b/i,
+    /(?:^|\s)etc\.(?:\s|$)/i,
+  ];
+  if (vaguePatterns.some((pattern) => pattern.test(body))) {
+    return "contains vague language without an observable boundary";
+  }
+  return undefined;
+}
+
 function issue(
   issues: ValidationIssue[],
   code: string,
@@ -137,6 +163,16 @@ function parseTask(
         issues,
         "task.acceptance.id",
         `${id} acceptance criterion must match AC-${id}-NN: <criterion>`,
+        offset,
+      );
+      return;
+    }
+    const ambiguity = ambiguousAcceptanceCriterion(criterion);
+    if (ambiguity) {
+      issue(
+        issues,
+        "task.acceptance.ambiguous",
+        `${id} acceptance criterion ${ambiguity}`,
         offset,
       );
     }

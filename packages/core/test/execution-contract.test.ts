@@ -21,7 +21,7 @@ describe("rb-execution/v1", () => {
     expect(result.document?.artifactId).toBe("init-minimal-execution");
     expect(result.document?.phases).toHaveLength(1);
     expect(result.document?.phases[0]?.tasks[0]?.acceptanceCriteria).toEqual([
-      "AC-T001-01: The foundation exposes the behavior required by RF-001.",
+      "AC-T001-01: Running the version command exits with code 0 and prints `0.1.0`.",
     ]);
   });
 
@@ -43,6 +43,33 @@ describe("rb-execution/v1", () => {
     const result = validateExecutionMarkdown(await fixture("invalid", "missing-acceptance"));
     expect(result.valid).toBe(false);
     expect(result.issues.map((entry) => entry.code)).toContain("task.acceptance.empty");
+  });
+
+  it("rejects acceptance criteria that delegate meaning to a requirement ID", async () => {
+    const source = (await fixture("valid", "minimal")).replace(
+      "Running the version command exits with code 0 and prints `0.1.0`.",
+      "The foundation exposes the behavior required by RF-001.",
+    );
+    const result = validateExecutionMarkdown(source);
+    expect(result.issues.map((entry) => entry.code)).toContain("task.acceptance.ambiguous");
+  });
+
+  it("rejects vague acceptance language without an observable boundary", async () => {
+    const source = (await fixture("valid", "minimal")).replace(
+      "Running the version command exits with code 0 and prints `0.1.0`.",
+      "The command handles errors appropriately when possible.",
+    );
+    const result = validateExecutionMarkdown(source);
+    expect(result.issues.map((entry) => entry.code)).toContain("task.acceptance.ambiguous");
+  });
+
+  it("rejects vague acceptance language in Portuguese", async () => {
+    const source = (await fixture("valid", "minimal")).replace(
+      "Running the version command exits with code 0 and prints `0.1.0`.",
+      "O comando trata os erros adequadamente quando possível.",
+    );
+    const result = validateExecutionMarkdown(source);
+    expect(result.issues.map((entry) => entry.code)).toContain("task.acceptance.ambiguous");
   });
 
   it("rejects a dependency on a future task", async () => {

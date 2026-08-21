@@ -27,7 +27,9 @@ Under `.rb/features/<slug>/` create:
   phase and must remain usable by direct execution without RB Ralph.
 - `contracts/`: OpenAPI/AsyncAPI/proto/schema only when RIGID requires it.
 - `source-manifest.json`: source paths and hashes, architecture/context refs,
-  request answers, generated artifact IDs.
+  generated artifact IDs, and for each request response its raw text,
+  normalized decision, answer disposition, affected topics, and remaining
+  uncertainty.
 
 Every RIGID requirement maps to at least one task. Every task maps to one or
 more requirements, declares affected scope, and owns a focused validation.

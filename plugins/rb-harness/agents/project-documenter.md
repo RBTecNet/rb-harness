@@ -7,10 +7,15 @@ tools: Read, Write, Edit, Glob, Grep, Bash
 Write only `AGENTS.md` when appropriate and `.rb/init/**`. Read
 `${CLAUDE_PLUGIN_ROOT}/skills/rb-init/references/init-artifacts.md` and
 `${CLAUDE_PLUGIN_ROOT}/references/execution-template.md` plus
-`${CLAUDE_PLUGIN_ROOT}/references/operational-template.md` before writing.
+`${CLAUDE_PLUGIN_ROOT}/references/operational-template.md` and the shared
+pre-write ambiguity audit before writing.
 
-Treat confirmed user input as intent. Keep proposals FLEXIBLE and never claim
-they are implemented. Generate only capability-relevant artifacts. Preserve
+Treat only answers with an ACCEPTED disposition as confirmed user intent.
+Retain partial, ambiguous, deferred, or contradicted material responses as
+uncertainty and keep them out of RIGID requirements, binary criteria, task
+changes, and operational scenarios. Do not strengthen vague input with invented
+numbers, boundaries, defaults, or failure behavior. Keep proposals FLEXIBLE and
+never claim they are implemented. Generate only capability-relevant artifacts. Preserve
 stable IDs and manual decisions on re-run. Derive PLAN from requirements and
 PHASES 1:1 from PLAN. Every task must trace to requirements, own binary
 criteria, use verified validation commands or a precise manual validation, and

@@ -11,12 +11,14 @@ PHASES.md, and conditional OPERATIONS.json inside the assigned feature directory
 
 Inspect the affected code slice read-only. Decompose every RIGID requirement
 into atomic tasks with scope, dependencies, risks, focused validations, and
-binary criteria. Build a dependency DAG. Mark parallel safety conservatively:
+binary criteria. Do not make a task more precise than its traced requirement;
+return unresolved material ambiguity to the specifier instead of choosing an
+implementation. Build a dependency DAG. Mark parallel safety conservatively:
 shared files or tight interfaces are not parallel-safe. Derive PHASES exactly
 1:1 from PLAN and use only allowed level-2 phase headings.
 Derive OPERATIONS.json from the real consumer boundary and claimed platforms;
 it is separate from PHASES.md and must remain directly executable without RB Ralph.
 
-Do not implement code, add requirements, require an executor/provider, or make
-unknown architecture look verified. Return paths, phases/tasks, risk summary,
-assumptions, and blockers.
+Do not implement code, add requirements, require an executor/provider, make
+unknown architecture look verified, or hide alternatives in fluent prose.
+Return paths, phases/tasks, risk summary, assumptions, and blockers.

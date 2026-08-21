@@ -19,7 +19,7 @@
   - **Depends on:** none
   - **Parallel safe:** false
   - **Acceptance criteria:**
-    - AC-T001-01: The interface matches every field and error in CT-001.
+    - AC-T001-01: The exported contract requires `id` and `kind` and rejects an unsupported `kind` with `invalid_contract`.
   - **Validation:**
     - `npm test -- contracts`
   - **Expected evidence:** Contract artifact and passing contract tests.
@@ -40,7 +40,7 @@
   - **Depends on:** T001
   - **Parallel safe:** true
   - **Acceptance criteria:**
-    - AC-T002-01: Consumer A satisfies RF-001 using CT-001.
+    - AC-T002-01: Given a valid CT-001 payload, consumer A stores one result and returns exit code 0.
   - **Validation:**
     - `npm test -- a`
   - **Expected evidence:** Consumer A changes and passing focused tests.
@@ -52,7 +52,7 @@
   - **Depends on:** T001
   - **Parallel safe:** true
   - **Acceptance criteria:**
-    - AC-T003-01: Consumer B satisfies RF-002 using CT-001.
+    - AC-T003-01: Given an invalid CT-001 payload, consumer B stores no result and returns `invalid_contract`.
   - **Validation:**
     - `npm test -- b`
   - **Expected evidence:** Consumer B changes and passing focused tests.

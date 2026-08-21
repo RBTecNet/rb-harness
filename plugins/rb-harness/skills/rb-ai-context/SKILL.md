@@ -37,7 +37,9 @@ Read these files completely before writing artifacts:
    intended behavior behind contradictions, external ownership, security or
    compliance boundaries, and known accidental legacy behavior.
 7. Present discoveries before questions so the developer can answer deltas
-   instead of retelling the system.
+   instead of retelling the system. Apply the answer acceptance gate; a vague or
+   partial response is not `CONFIRMED`. Re-ask material ambiguity narrowly or
+   retain it as `UNKNOWN`/`CONFLICT`.
 8. Write `AGENTS.md` as a compact index and the conditional context documents
    from `context-artifacts.md`. A subject with no evidence is omitted or marked
    evidence-based N/A; never fabricate it. When the repository proves a real
@@ -45,10 +47,14 @@ Read these files completely before writing artifacts:
    using `rb-operational/v1`. Cover the implemented product form and claimed
    platforms without assuming web. Omit the contract and record the evidence
    gap when commands or observables cannot be grounded.
-9. Run `operations validate .rb/context/OPERATIONS.json` when emitted, then
+9. Before writing, run the shared pre-write ambiguity audit. A writer receives
+   answer dispositions and may promote only `ACCEPTED` answers to `CONFIRMED`;
+   implemented behavior wins over an ungrounded interpretation.
+10. Run `operations validate .rb/context/OPERATIONS.json` when emitted, then
    `manifest sync` and `tree validate`. Re-run generation only for artifacts
    affected by evidence or confirmed-answer changes.
-10. Report coverage, confidence classes, conflicts, unknowns, skipped areas,
+11. Report coverage, confidence classes, answer dispositions, conflicts,
+    unknowns, skipped areas,
     changed artifacts, and validation. Never write application code, intent
     specs, or commits.
 

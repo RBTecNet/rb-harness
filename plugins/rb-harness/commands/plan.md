@@ -18,14 +18,17 @@ Plan documentation only. Never edit application code or commit.
 4. Normalize current/expected behavior, objective, scope, non-goals,
    constraints, risk, and preliminary acceptance criteria.
 5. Delegate read-only adversarial analysis to `rb-harness:clarifier`. Present
-   only its material, deduplicated questions using the balanced policy.
-6. Confirm one concise normalized request checkpoint.
+   only its material, deduplicated questions using the balanced policy. Apply
+   the answer acceptance gate and re-ask material partial or ambiguous answers.
+6. Run the shared pre-write ambiguity audit. Confirm one concise normalized
+   request checkpoint that separates accepted decisions, assumptions,
+   deferrals, and unresolved conflicts.
 7. Delegate SPEC writing to `rb-harness:specifier`, then planning and execution
    view generation to `rb-harness:planner`.
 8. Validate the resulting PHASES document and `OPERATIONS.json` when emitted,
    sync the manifest, and validate the tree. Return failures to the owning agent.
-9. Report readiness, paths, requirements, phases/tasks, risks, assumptions,
-   contracts, and checks.
+9. Report readiness, paths, requirements, phases/tasks, risks, answer
+   dispositions, assumptions, contracts, and checks.
 
 Every RIGID requirement traces to tasks and binary criteria. Parallel safety is
 descriptive and never forces an execution strategy.

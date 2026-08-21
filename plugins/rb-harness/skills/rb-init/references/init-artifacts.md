@@ -17,8 +17,9 @@ Create the smallest sufficient set under `.rb/init/`:
 - `OPERATIONS.json` when at least one honest consumer-level scenario can be
   derived from confirmed product/platform decisions; use `rb-operational/v1`.
 - `contracts/` only for public/async/formal interfaces required by RIGID.
-- `source-manifest.json` always: input paths, hashes, confirmed answers, and
-  generated artifact IDs.
+- `source-manifest.json` always: input paths, hashes, generated artifact IDs,
+  and for each response its raw text, normalized decision, answer disposition,
+  affected topics, and remaining uncertainty.
 
 Capability discovery is conditional. Do not create database, API, UI, auth,
 queue, mobile, CLI, or infrastructure sections without evidence or confirmed

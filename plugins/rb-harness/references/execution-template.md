@@ -34,3 +34,7 @@ grammar exactly and expand it; do not add other level-2 headings.
 Use `manual: <inspection>` only when no deterministic command can validate the
 criterion. Never invent a command. A phase is self-contained for a fresh
 session through its goal, context paths, tasks, criteria, and validations.
+Acceptance criteria must state the observable result directly. A criterion that
+only says a task satisfies, implements, or matches an RF/RNF/UI/CT ID is
+circular and invalid, as is an undefined qualifier such as "appropriately" or
+"when possible".

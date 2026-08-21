@@ -90,6 +90,13 @@ Every material claim is classified as `OBSERVED`, `CONFIRMED`, `INFERRED`,
 `UNKNOWN`, or `CONFLICT` so future agents can distinguish evidence from human
 knowledge and assumptions.
 
+Developer responses pass a separate acceptance gate before becoming
+`CONFIRMED`: `ACCEPTED`, `PARTIAL`, `AMBIGUOUS`, `DEFERRED`, or `CONTRADICTED`.
+Material partial or ambiguous answers are asked again more narrowly; if they
+remain unresolved, the documentation preserves the uncertainty instead of
+choosing an interpretation. The raw response and normalized decision remain in
+the source manifest for auditability.
+
 ## Plan a change
 
 After `rb-init` or `rb-ai-context`, describe the change:
@@ -140,6 +147,11 @@ node "$RB_CLI" tree resolve . --format tsv
 Do not start implementation when readiness is `BLOCKED`. Resolve the listed
 decision and rerun the appropriate workflow. `READY_WITH_ASSUMPTIONS` is safe
 only when the recorded assumptions are acceptable for the project.
+
+Execution-contract validation also rejects acceptance criteria that merely say
+they satisfy an RF/RNF/UI/CT identifier or rely on undefined qualifiers such as
+"appropriately" and "when possible". The criterion must state the observable
+result directly.
 
 ## Execute the result
 

@@ -32,9 +32,13 @@ Read these files completely before writing artifacts:
    verify technical literals, compare request with architecture/domain rules,
    find contradictions, merge duplicate questions, and rank by rework risk.
 6. Interview using the shared policy and the request-specific prompts in
-   `plan-artifacts.md`. Non-blocking unknowns become explicit assumptions;
-   blocking decisions yield `BLOCKED` rather than invented requirements.
-7. Confirm 1 concise normalized request checkpoint.
+   `plan-artifacts.md`. Apply the answer acceptance gate and re-ask material
+   partial or ambiguous responses narrowly. Only low-risk unknowns may become
+   explicit assumptions; blocking decisions yield `BLOCKED` rather than
+   invented requirements.
+7. Run the pre-write ambiguity audit, then confirm 1 concise normalized request
+   checkpoint that separates accepted decisions, assumptions, deferrals, and
+   unresolved conflicts.
 8. Write `.rb/features/<slug>/REQUEST.md`, `SPEC.md`, `PLAN.md`, conditional
    formal contracts, source manifest, and `PHASES.md`. Also write
    `OPERATIONS.json` using `rb-operational/v1` when an honest executable
@@ -51,8 +55,9 @@ Read these files completely before writing artifacts:
     - `operations validate .rb/features/<slug>/OPERATIONS.json` when emitted
     - `manifest sync .`
     - `tree validate .`
-12. Report readiness, artifact paths, requirements/tasks/phases, assumptions,
-    risks, contracts, and validation. Never edit application code or commit.
+12. Report readiness, artifact paths, requirements/tasks/phases, answer
+    dispositions, assumptions, risks, contracts, and validation. Never edit
+    application code or commit.
 
 Resolve `<plugin-root>` as 2 directories above this skill directory. Pass the
 project root explicitly to CLI commands when the current directory differs.

@@ -25,6 +25,10 @@ the project root or store secrets.
 - Source manifests store path plus full SHA-256.
 - Classify knowledge as `OBSERVED`, `CONFIRMED`, `INFERRED`, `UNKNOWN`, or
   `CONFLICT`.
+- A developer response becomes `CONFIRMED` only after the interview policy marks
+  its answer disposition `ACCEPTED`. Preserve the raw response and normalized
+  decision; do not collapse partial, ambiguous, deferred, or contradicted
+  responses into confirmed prose.
 - Cite code/test/config paths for OBSERVED claims.
 - Record superseded decisions; do not erase their history silently.
 
