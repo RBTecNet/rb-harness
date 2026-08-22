@@ -57,7 +57,7 @@ Each workflow generates documentation only. The resulting documents can be
 sent directly to any capable coding CLI/model or selected by RB Ralph; neither
 path is embedded into the documentation.
 
-## Generated-plan quality gates
+## Review and generated-plan quality gates
 
 Version 0.1.1 strengthens generation and deterministic validation around the
 failure modes found in cross-model execution trials:
@@ -80,6 +80,14 @@ failure modes found in cross-model execution trials:
 These rules are project-, stack-, architecture-, provider-, and model-neutral.
 Concrete applications used during testing remain regression fixtures, never
 production special cases.
+
+Version 0.1.2 strengthens UI review evidence without assuming a framework or
+platform. Responsive claims now require parent/child layout analysis across
+material layout states, complete-surface and below-the-fold coverage when safe
+runtime inspection is available, and calibrated UNKNOWN/partial results when
+runtime, visual, or computed-geometry evidence is missing. Selected responsive
+remediation must preserve a falsifiable failing case and validate usable
+geometry at affected and representative wider states.
 
 ## Development
 

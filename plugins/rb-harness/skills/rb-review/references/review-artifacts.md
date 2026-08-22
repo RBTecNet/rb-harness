@@ -5,7 +5,9 @@ IDs stable across reruns and preserve supersession history.
 
 - `REVIEW.md` always: target revision, depth/focus, coverage map, methodology,
   reviewed commands, runtime/static limits, summary by severity/confidence, and
-  readiness for remediation selection.
+  readiness for remediation selection. For UI-bearing targets, include a
+  surface-by-layout-state responsive evidence matrix with static/runtime/visual
+  disposition and explicit below-the-fold coverage or limitation.
 - `FINDINGS.md` always: one record per root cause with stable `RV-<AREA>-NNN` ID,
   title, area, severity (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO`), confidence
   (`CONFIRMED`, `LIKELY`, `UNKNOWN`, `FALSE_POSITIVE_RISK`), affected journey,
@@ -23,7 +25,8 @@ IDs stable across reruns and preserve supersession history.
   with fingerprints and dispositions, accepted risks, and comparison metadata.
 - `source-manifest.json` always: inspected paths/hashes, commands and outcomes,
   exclusions, raw/normalized developer answers with dispositions, finding-to-
-  evidence links, and generated artifact IDs.
+  evidence links, generated artifact IDs, and provenance for runtime or visual
+  evidence used to support responsive claims.
 
 Only after explicit finding selection:
 
@@ -32,7 +35,10 @@ Only after explicit finding selection:
 - `PLAN.md`: remediation DAG, root-cause grouping, regression boundaries, risks,
   rollout/rollback, and finding traceability.
 - `PHASES.md`: exact 1:1 `rb-execution/v1` view. Every task covers one or more
-  selected finding IDs and directly states observable criteria.
+  selected finding IDs and directly states observable criteria. Responsive
+  tasks use complete-surface geometry or equivalent behavioral checks at the
+  affected and representative wider layout states, not visibility or global
+  overflow alone.
 - `OPERATIONS.json`: conditional consumer-level `rb-operational/v1` acceptance.
 
 Do not put unselected findings into an executable plan. Do not combine unrelated

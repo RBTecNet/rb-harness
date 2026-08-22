@@ -37,6 +37,7 @@ const required = [
   "skills/rb-ai-context/SKILL.md",
   "skills/rb-plan/SKILL.md",
   "skills/rb-review/SKILL.md",
+  "skills/rb-review/references/responsive-evidence.md",
   "skills/rb-evolve/SKILL.md",
   "references/interview-policy.md",
   "references/artifact-conventions.md",
@@ -57,6 +58,29 @@ for (const path of pluginFiles.filter((value) => /\.(?:md|json|yaml|yml)$/.test(
 for (const skill of ["rb-init", "rb-ai-context", "rb-plan", "rb-review", "rb-evolve"]) {
   const source = await readFile(resolve(plugin, `skills/${skill}/SKILL.md`), "utf8");
   assert(source.startsWith(`---\nname: ${skill}\ndescription:`), `Invalid skill frontmatter: ${skill}`);
+}
+
+const responsiveReference = "skills/rb-review/references/responsive-evidence.md";
+const responsiveConsumers = [
+  "skills/rb-review/SKILL.md",
+  "commands/review.md",
+  "agents/review-inspector.md",
+  "agents/review-planner.md",
+];
+for (const path of responsiveConsumers) {
+  const source = await readFile(resolve(plugin, path), "utf8");
+  assert(source.includes("responsive-evidence.md"), `Responsive evidence policy is not wired into ${path}`);
+}
+
+const responsivePolicy = await readFile(resolve(plugin, responsiveReference), "utf8");
+for (const invariant of [
+  "parent and child constraints",
+  "below-the-fold",
+  "observable geometry",
+  "evidence provenance",
+  "UNKNOWN",
+]) {
+  assert(responsivePolicy.includes(invariant), `Responsive evidence policy omits invariant: ${invariant}`);
 }
 
 const version = execFileSync("node", [resolve(plugin, "scripts/rb-harness.cjs"), "--version"], {

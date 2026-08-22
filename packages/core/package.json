@@ -1,6 +1,6 @@
 {
   "name": "@rb-harness/core",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Deterministic contracts and artifact discovery for RB Harness",
   "type": "module",
   "bin": {

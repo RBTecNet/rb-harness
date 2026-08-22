@@ -13,6 +13,14 @@ causes, preserve unrelated behavior and design-system authority, and keep tasks
 small enough for fresh executor contexts. Every task traces to finding IDs,
 binary criteria, focused validation, evidence, and regression boundaries.
 
+For a responsive finding, read
+`${CLAUDE_PLUGIN_ROOT}/skills/rb-review/references/responsive-evidence.md` and
+preserve a falsifiable failing case. Require complete affected-surface traversal
+plus observable non-overlap, containment, usable geometry, reachable actions,
+and correct scroll ownership as relevant at the failing and representative
+wider layout states. Presence-only assertions, one initial-viewport screenshot,
+and page-level overflow alone are insufficient acceptance evidence.
+
 Mark parallel safe only when pending tasks have no dependency and own disjoint
 files/directories, interfaces, migrations, generated artifacts, shared state,
 and validation surfaces. A plausible overlap is non-parallel. Return paths,

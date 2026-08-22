@@ -18,6 +18,7 @@ Read these files completely before writing artifacts:
 - [Execution template](../../references/execution-template.md)
 - [Operational acceptance template](../../references/operational-template.md)
 - [Review artifact shapes](references/review-artifacts.md)
+- For every UI-bearing target, [Responsive evidence](references/responsive-evidence.md)
 
 ## Modes
 
@@ -52,15 +53,21 @@ depth, not cross-boundary evidence needed to understand a critical journey.
    renders, Angular change detection and subscriptions, but findings must be
    expressed as observable product or engineering behavior.
 6. For UI-bearing products, discover the formal or informal design system and
-   loading/feedback conventions. Check responsiveness, accessibility, request
-   duplication, stale responses, debounce/cancellation, duplicate submits,
-   layout stability, and success/empty/error/timeout/cancel states.
+   loading/feedback conventions. Apply `responsive-evidence.md`: analyze parent
+   and child layout constraints together at each supported breakpoint and, when
+   safe runtime evidence is available, traverse complete surfaces including
+   below-the-fold content. Check accessibility, request duplication, stale
+   responses, debounce/cancellation, duplicate submits, layout stability, and
+   success/empty/error/timeout/cancel states.
 7. Evaluate test meaning, not coverage alone: assertions, negative paths,
    mutation sensitivity, mock boundaries, skipped tests, tautologies, and
    whether important behavior is exercised.
 8. Classify each candidate as `CONFIRMED`, `LIKELY`, `UNKNOWN`, or
    `FALSE_POSITIVE_RISK`. A confirmed finding needs direct evidence and a
-   reproducible or inspectable failure. Never promote absence of evidence into
+   reproducible or inspectable failure. A clean responsive claim needs evidence
+   proportional to its breadth; a token scan, element visibility, one viewport,
+   one above-the-fold screenshot, or absence of document-level overflow cannot
+   prove an entire surface responsive. Never promote absence of evidence into
    evidence of absence.
 9. Apply the shared ambiguity audit. Deduplicate by root cause, preserve
    independent impact paths, and compare with the baseline as new, changed,
@@ -78,6 +85,9 @@ depth, not cross-boundary evidence needed to understand a critical journey.
 3. Preserve unrelated behavior and design-system authority. Every task traces to
    finding IDs, owns binary criteria and focused validation, and names regression
    boundaries.
+   For responsive findings, require a falsifiable before/after check at the
+   affected narrow and wide layout states, exercise the complete affected
+   surface, and validate usable geometry rather than presence alone.
 4. Emit valid `rb-execution/v1` and conditional `rb-operational/v1`, validate
    both, sync the manifest, and validate the tree. Use `BLOCKED` rather than
    inventing a security, product, or design decision. Audit selected-finding

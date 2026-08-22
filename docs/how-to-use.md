@@ -114,6 +114,13 @@ product completeness, security and tenant isolation, frontend/backend request
 behavior, loading and feedback states, responsiveness/accessibility, data and
 operations, and whether tests meaningfully exercise behavior.
 
+For UI-bearing targets, review builds a surface-by-layout-state evidence matrix.
+It analyzes parent and child constraints together, traverses complete dynamic
+surfaces when safe runtime tooling is available, and distinguishes current
+geometry/visual proof from stale or cropped screenshots. Visibility of a few
+controls or absence of page-level overflow cannot justify a broad responsive
+clean result; unverified surfaces remain explicitly partial or unknown.
+
 Review does not repair code. Select stable finding IDs explicitly before asking
 it to generate remediation `PLAN.md`, `PHASES.md`, and optional
 `OPERATIONS.json`; unselected findings never leak into the execution plan.
