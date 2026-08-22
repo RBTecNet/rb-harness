@@ -21,6 +21,18 @@ mobile, CLI, data, infrastructure, and mixed repositories use the same
 artifact and execution contracts; project-specific capabilities are documented
 only when evidence or the developer requires them.
 
+## Claude Code installation
+
+Register the repository root as a local marketplace and install the plugin:
+
+```bash
+claude plugin marketplace add /absolute/path/to/rb-harness --scope user
+claude plugin install rb-harness@rb-harness-local --scope user
+```
+
+The marketplace source must be the repository root containing
+`.claude-plugin/marketplace.json`, not the nested `plugins/rb-harness` directory.
+
 ## Workflows
 
 The conceptual workflows are `init`, `ai-context`, `review`, `evolve`, and

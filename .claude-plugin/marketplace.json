@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "rb-harness-local",
+  "description": "Local RB Harness marketplace for Claude Code.",
+  "owner": {
+    "name": "RB Harness contributors"
+  },
+  "plugins": [
+    {
+      "name": "rb-harness",
+      "source": "./plugins/rb-harness",
+      "description": "Provider-neutral project context, product review, evolution, specification, and execution-plan documentation.",
+      "version": "0.1.1"
+    }
+  ]
+}
