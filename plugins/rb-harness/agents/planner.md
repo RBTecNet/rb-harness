@@ -22,6 +22,20 @@ order. Derive PHASES exactly
 Derive OPERATIONS.json from the real consumer boundary and claimed platforms;
 it is separate from PHASES.md and must remain directly executable without RB Ralph.
 
+Run a lossless traceability audit before returning: every source requirement
+must map through Covers to task Change, binary criteria, focused validation,
+and expected evidence. Name every promised quality command separately. Do not
+turn executable checks into manual prose. Use `manual:` only for an inspection
+the manager can perform and `human:` for external evidence that must pause.
+When standards, public variants, or secrets are in scope, carry their complete
+matrix and independent negative/adversarial cases into deterministic tests.
+
+A normal phase may create and structurally validate OPERATIONS.json, but actual
+clean-room execution belongs only to the post-phase RBF audit. Never make a
+normal criterion or manual validation depend on that future result. Cover every
+material documented configuration mode in the operational contract, including
+enabled/disabled optional behavior when it changes the public workflow.
+
 Do not implement code, add requirements, require an executor/provider, make
 unknown architecture look verified, or hide alternatives in fluent prose.
 Return paths, phases/tasks, risk summary, assumptions, and blockers.

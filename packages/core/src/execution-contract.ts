@@ -13,7 +13,7 @@ const PHASE_FIELD = /^\*\*(Phase ID|Goal|Depends on):\*\*\s*(.*)$/;
 const TASK_FIELD = /^  - \*\*(Scope|Change|Covers|Depends on|Parallel safe|Acceptance criteria|Validation|Expected evidence):\*\*\s*(.*)$/;
 
 export interface ValidationInstruction {
-  kind: "command" | "manual";
+  kind: "command" | "manual" | "human";
   value: string;
 }
 
@@ -23,6 +23,25 @@ export function parseValidationInstruction(value: string): ValidationInstruction
   if (command?.[1]?.trim()) return { kind: "command", value: command[1].trim() };
   const manual = value.match(/^manual:\s+(.+)$/i);
   if (manual?.[1]?.trim()) return { kind: "manual", value: manual[1].trim() };
+  const human = value.match(/^human:\s+(.+)$/i);
+  if (human?.[1]?.trim()) return { kind: "human", value: human[1].trim() };
+  return undefined;
+}
+
+function ambiguousValidationInstruction(instruction: ValidationInstruction): string | undefined {
+  if (instruction.kind === "command") {
+    if (/(^|\s)(?:\|\|\s*true|;\s*(?:true|exit\s+0))(?:\s|$)/i.test(instruction.value)) {
+      return "must not mask a failing command with a forced successful exit";
+    }
+    return undefined;
+  }
+
+  if (instruction.kind === "manual") {
+    const executableProse = /^(?:run|execute|invoke|launch|start|test|verify by running|executar|rodar|iniciar|testar|verificar executando)\b/i;
+    if (executableProse.test(instruction.value)) {
+      return "uses manual prose for an executable check; declare the exact command or use human: for evidence unavailable to the executor";
+    }
+  }
   return undefined;
 }
 
@@ -41,13 +60,17 @@ function ambiguousAcceptanceCriterion(value: string): string | undefined {
 
   const vaguePatterns = [
     /\b(?:appropriate(?:ly)?|adequate(?:ly)?|reasonable|reasonably|proper(?:ly)?|correctly|fast|securely)\b/i,
-    /\b(?:as needed|when possible|if appropriate|works? as expected|handles? errors?)\b/i,
+    /\b(?:as needed|when possible|if appropriate|where valid|where applicable|works? as expected|handles? errors?)\b/i,
     /\b(?:adequad[ao]s?|apropriad[ao]s?|corretamente|razoavelmente)\b/i,
-    /\b(?:conforme necess[aá]rio|quando poss[ií]vel|funciona conforme esperado|trata (?:os )?erros?)\b/i,
+    /\b(?:conforme necess[aá]rio|quando poss[ií]vel|onde (?:for|seja) v[aá]lid[oa]|quando aplic[aá]vel|funciona conforme esperado|trata (?:os )?erros?)\b/i,
     /(?:^|\s)etc\.(?:\s|$)/i,
   ];
   if (vaguePatterns.some((pattern) => pattern.test(body))) {
     return "contains vague language without an observable boundary";
+  }
+  if (/\bOPERATIONS\.json\b/i.test(body)
+    && /\b(?:pass(?:es|ed)?|succeed(?:s|ed)?|run(?:s)? successfully|clean[- ]room|passes? in|executad[oa]|passa|sucesso|ambiente limpo)\b/i.test(body)) {
+    return "requires future final-audit evidence; a normal task may require a valid operational contract, while execution of that contract belongs to the post-phase operational audit";
   }
   return undefined;
 }
@@ -147,13 +170,19 @@ function parseTask(
     issue(issues, "task.validation.empty", `${id} has no validation entries`, offset);
   }
   validation.forEach((entry) => {
-    if (!parseValidationInstruction(entry)) {
+    const instruction = parseValidationInstruction(entry);
+    if (!instruction) {
       issue(
         issues,
         "task.validation.format",
-        `${id} validation must be a backtick-delimited command or manual: <inspection>`,
+        `${id} validation must be a backtick-delimited command, manual: <manager inspection>, or human: <external evidence>`,
         offset,
       );
+      return;
+    }
+    const ambiguity = ambiguousValidationInstruction(instruction);
+    if (ambiguity) {
+      issue(issues, "task.validation.ambiguous", `${id} validation ${ambiguity}`, offset);
     }
   });
   acceptanceCriteria.forEach((criterion) => {

@@ -17,3 +17,10 @@ Mark parallel safe only when pending tasks have no dependency and own disjoint
 files/directories, interfaces, migrations, generated artifacts, shared state,
 and validation surfaces. A plausible overlap is non-parallel. Return paths,
 selected/deferred IDs, phases/tasks, parallel opportunities, risks, and blockers.
+
+Audit every selected finding through Covers, criterion, validation, evidence,
+and regression boundary. Do not hide executable gates in manual prose;
+`manual:` is manager-observable and `human:` is external evidence. Normal
+phases may validate OPERATIONS.json but never require its future RBF execution
+to pass. Preserve exact standard/dialect matrices and add independent hostile
+schema/secret cases when those are part of the finding.

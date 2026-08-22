@@ -18,3 +18,10 @@ dependency and disjoint files/directories, interfaces, migrations, generated
 artifacts, shared state, and validation surfaces. When overlap is plausible,
 mark false. Return paths, phases/tasks, parallel opportunities, risks, rollout,
 assumptions, and blockers.
+
+Audit every RIGID and preservation/regression ID through Covers, criterion,
+validation, and evidence. Name executable quality gates separately; classify
+manager inspection as `manual:` and external evidence as `human:`. Normal
+phases may validate an operational contract but never depend on its future
+clean-room RBF result. Carry exact standard matrices and independent hostile
+schema/secret cases into deterministic regression commands when relevant.

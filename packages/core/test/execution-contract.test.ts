@@ -109,11 +109,42 @@ describe("rb-execution/v1", () => {
       kind: "manual",
       value: "inspect the rendered screen",
     });
+    expect(parseValidationInstruction("human: confirm behavior on the target hardware")).toEqual({
+      kind: "human",
+      value: "confirm behavior on the target hardware",
+    });
   });
 
   it("rejects ambiguous validation prose", async () => {
     const source = (await fixture("valid", "minimal")).replace("`npm test`", "run the tests");
     const result = validateExecutionMarkdown(source);
     expect(result.issues.map((entry) => entry.code)).toContain("task.validation.format");
+  });
+
+  it("rejects executable work disguised as manual validation", async () => {
+    const source = (await fixture("valid", "minimal")).replace(
+      "`npm test`",
+      "manual: execute all quality gates and the operational scenario",
+    );
+    const result = validateExecutionMarkdown(source);
+    expect(result.issues.map((entry) => entry.code)).toContain("task.validation.ambiguous");
+  });
+
+  it("rejects a normal task that depends on future operational-audit evidence", async () => {
+    const source = (await fixture("valid", "minimal")).replace(
+      "Running the version command exits with code 0 and prints `0.1.0`.",
+      "The scenario in `OPERATIONS.json` passes in a clean-room environment.",
+    );
+    const result = validateExecutionMarkdown(source);
+    expect(result.issues.map((entry) => entry.code)).toContain("task.acceptance.ambiguous");
+  });
+
+  it("rejects failure-masking validation commands", async () => {
+    const source = (await fixture("valid", "minimal")).replace(
+      "`npm test`",
+      "`npm test || true`",
+    );
+    const result = validateExecutionMarkdown(source);
+    expect(result.issues.map((entry) => entry.code)).toContain("task.validation.ambiguous");
   });
 });

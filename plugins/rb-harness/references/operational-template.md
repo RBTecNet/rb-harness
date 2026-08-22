@@ -24,6 +24,16 @@ CI, or RB Ralph can execute it.
    in `cleanRoom.exclude`. Keep only `.env.example`-style templates.
 6. Inherit only named non-secret variables that the scenario genuinely needs.
    Never write a secret value into the contract.
+7. Enumerate materially distinct documented configuration modes. At minimum,
+   cover enabled and disabled optional capabilities when they change startup,
+   the public response, or a user workflow. Cross-check the README, sample
+   configuration, runtime loader, package/launcher entrypoint, and operational
+   scenario as one public interface; a setup instruction is not proven merely
+   because direct environment injection works.
+8. Use the exact documented public argv and environment behavior. The verifier
+   compares the declared workspace, argv, and environment to the contract;
+   current-worktree services, ad hoc replacement commands, or pre-existing
+   artifacts never substitute for the scenario.
 
 ## Scenario mapping
 
@@ -83,6 +93,19 @@ Do not encode a visual/manual claim as an automated pass. Keep genuinely
 manual acceptance criteria in SPEC/PLAN and call out the automation gap. An
 invalid or fictitious `OPERATIONS.json` is worse than omitting it and reporting
 the gap.
+
+When a scenario crosses an untrusted or secret-bearing boundary, prefer a local
+fake/stub provider and a unique non-production sentinel. Force representative
+provider/transport failures and assert that the sentinel is absent from public
+responses and captured evidence. A readiness probe is not success if the
+process later times out, is force-terminated, exits incorrectly, or fails its
+declared cleanup; record those outcomes as failures.
+
+Normal implementation phases own contract creation and deterministic
+`operations validate`. Actual clean-room execution is owned by the post-phase
+operational audit (`RBF`). Do not add "the OPERATIONS scenario passes" to a
+normal phase acceptance criterion or manual validation: that creates a gate
+which cannot run until the phase it gates is accepted.
 
 Validate every emitted document with the bundled CLI before syncing the tree:
 

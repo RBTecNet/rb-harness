@@ -52,11 +52,18 @@ Read these files completely before writing artifacts:
    `rb-operational/v1`, remain usable without RB Ralph, and must not assume web
    or any stack. If no honest executable scenario can be defined, omit it and
    record the blocking operational gap instead of inventing proof.
+   Normal phases own creation and structural validation of the operational
+   contract; its clean-room pass is owned only by Ralph's post-phase RBF audit.
+   Never make a preceding task depend on that future result.
 9. Run, fix, and repeat until green:
    - `contract validate .rb/init/PHASES.md`
    - `operations validate .rb/init/OPERATIONS.json` when emitted
    - `manifest sync .`
    - `tree validate .`
+   Also audit lossless requirement/cross-cutting traceability, explicit quality
+   commands, validation capability (`command`, manager `manual`, or external
+   `human`), exact standard/dialect matrices, hostile public-schema/secret cases
+   when relevant, and every materially distinct documented configuration mode.
 10. Report paths, readiness, answer dispositions, assumptions, unresolved
     questions, phase/task counts, and validation results. Never write
     application code or commit.

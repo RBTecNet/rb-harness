@@ -1,6 +1,6 @@
 {
   "name": "rb-harness",
-  "version": "0.1.0+codex.20260821051457",
+  "version": "0.1.1+codex.20260821214258",
   "description": "Provider-neutral project context, product review, evolution, specification, and execution-plan documentation.",
   "author": {
     "name": "RB Harness contributors"

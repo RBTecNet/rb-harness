@@ -57,7 +57,11 @@ isolated from existing behavior.
 10. Derive `PLAN.md` and a 1:1 `PHASES.md`. Tasks are small, dependency-aware,
     name the AS IS/TO BE delta, preserve legitimate behavior, and own focused
     binary validation. Derive `OPERATIONS.json` when an honest consumer-level
-    scenario can validate the evolution and its key preserved path.
+    scenario can validate the evolution and its key preserved path. Normal
+    phases validate its structure; only the post-phase RBF audit owns the
+    clean-room pass. Audit exact standard/dialect matrices, independent hostile
+    schema/secret cases, explicit quality commands, validation capability, and
+    lossless RIGID/preservation/regression traceability before returning.
 11. Run, fix, and repeat until green:
     - `contract validate .rb/evolutions/<slug>/PHASES.md`
     - `operations validate .rb/evolutions/<slug>/OPERATIONS.json` when emitted

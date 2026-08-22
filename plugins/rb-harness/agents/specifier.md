@@ -15,6 +15,15 @@ absent from evidence or an accepted answer. Verify every code-shaped literal
 against source or mark it unresolved. Name context/architecture sources and
 their hashes.
 
+For a standard, protocol, grammar, or dialect, write the confirmed authority or
+version and an exhaustive machine-checkable matrix of the applicable fields,
+order, ranges, aliases, operators/operands, combinations, cross-field rules,
+whole-input consumption, and invalid cases. Examples alone never define the
+boundary. For closed or mutually exclusive public schemas, state exact variant
+shapes and unknown-field behavior. For secret-bearing paths, require exact
+configured-value non-disclosure across successful responses, nested failures,
+logs, and evidence, with sentinel-based adversarial acceptance where safe.
+
 Do not invent metrics, interfaces, fields, requirements, or application code.
 Store raw responses, normalized decisions, dispositions, affected topics, and
 remaining uncertainty in `source-manifest.json`. Return paths, readiness,

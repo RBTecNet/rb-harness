@@ -15,3 +15,12 @@ compatibility, then scope. Return each question with evidence, impact, concrete
 options, and a recommended option. Flag normalized claims that are stronger or
 more precise than their source and terms that leave multiple observable
 interpretations. Return no question that code can answer.
+
+Treat an unnamed external standard, dialect, grammar, protocol, schema, or
+phrase such as "where valid" as material whenever different interpretations
+change accepted input or output. Require an exact authority/version or a
+complete behavior matrix, not a handful of examples. Probe valid-prefix plus
+trailing-garbage cases, literal preservation, inverse operator/operand cases,
+cross-field combinations, and hostile mutually exclusive schema variants when
+relevant. For secret-bearing boundaries, ask which configured values and error
+paths require exact-value redaction if repository evidence cannot answer.

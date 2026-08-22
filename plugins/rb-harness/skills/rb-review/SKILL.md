@@ -80,7 +80,12 @@ depth, not cross-boundary evidence needed to understand a critical journey.
    boundaries.
 4. Emit valid `rb-execution/v1` and conditional `rb-operational/v1`, validate
    both, sync the manifest, and validate the tree. Use `BLOCKED` rather than
-   inventing a security, product, or design decision.
+   inventing a security, product, or design decision. Audit selected-finding
+   traceability through criteria, explicit executable gates, validation
+   capability, and evidence. Normal phases validate operational-contract
+   structure; only the post-phase RBF audit owns its clean-room result. Preserve
+   exact standards and add independent hostile schema/secret regressions when
+   relevant.
 
 Resolve `<plugin-root>` as 2 directories above this skill directory. Pass the
 project root explicitly when it differs from the current directory.

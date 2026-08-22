@@ -24,4 +24,19 @@ Generate `OPERATIONS.json` using `rb-operational/v1` when an honest executable
 consumer scenario can be derived. Match the actual product form and claimed
 platforms; never default to web or fabricate an entrypoint.
 
+Before returning, audit lossless traceability from each source requirement and
+cross-cutting rule to task, criterion, validation, and evidence. Convert every
+promised quality gate to its own verified command. `manual:` is limited to
+manager-observable inspection; unavailable environment/device/subjective proof
+uses `human:` and is reported as a pause. If a standard, grammar, protocol, or
+schema matters, require the exact dialect and complete positive/negative
+matrix, including whole-token consumption. If secrets cross a public boundary,
+include exact-value sentinel probes through success and failure paths.
+
+Implementation phases may create and validate OPERATIONS.json, but only the
+post-phase RBF audit executes it in a clean room. Never make an earlier phase
+depend on that future result. Derive scenarios for materially distinct public
+configuration modes and cross-check documentation, sample configuration,
+runtime loading, entrypoint, and scenario commands as one interface.
+
 Return only paths, readiness, counts, assumptions, and unresolved blockers.

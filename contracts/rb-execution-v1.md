@@ -23,9 +23,15 @@ as a direct prompt for any capable coding LLM.
    `AC-TNNN-NN` and at least one validation entry.
 10. Dependencies refer only to earlier phase/task IDs or `none`.
 11. Each validation is either one non-interactive shell command enclosed in
-    backticks or `manual: <inspection>`. Validation commands are reviewed input
-    and must verify behavior without destructive project or external-state
-    changes.
+    backticks, `manual: <manager-observable inspection>`, or
+    `human: <external evidence>`. Validation commands are reviewed input and
+    must verify behavior without destructive project or external-state changes.
+    Executable checks cannot be disguised as manual prose or forced to exit
+    successfully after a failure.
+12. Normal phases may require a valid `rb-operational/v1` document, but cannot
+    require its clean-room result. That result is owned by the post-phase final
+    operational audit, so using it to accept an earlier phase is an invalid
+    forward dependency.
 
 ## Execution neutrality
 
@@ -66,5 +72,6 @@ agent topology, or RB Ralph itself.
 ## Compatibility
 
 Consumers must reject unknown major versions before starting an LLM. Additive
-minor revisions may only introduce optional fields. Breaking grammar changes
+minor revisions may introduce optional syntax such as `human:` while preserving
+existing meanings. Breaking grammar changes
 require a new major contract and migration tooling.

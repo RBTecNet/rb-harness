@@ -48,9 +48,17 @@ Read these files completely before writing artifacts:
    consumer scenario can be grounded. The scenario must validate the actual
    product form and claimed platforms (desktop, CLI, library, service, web, or
    otherwise), not a presumed HTTP boundary. Reuse verified project-level
-   operations where valid and specialize only what this change affects.
+   operations only when their exact contract and configuration mode still
+   apply, and specialize only what this change affects. Normal phases may
+   validate the contract structure but cannot require its future RBF clean-room
+   result.
 9. Trace every RIGID requirement to acceptance criteria and tasks. Verify every
    code-shaped literal in RIGID against code/config or mark it unresolved.
+   Trace further to one observable validation and expected evidence. Audit
+   cross-cutting rules at every affected public state, name promised quality
+   commands separately, classify unavailable proof as external `human`
+   evidence, and require exact standard/dialect matrices plus hostile
+   schema/secret cases when relevant.
 10. Derive phases from a dependency DAG. `Parallel safe` is descriptive; no
     executor or provider is required to parallelize.
 11. Run, fix, and repeat until green:

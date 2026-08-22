@@ -15,3 +15,9 @@ maps to impact and regression entries. Every affected preserved behavior owns a
 regression entry. Cover old records, compatibility, tenants, public consumers,
 concurrency, idempotency, rollout, and rollback when relevant. Return paths,
 freshness, matrix counts, requirements, unknowns, and blockers.
+
+When the delta touches a standard/dialect, public variant, or secret-bearing
+boundary, preserve or define the exact machine-checkable contract rather than
+examples or "where valid" prose. Include whole-input consumption, independent
+invalid/mixed-variant cases, and exact configured-value redaction through
+provider/transport failures in requirements and regression entries.

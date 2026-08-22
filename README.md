@@ -45,6 +45,30 @@ Each workflow generates documentation only. The resulting documents can be
 sent directly to any capable coding CLI/model or selected by RB Ralph; neither
 path is embedded into the documentation.
 
+## Generated-plan quality gates
+
+Version 0.1.1 strengthens generation and deterministic validation around the
+failure modes found in cross-model execution trials:
+
+- every RIGID requirement and cross-cutting rule must trace through task,
+  binary criterion, validation, and expected evidence;
+- promised quality gates are explicit commands, while `manual:` is limited to
+  manager-observable inspection and `human:` pauses for truly external proof;
+- standards, protocols, grammars, and dialects require an exact authority and
+  machine-checkable positive/negative matrix rather than "where valid" prose;
+- public schema and secret-bearing boundaries gain independent hostile cases
+  and exact configured-value sentinel checks when relevant;
+- documented configuration, runtime loading, public entrypoint, and
+  `OPERATIONS.json` are audited as one interface across materially different
+  modes; and
+- normal phases may validate an operational contract's structure, but only the
+  post-phase `RBF` audit owns its clean-room result. A plan that makes an earlier
+  task depend on that future result is rejected.
+
+These rules are project-, stack-, architecture-, provider-, and model-neutral.
+Concrete applications used during testing remain regression fixtures, never
+production special cases.
+
 ## Development
 
 ```sh

@@ -77,6 +77,15 @@ or exceptions. Terms such as `appropriate`, `supported`, `normal`, `fast`,
 prose, but cannot define RIGID behavior, a domain rule, or acceptance criteria
 without an observable meaning or explicit boundary.
 
+When an answer names or implies an external standard, grammar, protocol,
+dialect, file format, schedule syntax, locale rule, or schema, do not accept
+"standard", "supported", or "where valid" as a boundary. Ask for an exact
+version/authority or present a concrete normalized matrix for approval. The
+matrix must resolve the material fields, order, ranges, aliases, operators,
+operands, combinations, invalid input, and whole-input behavior that apply.
+Examples are evidence, not an exhaustive definition, unless the developer
+explicitly restricts the requirement to those examples.
+
 When the repository contradicts a response, preserve both as `CONFLICT` and ask
 whether the response describes current behavior, intended behavior, or an
 exception. A vague response never overrides observed behavior in an existing
@@ -98,6 +107,10 @@ Before writing or delegating artifacts, audit every material normalized claim:
 3. Check that the normalization is no stronger or more precise than its source.
 4. Move unresolved alternatives to questions, assumptions, `UNKNOWN`, or
    `CONFLICT`; never hide them inside fluent prose.
+5. Trace every RIGID requirement through its affected public states and
+   cross-cutting rules, and verify that each can be proven by an executable
+   command, a manager-observable inspection, or explicitly external human
+   evidence. A proof owned only by a later phase is unresolved, not validation.
 
 For existing projects, favor preservation: document uncertainty and the
 implemented behavior rather than guessing a rule that could make a later plan
