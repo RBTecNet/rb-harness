@@ -74,3 +74,81 @@ export interface ManifestValidation {
   issues: ValidationIssue[];
   manifest?: ArtifactManifest;
 }
+
+export type ResponsiveDepth = "quick" | "balanced" | "deep";
+export type ResponsiveFileDisposition = "ANALYZED" | "EXCLUDED" | "UNKNOWN";
+export type ResponsiveCandidateDisposition =
+  | "CONFIRMED_DEFECT"
+  | "LIKELY_DEFECT"
+  | "ANALYZED_SAFE"
+  | "FALSE_POSITIVE_RISK"
+  | "EXCLUDED"
+  | "UNKNOWN";
+
+export interface ResponsiveSourceRef {
+  path: string;
+  line: number;
+  role: string;
+}
+
+export interface ResponsiveLayoutState {
+  name: string;
+  parentConstraint: string;
+  childRequirement: string;
+  relationship: string;
+  assessment: "COMPATIBLE" | "INCOMPATIBLE" | "UNKNOWN";
+}
+
+export interface ResponsiveCandidate {
+  id: string;
+  path: string;
+  mechanism: string;
+  disposition: ResponsiveCandidateDisposition;
+  sourceRefs: ResponsiveSourceRef[];
+  invariantsChecked: string[];
+  layoutStates?: ResponsiveLayoutState[];
+  rationale: string;
+  findingIds?: string[];
+  limitations?: string[];
+}
+
+interface ResponsiveAccounting<T> {
+  discovered: number;
+  analyzed: number;
+  excluded: number;
+  unresolved: number;
+  entries: T[];
+}
+
+interface ResponsiveInventoryBase {
+  contract: "rb-responsive-inventory/v1";
+  reviewId: string;
+  depth: ResponsiveDepth;
+  targetRevision: string;
+}
+
+export type ResponsiveInventoryDocument = ResponsiveInventoryBase & (
+  | {
+    applicability: "NOT_APPLICABLE";
+    reason: string;
+  }
+  | {
+    applicability: "APPLICABLE";
+    mechanisms: string[];
+    commands: Array<{ command: string; purpose: string; limitations: string[] }>;
+    uiFiles: ResponsiveAccounting<{
+      path: string;
+      disposition: ResponsiveFileDisposition;
+      candidateIds: string[];
+      reason?: string;
+    }>;
+    layoutCandidates: ResponsiveAccounting<ResponsiveCandidate>;
+    limitations?: string[];
+  }
+);
+
+export interface ResponsiveInventoryValidation {
+  valid: boolean;
+  issues: ValidationIssue[];
+  document?: ResponsiveInventoryDocument;
+}

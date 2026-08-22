@@ -24,9 +24,18 @@ Read these files completely before writing artifacts:
 
 - Audit mode is the default. It discovers and records findings but emits no
   remediation plan.
-- Remediation mode applies only when the developer selects stable finding IDs.
-  It plans those findings into `PLAN.md`, `PHASES.md`, and conditional
-  `OPERATIONS.json`; it never edits application code.
+- Remediation mode applies only when the developer selects stable finding IDs
+  or supplies the explicit `--plan-all-confirmed` selection policy in the same
+  review request. It plans the resolved findings into `PLAN.md`, `PHASES.md`,
+  and conditional `OPERATIONS.json`; it never edits application code.
+
+`--plan-all-confirmed` means every and only finding classified `CONFIRMED` after
+the audit artifacts and stable IDs are finalized. It never promotes or selects
+`LIKELY`, `UNKNOWN`, or `FALSE_POSITIVE_RISK`, never widens an empty selection,
+and never creates a zero-finding plan. It is mutually exclusive with explicit
+`--plan <finding-ids>`. The policy preauthorizes selection for planning only;
+it does not authorize implementation, commits, destructive actions, or bypass
+of a `human:` execution gate.
 
 Support `quick`, `balanced`, and `deep`. Accept one or more focus areas:
 `product`, `security`, `tenancy`, `frontend`, `design`, `accessibility`,
@@ -76,15 +85,27 @@ depth, not cross-boundary evidence needed to understand a critical journey.
    independent impact paths, and compare with the baseline as new, changed,
    regressed, unchanged, or resolved.
 10. Write the conditional artifacts from `review-artifacts.md`, then run
-    `manifest sync` and `tree validate`. For UI targets, do not hand work to the
-    writer until responsive file and candidate totals reconcile. Report
+    `review validate-responsive`, `manifest sync`, and `tree validate`. For UI
+    targets, do not hand work to the writer until every high-risk responsive
+    candidate has an individual structured disposition and file/candidate totals
+    reconcile. A path list or prose claim of zero unresolved candidates is not
+    evidence. Report
     coverage, skipped areas, limitations, counts by severity/confidence, and
     artifact paths.
 
+11. When an explicit planning selector was supplied, freeze the completed audit
+    before resolving it. Persist its raw form, normalized predicate, resolved
+    IDs, and selected/deferred/rejected counts. Start a fresh planner context
+    that reads the written review artifacts and relevant current code evidence;
+    do not carry the inspector/writer conversation into remediation planning.
+
 ## Remediation workflow
 
-1. Require explicit stable finding IDs and revalidate their evidence against the
-   current tree. Resolved, stale, or contradicted findings are not planned.
+1. Require explicit stable finding IDs or resolve `--plan-all-confirmed` against
+   the frozen audit. Revalidate resolved evidence against the current tree.
+   Resolved, stale, contradicted, or unselected findings are not planned. If an
+   automatic policy resolves to zero IDs, report that result and stop without
+   creating `SELECTION.md`, `PLAN.md`, `PHASES.md`, or `OPERATIONS.json`.
 2. Group by dependency and shared root cause, not merely severity. Keep each task
    bounded enough for a fresh executor context.
 3. Preserve unrelated behavior and design-system authority. Every task traces to

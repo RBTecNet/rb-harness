@@ -9,6 +9,7 @@ import {
   validateExecutionMarkdown,
 } from "./execution-contract.js";
 import { validateOperationalJson } from "./operational-contract.js";
+import { validateResponsiveInventoryJson } from "./responsive-inventory.js";
 import {
   initializeProject,
   manifestTsv,
@@ -39,7 +40,7 @@ function fail(error: unknown): never {
 program
   .name("rb-harness")
   .description("Deterministic contracts and artifact discovery for RB Harness")
-  .version("0.1.3");
+  .version("0.1.5");
 
 const contract = program.command("contract").description("Validate RB execution documents");
 contract
@@ -68,6 +69,22 @@ operations
       printIssues(result.issues, Boolean(options.json));
       if (!result.valid) process.exitCode = 1;
       else if (!options.json) process.stdout.write(`OK: ${path} conforms to rb-operational/v1\n`);
+    } catch (error) {
+      fail(error);
+    }
+  });
+
+const review = program.command("review").description("Validate RB review evidence contracts");
+review
+  .command("validate-responsive")
+  .argument("<path>", "RESPONSIVE_INVENTORY.json path")
+  .option("--json", "emit JSON")
+  .action(async (path: string, options: { json?: boolean }) => {
+    try {
+      const result = validateResponsiveInventoryJson(await readFile(resolve(path), "utf8"));
+      printIssues(result.issues, Boolean(options.json));
+      if (!result.valid) process.exitCode = 1;
+      else if (!options.json) process.stdout.write(`OK: ${path} conforms to rb-responsive-inventory/v1\n`);
     } catch (error) {
       fail(error);
     }

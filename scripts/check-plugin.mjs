@@ -42,6 +42,7 @@ const required = [
   "references/interview-policy.md",
   "references/artifact-conventions.md",
   "references/execution-template.md",
+  "skills/rb-review/references/responsive-evidence.md",
   "scripts/rb-harness.cjs",
   "scripts/rb-resolve.sh",
 ];
@@ -49,6 +50,9 @@ const required = [
 const pluginFiles = await filesUnder(plugin);
 const relativeFiles = new Set(pluginFiles.map((path) => path.slice(plugin.length + 1)));
 for (const path of required) assert(relativeFiles.has(path), `Missing plugin file: ${path}`);
+for (const path of ["contracts/rb-responsive-inventory-v1.md", "contracts/rb-responsive-inventory-v1.schema.json"]) {
+  await readFile(resolve(root, path), "utf8");
+}
 
 for (const path of pluginFiles.filter((value) => /\.(?:md|json|yaml|yml)$/.test(value))) {
   const source = await readFile(path, "utf8");
@@ -91,6 +95,24 @@ for (const invariant of [
     `Responsive evidence policy omits invariant: ${invariant}`,
   );
 }
+
+const reviewCommand = await readFile(resolve(plugin, "commands/review.md"), "utf8");
+const reviewSkill = await readFile(resolve(plugin, "skills/rb-review/SKILL.md"), "utf8");
+const reviewPlanner = await readFile(resolve(plugin, "agents/review-planner.md"), "utf8");
+const normalizedReviewCommand = reviewCommand.replace(/\s+/g, " ");
+const normalizedReviewPlanner = reviewPlanner.replace(/\s+/g, " ");
+for (const [name, source] of [
+  ["review command", reviewCommand],
+  ["review skill", reviewSkill],
+]) {
+  assert(source.includes("--plan-all-confirmed"), `${name} omits --plan-all-confirmed`);
+  for (const confidence of ["CONFIRMED", "LIKELY", "UNKNOWN", "FALSE_POSITIVE_RISK"]) {
+    assert(source.includes(confidence), `${name} omits ${confidence} selection semantics`);
+  }
+}
+assert(normalizedReviewCommand.includes("fresh context"), "Review command does not require a fresh planner context");
+assert(normalizedReviewPlanner.includes("Do not rely on the audit conversation"), "Planner may inherit accumulated audit context");
+assert(normalizedReviewPlanner.includes("normalized predicate"), "Planner does not persist normalized selection policy");
 
 const version = execFileSync("node", [resolve(plugin, "scripts/rb-harness.cjs"), "--version"], {
   encoding: "utf8",

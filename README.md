@@ -96,6 +96,31 @@ UNKNOWN, and reconcile discovered counts against analyzed, excluded, and
 unresolved counts before artifact writing. Deep mode builds on that static
 denominator instead of replacing it with selected runtime samples.
 
+Version 0.1.4 makes that accounting machine-verifiable. UI reviews emit an
+`rb-responsive-inventory/v1` JSON artifact with one disposed record per
+high-risk parent/child candidate, active layout-state evidence, and finding
+traceability. The CLI rejects self-reported totals backed only by path lists,
+including inventories that claim every candidate was analyzed without
+individual dispositions.
+
+Version 0.1.5 preserves legacy review trees while keeping the structured gate
+strict for new reviews: only reviews that declare `rb-responsive-inventory/v1`
+are required to carry its JSON artifact. Reviews can also audit and plan in one
+invocation with the explicit `--plan-all-confirmed` policy. The finding set is
+frozen first, only `CONFIRMED` IDs are selected, and a fresh planner context
+reads the generated artifacts instead of inheriting the audit conversation.
+
+For example:
+
+```text
+$rb-review /path/to/project --balanced --plan-all-confirmed
+/rb-harness:review /path/to/project --balanced --plan-all-confirmed
+```
+
+This produces remediation documents only when at least one confirmed finding
+survives revalidation. It never implements the plan or authorizes destructive
+execution steps.
+
 ## Development
 
 ```sh
@@ -113,6 +138,7 @@ After the build, the distributable CLI is bundled at
 node plugins/rb-harness/scripts/rb-harness.cjs contract validate <PHASES.md>
 node plugins/rb-harness/scripts/rb-harness.cjs contract inspect <PHASES.md> --format tsv
 node plugins/rb-harness/scripts/rb-harness.cjs contract extract <PHASES.md> --phase P01
+node plugins/rb-harness/scripts/rb-harness.cjs review validate-responsive <RESPONSIVE_INVENTORY.json>
 node plugins/rb-harness/scripts/rb-harness.cjs project init . --name "My Project"
 node plugins/rb-harness/scripts/rb-harness.cjs manifest sync .
 node plugins/rb-harness/scripts/rb-harness.cjs tree validate .

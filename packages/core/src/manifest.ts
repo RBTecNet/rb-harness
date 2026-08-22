@@ -4,6 +4,7 @@ import { validateExecutionMarkdown } from "./execution-contract.js";
 import { atomicWrite, readJson, relativeProjectPath, safeProjectPath, walkFiles } from "./fs-utils.js";
 import { sha256File } from "./hash.js";
 import { validateOperationalJson } from "./operational-contract.js";
+import { candidateFindings, validateResponsiveInventoryJson } from "./responsive-inventory.js";
 import type {
   ArtifactManifest,
   ArtifactRecord,
@@ -42,6 +43,7 @@ function artifactKind(relativePath: string): string {
     if (name === "FINDINGS.MD") return "review-findings";
     if (name === "DESIGN_SYSTEM.MD") return "design-system";
     if (name === "BASELINE.JSON") return "review-baseline";
+    if (name === "RESPONSIVE_INVENTORY.JSON") return "responsive-inventory";
     return "review-document";
   }
   if (relativePath.startsWith(".rb/evolutions/")) {
@@ -58,6 +60,14 @@ async function operationalMetadata(path: string): Promise<{
 }> {
   const result = validateOperationalJson(await readFile(path, "utf8"));
   return { status: result.valid ? "ready" : "invalid", contract: "rb-operational/v1" };
+}
+
+async function responsiveMetadata(path: string): Promise<{
+  status: ArtifactStatus;
+  contract: string;
+}> {
+  const result = validateResponsiveInventoryJson(await readFile(path, "utf8"));
+  return { status: result.valid ? "ready" : "invalid", contract: "rb-responsive-inventory/v1" };
 }
 
 function pathArtifactId(relativePath: string): string {
@@ -164,6 +174,10 @@ export async function syncManifest(root: string): Promise<ArtifactManifest> {
       contract = metadata.contract;
     } else if (kind === "operational-verification") {
       const metadata = await operationalMetadata(path);
+      status = metadata.status;
+      contract = metadata.contract;
+    } else if (kind === "responsive-inventory") {
+      const metadata = await responsiveMetadata(path);
       status = metadata.status;
       contract = metadata.contract;
     }
@@ -286,9 +300,79 @@ export async function validateManifestTree(root: string): Promise<ManifestValida
         if (artifact.contract !== "rb-operational/v1") {
           addIssue(issues, "artifact.contract", "Operational verification contract must be rb-operational/v1", artifact.path);
         }
+      } else if (artifact.kind === "responsive-inventory") {
+        const responsive = validateResponsiveInventoryJson(await readFile(absolute, "utf8"));
+        const metadata = {
+          status: responsive.valid ? "ready" as const : "invalid" as const,
+          contract: "rb-responsive-inventory/v1",
+        };
+        for (const responsiveIssue of responsive.issues) issues.push({ ...responsiveIssue, path: artifact.path });
+        if (artifact.status !== metadata.status) {
+          addIssue(issues, "artifact.status.mismatch", `Manifest status ${artifact.status} differs from document status ${metadata.status}`, artifact.path);
+        }
+        if (artifact.contract !== metadata.contract) {
+          addIssue(issues, "artifact.contract", "Responsive inventory contract must be rb-responsive-inventory/v1", artifact.path);
+        }
+        if (responsive.document) {
+          const reviewDirectory = artifact.path.slice(0, artifact.path.lastIndexOf("/"));
+          if (responsive.document.reviewId !== basename(reviewDirectory)) {
+            addIssue(issues, "responsive.reviewId.mismatch", "reviewId must match the containing review directory", artifact.path);
+          }
+          const findingsArtifact = manifest.artifacts.find((entry) =>
+            entry.path === `${reviewDirectory}/FINDINGS.md` && entry.kind === "review-findings",
+          );
+          if (responsive.document.applicability === "APPLICABLE" && !findingsArtifact) {
+            addIssue(issues, "responsive.findings.missing", "Applicable responsive evidence requires FINDINGS.md", artifact.path);
+          } else if (findingsArtifact) {
+            const findingsSource = await readFile(safeProjectPath(root, findingsArtifact.path), "utf8");
+            for (const { candidate, findingId } of candidateFindings(responsive.document)) {
+              if (!new RegExp(`(?:^|[^A-Z0-9-])${findingId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:$|[^A-Z0-9-])`, "m").test(findingsSource)) {
+                addIssue(
+                  issues,
+                  "responsive.finding.unresolved",
+                  `Candidate ${candidate.id} references missing finding ${findingId}`,
+                  artifact.path,
+                );
+              }
+            }
+          }
+        }
       }
     } catch {
       addIssue(issues, "artifact.missing", "Artifact file does not exist", artifact.path);
+    }
+  }
+
+  const artifactPaths = new Set(manifest.artifacts.map((entry) => entry.path));
+  const responsiveContract = "rb-responsive-inventory/v1";
+  const reviewDirectories = new Set(
+    manifest.artifacts
+      .map((entry) => entry.path.match(/^(\.rb\/reviews\/[^/]+)\//)?.[1])
+      .filter((entry): entry is string => Boolean(entry)),
+  );
+  for (const reviewDirectory of reviewDirectories) {
+    const declarationPaths = [
+      `${reviewDirectory}/REVIEW.md`,
+      `${reviewDirectory}/source-manifest.json`,
+    ].filter((path) => artifactPaths.has(path));
+    let declarationPath: string | undefined;
+    for (const path of declarationPaths) {
+      try {
+        if ((await readFile(safeProjectPath(root, path), "utf8")).includes(responsiveContract)) {
+          declarationPath = path;
+          break;
+        }
+      } catch {
+        // Missing/stale declaration artifacts are reported by the artifact loop.
+      }
+    }
+    if (declarationPath && !artifactPaths.has(`${reviewDirectory}/RESPONSIVE_INVENTORY.json`)) {
+      addIssue(
+        issues,
+        "responsive.inventory.companion",
+        `Reviews declaring ${responsiveContract} require a machine-validatable RESPONSIVE_INVENTORY.json`,
+        declarationPath,
+      );
     }
   }
 

@@ -88,6 +88,37 @@ describe("artifact manifest", () => {
     expect((await validateManifestTree(root)).valid).toBe(true);
   });
 
+  it("grandfathers a legacy narrative responsive inventory without a contract declaration", async () => {
+    const root = await project();
+    const review = resolve(root, ".rb/reviews/ui-review");
+    await mkdir(review, { recursive: true });
+    await writeFile(resolve(review, "RESPONSIVE_INVENTORY.md"), "# Paths\n\n- src/view.ui\n", "utf8");
+    await syncManifest(root);
+
+    const result = await validateManifestTree(root);
+    expect(result.valid).toBe(true);
+    expect(result.issues.map((entry) => entry.code)).not.toContain("responsive.inventory.companion");
+  });
+
+  it("rejects a review that declares the responsive contract without its JSON artifact", async () => {
+    const root = await project();
+    const review = resolve(root, ".rb/reviews/ui-review");
+    await mkdir(review, { recursive: true });
+    await writeFile(
+      resolve(review, "REVIEW.md"),
+      "# UI review\n\n<!-- rb-responsive-inventory-contract: rb-responsive-inventory/v1 -->\n",
+      "utf8",
+    );
+    await writeFile(resolve(review, "RESPONSIVE_INVENTORY.md"), "# Paths\n\n- src/view.ui\n", "utf8");
+    await syncManifest(root);
+
+    const result = await validateManifestTree(root);
+    expect(result.issues).toEqual(expect.arrayContaining([expect.objectContaining({
+      code: "responsive.inventory.companion",
+      path: ".rb/reviews/ui-review/REVIEW.md",
+    })]));
+  });
+
   it("fails closed for a malformed operational contract", async () => {
     const root = await project();
     await writeFile(resolve(root, ".rb/init/OPERATIONS.json"), '{"contract":"wrong","scenarios":[]}\n', "utf8");

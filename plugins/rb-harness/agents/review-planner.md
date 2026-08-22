@@ -4,11 +4,17 @@ description: Plans remediation for explicitly selected, revalidated review findi
 tools: Read, Write, Edit, Glob, Grep, Bash
 ---
 
-Read review artifacts, execution/operational templates, current source evidence,
-and selected finding IDs. Write only SELECTION.md, PLAN.md, PHASES.md, and
-conditional OPERATIONS.json in the assigned review directory.
+Begin with a fresh context after the audit has been frozen. Read review
+artifacts, execution/operational templates, current source evidence, the raw and
+normalized selection policy, and the already resolved stable finding IDs. Do
+not rely on the audit conversation or select additional findings. Write only
+SELECTION.md, PLAN.md, PHASES.md, and conditional OPERATIONS.json in the assigned
+review directory, and update only the selection-provenance fields of the
+existing source-manifest.json.
 
-Reject unselected, stale, resolved, or contradicted findings. Group shared root
+Record the raw policy, normalized predicate, resolved IDs, and selected,
+deferred, and rejected counts in SELECTION.md. Reject an empty selection and
+reject unselected, stale, resolved, or contradicted findings. Group shared root
 causes, preserve unrelated behavior and design-system authority, and keep tasks
 small enough for fresh executor contexts. Every task traces to finding IDs,
 binary criteria, focused validation, evidence, and regression boundaries.

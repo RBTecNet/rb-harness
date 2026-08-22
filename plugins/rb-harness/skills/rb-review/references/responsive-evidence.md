@@ -28,6 +28,15 @@ Depth changes evidence depth, not accounting honesty:
 
 ## Reconciled static inventory
 
+Use these terms consistently:
+
+- a **layout declaration** is a mechanically discovered container, placement,
+  sizing, overflow, wrapping, or positioning instruction;
+- a **high-risk candidate** is one parent/child or nested-region relationship
+  selected by a topology invariant for inspection;
+- a **candidate path** is only provenance. A path is not itself an analyzed
+  candidate and cannot be counted as one.
+
 Before sampling screens or making findings, discover the target's actual UI
 boundaries from routes or screen registries, template/component directories,
 design-system sources, style/build configuration, and UI tests. Exclude generated
@@ -53,6 +62,15 @@ Evaluate each discovered layout state for at least these general invariants:
 - absolute, fixed, sticky, overlay, and nested-scroll relationships that can
   clip, overlap, obscure, or make actions unreachable.
 
+Resolve statically knowable topology instead of deferring it merely because a
+runtime session is unavailable. When the active base parent and owned-child
+constraints are known, a child placement/span that exceeds the parent's base
+tracks is direct static evidence of an implicit-track dependency. Classify the
+relationship from those semantics after checking same-state overrides and
+generated/custom configuration. Runtime remains useful for impact and geometry,
+but its absence does not turn known incompatible source constraints into a
+generic runtime UNKNOWN.
+
 Run and record negative-control queries for every discovered mechanism rather
 than stopping after the first useful pattern. A fixed-width search, for example,
 does not cover track/span topology. Trace reusable components and dynamic layout
@@ -67,10 +85,21 @@ Publish a responsive static-inventory reconciliation with at least:
 - candidate paths or a provenance-linked artifact containing them;
 - the commands/parsers used and their limitations.
 
+For every UI-bearing review, write
+`.rb/reviews/<review-id>/RESPONSIVE_INVENTORY.json` conforming to
+`rb-responsive-inventory/v1`. Every high-risk candidate needs its own stable
+entry containing source references for the parent/child/config relationship,
+the invariants actually checked, explicit active layout-state assessments,
+disposition, rationale, limitations when unresolved, and finding IDs when it is
+a confirmed or likely defect. Link every candidate exactly once from its owning
+UI-file entry. A readable Markdown summary is optional; a bare path list never
+satisfies this evidence duty.
+
 The counts must reconcile: discovered equals analyzed plus excluded plus
 unresolved for both files and candidates. Missing or inconsistent reconciliation
 is incomplete review evidence and must be returned to the inspector before the
-writer can finalize artifacts.
+writer can finalize artifacts. Run `review validate-responsive` against the JSON;
+do not infer successful reconciliation from prose or self-reported totals.
 
 Inspect parent and child constraints as a system at every active layout state:
 

@@ -25,6 +25,14 @@ its path as UNKNOWN. Do not stop after finding fixed widths or another productiv
 pattern. Do not return until file and candidate totals reconcile as discovered =
 analyzed + excluded + unresolved.
 
+Return one structured record per high-risk candidate, not one record per file.
+Each record must identify the owning path, parent/child/config source references,
+mechanism, invariants checked, every relevant active layout state, disposition,
+rationale, limitations, and linked finding IDs for defects. A file containing
+many candidates needs many records. Resolve statically known incompatible
+parent/child constraints even when runtime is unavailable; reserve UNKNOWN for
+evidence that actually depends on unresolved composition or configuration.
+
 Inspect parent/child topology, nested overflow, full-surface and below-the-fold
 content, dynamic states, usable geometry, and evidence provenance. Existing
 responsive tests must themselves be audited for falsifiability: visibility of a
