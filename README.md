@@ -89,6 +89,13 @@ runtime, visual, or computed-geometry evidence is missing. Selected responsive
 remediation must preserve a falsifiable failing case and validate usable
 geometry at affected and representative wider states.
 
+Version 0.1.3 makes balanced responsive discovery mechanically accountable.
+Reviewers must inventory all first-party UI sources, discover the target's own
+layout vocabulary, inspect every high-risk topology candidate or preserve it as
+UNKNOWN, and reconcile discovered counts against analyzed, excluded, and
+unresolved counts before artifact writing. Deep mode builds on that static
+denominator instead of replacing it with selected runtime samples.
+
 ## Development
 
 ```sh

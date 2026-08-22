@@ -39,7 +39,7 @@ function fail(error: unknown): never {
 program
   .name("rb-harness")
   .description("Deterministic contracts and artifact discovery for RB Harness")
-  .version("0.1.2");
+  .version("0.1.3");
 
 const contract = program.command("contract").description("Validate RB execution documents");
 contract

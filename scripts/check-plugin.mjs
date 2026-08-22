@@ -65,6 +65,7 @@ const responsiveConsumers = [
   "skills/rb-review/SKILL.md",
   "commands/review.md",
   "agents/review-inspector.md",
+  "agents/review-writer.md",
   "agents/review-planner.md",
 ];
 for (const path of responsiveConsumers) {
@@ -73,14 +74,22 @@ for (const path of responsiveConsumers) {
 }
 
 const responsivePolicy = await readFile(resolve(plugin, responsiveReference), "utf8");
+const normalizedResponsivePolicy = responsivePolicy.replace(/\s+/g, " ");
 for (const invariant of [
   "parent and child constraints",
   "below-the-fold",
   "observable geometry",
   "evidence provenance",
+  "all first-party UI source files",
+  "high-risk topology",
+  "negative-control queries",
+  "discovered equals analyzed plus excluded plus unresolved",
   "UNKNOWN",
 ]) {
-  assert(responsivePolicy.includes(invariant), `Responsive evidence policy omits invariant: ${invariant}`);
+  assert(
+    normalizedResponsivePolicy.includes(invariant),
+    `Responsive evidence policy omits invariant: ${invariant}`,
+  );
 }
 
 const version = execFileSync("node", [resolve(plugin, "scripts/rb-harness.cjs"), "--version"], {

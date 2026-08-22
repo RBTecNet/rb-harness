@@ -13,6 +13,65 @@ orientation, window, or device states from the product's declared support and
 discovered breakpoints. Record what was statically inspected, exercised at
 runtime, visually inspected, skipped, or blocked.
 
+Depth changes evidence depth, not accounting honesty:
+
+- `quick` may sample static candidates, but must publish the complete discovered
+  UI-file denominator, the sampled numerator, and explicit unreviewed coverage;
+  it cannot emit a broad responsive clean result.
+- `balanced` must mechanically inventory all first-party UI source files and all
+  discoverable layout declarations. It must inspect every candidate returned by
+  the high-risk topology queries below or preserve each unresolved candidate and
+  path as `UNKNOWN`. It need not manually read every non-candidate line.
+- `deep` includes the balanced static inventory and adds broader runtime,
+  computed-layout, visual, state, content, and assistive-technology evidence
+  where safe. Runtime unavailability never reduces the balanced static duty.
+
+## Reconciled static inventory
+
+Before sampling screens or making findings, discover the target's actual UI
+boundaries from routes or screen registries, template/component directories,
+design-system sources, style/build configuration, and UI tests. Exclude generated
+or third-party code explicitly. Record paths and counts by materially distinct
+surface kind; do not let the reviewer self-select only familiar pages, tables,
+or above-the-fold regions.
+
+Discover the project's own layout vocabulary and responsive semantics from
+source, configuration, generated-style inputs, and authoritative local
+documentation. Then use broad mechanical search or parsing across the complete
+first-party UI inventory to extract container declarations and the placement or
+sizing constraints of their owned children. Do not hard-code one framework's
+class names as the production rule.
+
+Evaluate each discovered layout state for at least these general invariants:
+
+- child span, line, area, or placement requirements exceeding the parent's
+  declared tracks and therefore creating or depending on implicit tracks;
+- base/unconditional child constraints that are incompatible with the base
+  container and are repaired only at a wider or later layout state;
+- fixed or intrinsic minimum sizes that exceed available container space;
+- non-wrapping flex or row layouts whose children cannot shrink or reflow;
+- absolute, fixed, sticky, overlay, and nested-scroll relationships that can
+  clip, overlap, obscure, or make actions unreachable.
+
+Run and record negative-control queries for every discovered mechanism rather
+than stopping after the first useful pattern. A fixed-width search, for example,
+does not cover track/span topology. Trace reusable components and dynamic layout
+composition far enough to determine their effective parent/child constraints;
+when static resolution is not possible, keep the candidate unresolved.
+
+Publish a responsive static-inventory reconciliation with at least:
+
+- first-party UI files discovered, inspected, excluded, and unresolved;
+- layout containers/candidates discovered, analyzed, excluded, and unresolved;
+- surface kinds and layout mechanisms covered;
+- candidate paths or a provenance-linked artifact containing them;
+- the commands/parsers used and their limitations.
+
+The counts must reconcile: discovered equals analyzed plus excluded plus
+unresolved for both files and candidates. Missing or inconsistent reconciliation
+is incomplete review evidence and must be returned to the inspector before the
+writer can finalize artifacts.
+
 Inspect parent and child constraints as a system at every active layout state:
 
 - declared and implicit grid tracks, placement, spans, gaps, and ordering;

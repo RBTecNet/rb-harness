@@ -121,6 +121,14 @@ geometry/visual proof from stale or cropped screenshots. Visibility of a few
 controls or absence of page-level overflow cannot justify a broad responsive
 clean result; unverified surfaces remain explicitly partial or unknown.
 
+Balanced and deep UI reviews also produce a reconciled static inventory. Every
+first-party UI source and every mechanically discoverable high-risk layout
+candidate is counted as analyzed, explicitly excluded, or unresolved with its
+path preserved. This prevents a successful fixed-width search or a handful of
+sampled screens from standing in for parent/child topology coverage across the
+rest of the product. Deep mode adds broader runtime and visual evidence; it does
+not replace the balanced static inventory.
+
 Review does not repair code. Select stable finding IDs explicitly before asking
 it to generate remediation `PLAN.md`, `PHASES.md`, and optional
 `OPERATIONS.json`; unselected findings never leak into the execution plan.

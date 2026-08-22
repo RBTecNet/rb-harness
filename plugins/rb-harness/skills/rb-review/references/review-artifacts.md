@@ -7,7 +7,10 @@ IDs stable across reruns and preserve supersession history.
   reviewed commands, runtime/static limits, summary by severity/confidence, and
   readiness for remediation selection. For UI-bearing targets, include a
   surface-by-layout-state responsive evidence matrix with static/runtime/visual
-  disposition and explicit below-the-fold coverage or limitation.
+  disposition and explicit below-the-fold coverage or limitation. Also include
+  the responsive static-inventory reconciliation: first-party UI files and
+  layout candidates discovered/analyzed/excluded/unresolved, covered surface
+  kinds/mechanisms, negative-control commands, and provenance for candidate paths.
 - `FINDINGS.md` always: one record per root cause with stable `RV-<AREA>-NNN` ID,
   title, area, severity (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO`), confidence
   (`CONFIRMED`, `LIKELY`, `UNKNOWN`, `FALSE_POSITIVE_RISK`), affected journey,
@@ -26,7 +29,9 @@ IDs stable across reruns and preserve supersession history.
 - `source-manifest.json` always: inspected paths/hashes, commands and outcomes,
   exclusions, raw/normalized developer answers with dispositions, finding-to-
   evidence links, generated artifact IDs, and provenance for runtime or visual
-  evidence used to support responsive claims.
+  evidence used to support responsive claims. For UI targets, include structured
+  responsive inventory counts and candidate paths (or a provenance-linked
+  artifact) whose totals reconcile with REVIEW.md.
 
 Only after explicit finding selection:
 

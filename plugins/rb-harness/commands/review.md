@@ -18,11 +18,16 @@ Audit and document only. Never repair application code or commit.
    IDs. Initialize the RB tree and run the bundled `inspect` command when needed.
 3. In audit mode, delegate read-only coverage and candidate discovery to
    `rb-harness:review-inspector`. Permit only safe, non-destructive project
-   commands and retain their outputs and limitations.
+   commands and retain their outputs and limitations. For UI targets in balanced
+   or deep mode, require a complete mechanical first-party UI inventory and all
+   high-risk topology candidates inspected or preserved as UNKNOWN.
 4. Apply the ambiguity and finding-confidence gates. Deduplicate candidates by
    root cause; never present suspicion as a confirmed defect. Reject broad clean
    responsive claims unless their surface/layout-state matrix has proportional
    full-surface evidence; otherwise preserve explicit partial/UNKNOWN coverage.
+   Before invoking the writer, verify that responsive file and candidate totals
+   both reconcile as discovered = analyzed + excluded + unresolved; return an
+   incomplete inventory to the inspector instead of silently accepting sampling.
 5. Delegate artifact generation to `rb-harness:review-writer`. Do not emit
    PLAN/PHASES without explicit finding selection.
 6. In remediation mode, revalidate selected IDs and delegate only those findings

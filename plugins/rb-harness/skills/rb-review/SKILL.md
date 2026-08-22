@@ -53,12 +53,15 @@ depth, not cross-boundary evidence needed to understand a critical journey.
    renders, Angular change detection and subscriptions, but findings must be
    expressed as observable product or engineering behavior.
 6. For UI-bearing products, discover the formal or informal design system and
-   loading/feedback conventions. Apply `responsive-evidence.md`: analyze parent
-   and child layout constraints together at each supported breakpoint and, when
-   safe runtime evidence is available, traverse complete surfaces including
-   below-the-fold content. Check accessibility, request duplication, stale
-   responses, debounce/cancellation, duplicate submits, layout stability, and
-   success/empty/error/timeout/cancel states.
+   loading/feedback conventions. Apply `responsive-evidence.md`, including its
+   depth-specific static inventory and reconciliation gate. In balanced and deep
+   reviews, mechanically account for all first-party UI sources and inspect or
+   preserve as UNKNOWN every high-risk layout candidate before sampling runtime
+   surfaces. Analyze parent and child constraints together at each supported
+   breakpoint and, when safe runtime evidence is available, traverse complete
+   surfaces including below-the-fold content. Check accessibility, request
+   duplication, stale responses, debounce/cancellation, duplicate submits,
+   layout stability, and success/empty/error/timeout/cancel states.
 7. Evaluate test meaning, not coverage alone: assertions, negative paths,
    mutation sensitivity, mock boundaries, skipped tests, tautologies, and
    whether important behavior is exercised.
@@ -73,8 +76,10 @@ depth, not cross-boundary evidence needed to understand a critical journey.
    independent impact paths, and compare with the baseline as new, changed,
    regressed, unchanged, or resolved.
 10. Write the conditional artifacts from `review-artifacts.md`, then run
-    `manifest sync` and `tree validate`. Report coverage, skipped areas,
-    limitations, counts by severity/confidence, and artifact paths.
+    `manifest sync` and `tree validate`. For UI targets, do not hand work to the
+    writer until responsive file and candidate totals reconcile. Report
+    coverage, skipped areas, limitations, counts by severity/confidence, and
+    artifact paths.
 
 ## Remediation workflow
 
