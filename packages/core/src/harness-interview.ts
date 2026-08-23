@@ -32,7 +32,9 @@ function parseQuestion(value: unknown): InterviewQuestion {
   if (typeof question.question !== "string" || !question.question.trim()) throw new Error(`question ${question.id} has no text`);
   if (typeof question.why !== "string" || !question.why.trim()) throw new Error(`question ${question.id} has no rationale`);
   if (!(["text", "single-choice", "confirm"] as unknown[]).includes(question.type)) throw new Error(`question ${question.id} has an invalid type`);
-  const options = stringArray(question.options, `question ${question.id}.options`, 6);
+  const options = question.options === undefined
+    ? []
+    : stringArray(question.options, `question ${question.id}.options`, 6);
   if (question.type === "single-choice" && options.length < 2) throw new Error(`question ${question.id} needs at least two choices`);
   if (question.type !== "single-choice" && options.length > 0) throw new Error(`question ${question.id} must not declare choices`);
   for (const optional of ["recommendation", "evidence", "answerFor"] as const) {
@@ -40,7 +42,7 @@ function parseQuestion(value: unknown): InterviewQuestion {
       throw new Error(`question ${question.id}.${optional} must be a non-empty string`);
     }
   }
-  return question as unknown as InterviewQuestion;
+  return { ...question, options } as unknown as InterviewQuestion;
 }
 
 export function parseInterviewAnalysis(output: string, pendingAnswers: InterviewAnswer[]): InterviewAnalysis {
@@ -150,6 +152,7 @@ function interviewPrompt(
     "Ask only material questions. You may discover a batch, but the CLI will present them one at a time.",
     "Question IDs are internal correlation keys: use 2-80 ASCII letters, digits, dots, underscores, or hyphens, starting with a letter or digit. IDs such as q1 and EVO-MEMORY-001 are valid.",
     "Classify every pending answer with the answer acceptance gate. PARTIAL, AMBIGUOUS, or CONTRADICTED requires one focused follow-up whose answerFor names the original question ID.",
+    "Question options are type-sensitive: single-choice requires 2-6 non-empty choices; text and confirm must omit options or use an empty array.",
     "Do not turn vague language into precise requirements. A ready result may contain only accepted decisions, explicit low-risk assumptions, or non-rigid deferrals.",
     `Return exactly ${BEGIN}, one JSON object, and ${END}. Do not use Markdown fences.`,
     "The JSON shape is:",
@@ -161,7 +164,7 @@ function interviewPrompt(
       assumptions: ["explicit low-risk assumption"],
       unresolved: ["remaining unknown or conflict"],
       answerReviews: [{ questionId: "prior-question-id", disposition: "ACCEPTED | PARTIAL | AMBIGUOUS | DEFERRED | CONTRADICTED", normalizedDecision: "required for ACCEPTED", remainingUncertainty: "optional" }],
-      questions: [{ id: "stable-id", question: "single material decision", why: "impact", type: "text | single-choice | confirm", options: ["only for single-choice"], recommendation: "optional", evidence: "optional", answerFor: "original question id when following up" }],
+      questions: [{ id: "stable-id", question: "single material decision", why: "impact", type: "text | single-choice | confirm", options: ["2-6 choices only for single-choice; omit or use [] otherwise"], recommendation: "optional", evidence: "optional", answerFor: "original question id when following up" }],
     }),
     repair ? `A prior response violated the protocol. Correct only the protocol defect without changing its substantive discoveries, decisions, or questions: ${repair}` : "",
     rejectedResponse ? `\nRejected response to repair faithfully:\n${rejectedResponse}` : "",

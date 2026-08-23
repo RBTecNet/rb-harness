@@ -26,7 +26,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.3.2 is an executable rather than a workflow that must run inside
+RB Harness 0.3.3 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -47,7 +47,7 @@ the current shell. Verify the exact installed build with:
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.3.2
+# Both print 0.3.3
 ```
 
 Run without arguments to start the wizard:
@@ -226,6 +226,10 @@ On resume, the Harness first revalidates any successful provider response that
 was already written to the private run log. If the current protocol accepts
 it and it still matches the pending-answer state, the response is reused
 without spending another provider call.
+Interview adapters may omit `options` for `text` and `confirm` questions; the
+Harness normalizes the field to an empty list. Only `single-choice` questions
+may carry two to six choices, preventing protocol repair from inventing a
+choice for an intentionally free-form follow-up.
 
 For automation, provide answers without opening a terminal:
 

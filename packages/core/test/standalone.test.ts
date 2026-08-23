@@ -102,6 +102,21 @@ describe("standalone RB Harness", () => {
     expect(() => parseInterviewAnalysis(source("q"), [])).toThrow("2-80 ASCII");
   });
 
+  it("normalizes omitted options for text/confirm questions and rejects invented choices", () => {
+    const envelope = (question: Record<string, unknown>) => `RB_HARNESS_INTERVIEW_JSON_BEGIN\n${JSON.stringify({
+      contract: "rb-harness-interview/v1",
+      status: "needs_input",
+      summary: "One decision remains.",
+      discoveries: [], assumptions: [], unresolved: ["Decision"], answerReviews: [], questions: [question],
+    })}\nRB_HARNESS_INTERVIEW_JSON_END`;
+    const text = { id: "follow-up-1", question: "Add the missing limit.", why: "It affects admission.", type: "text" };
+    expect(parseInterviewAnalysis(envelope(text), []).questions[0]?.options).toEqual([]);
+    expect(() => parseInterviewAnalysis(envelope({ ...text, options: ["Free text"] }), []))
+      .toThrow("must not declare choices");
+    expect(() => parseInterviewAnalysis(envelope({ ...text, type: "single-choice" }), []))
+      .toThrow("needs at least two choices");
+  });
+
   it("recovers a now-valid interview envelope from a successful provider log", async () => {
     const directory = await mkdtemp(resolve(tmpdir(), "rb-harness-interview-recovery-"));
     const log = resolve(directory, "interview.log");
