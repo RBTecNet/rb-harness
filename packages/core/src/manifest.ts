@@ -1,5 +1,5 @@
 import { access, mkdir, readFile } from "node:fs/promises";
-import { basename, extname, resolve } from "node:path";
+import { basename, extname, resolve, sep } from "node:path";
 import { validateExecutionMarkdown } from "./execution-contract.js";
 import { atomicWrite, readJson, relativeProjectPath, safeProjectPath, walkFiles } from "./fs-utils.js";
 import { sha256File } from "./hash.js";
@@ -25,8 +25,22 @@ export function slugify(value: string): string {
     .slice(0, 64) || "project";
 }
 
-export function manifestPath(root: string): string {
-  return resolve(root, ".rb", "rb-manifest.json");
+function artifactDirectoryPath(root: string, artifactDirectory = ".rb"): string {
+  const projectRoot = resolve(root);
+  const directory = resolve(projectRoot, artifactDirectory);
+  if (directory === projectRoot || !directory.startsWith(`${projectRoot}${sep}`)) {
+    throw new Error(`Artifact directory must be a child of the project root: ${artifactDirectory}`);
+  }
+  return directory;
+}
+
+function physicalArtifactPath(root: string, logicalPath: string, artifactDirectory = ".rb"): string {
+  if (!logicalPath.startsWith(".rb/")) throw new Error(`Artifact path must be under .rb/: ${logicalPath}`);
+  return safeProjectPath(artifactDirectoryPath(root, artifactDirectory), logicalPath.slice(4));
+}
+
+export function manifestPath(root: string, artifactDirectory = ".rb"): string {
+  return resolve(artifactDirectoryPath(root, artifactDirectory), "rb-manifest.json");
 }
 
 function artifactKind(relativePath: string): string {
@@ -122,8 +136,8 @@ export async function initializeProject(
   return manifest;
 }
 
-export async function loadManifest(root: string): Promise<ArtifactManifest> {
-  const path = manifestPath(root);
+export async function loadManifest(root: string, artifactDirectory = ".rb"): Promise<ArtifactManifest> {
+  const path = manifestPath(root, artifactDirectory);
   try {
     await access(path);
   } catch {
@@ -154,7 +168,10 @@ export async function syncManifest(root: string): Promise<ArtifactManifest> {
   const absoluteRoot = resolve(root);
   const existing = await loadManifest(absoluteRoot);
   const rbRoot = resolve(absoluteRoot, ".rb");
-  const files = (await walkFiles(rbRoot)).filter((path) => {
+  // `.rb/runs` is append-only Ralph control-plane state, not a portable
+  // project artifact. Indexing it makes the manifest depend on a live run and
+  // can produce colliding IDs for attempt evidence.
+  const files = (await walkFiles(rbRoot, 10_000, new Set(["runs"]))).filter((path) => {
     const name = basename(path);
     return name !== "rb-manifest.json" && name !== "artifacts.tsv" && !name.includes(".tmp-");
   });
@@ -209,11 +226,15 @@ function addIssue(
   issues.push({ code, message, severity: "error", ...(path ? { path } : {}) });
 }
 
-export async function validateManifestTree(root: string): Promise<ManifestValidation> {
+export async function validateManifestTree(
+  root: string,
+  options: { artifactDirectory?: string } = {},
+): Promise<ManifestValidation> {
   const issues: ValidationIssue[] = [];
+  const artifactDirectory = options.artifactDirectory ?? ".rb";
   let manifest: ArtifactManifest;
   try {
-    manifest = await loadManifest(root);
+    manifest = await loadManifest(root, artifactDirectory);
   } catch (error) {
     addIssue(issues, "manifest.missing", error instanceof Error ? error.message : String(error));
     return { valid: false, issues };
@@ -256,7 +277,7 @@ export async function validateManifestTree(root: string): Promise<ManifestValida
     paths.add(artifact.path);
     let absolute: string;
     try {
-      absolute = safeProjectPath(root, artifact.path);
+      absolute = physicalArtifactPath(root, artifact.path, artifactDirectory);
     } catch (error) {
       addIssue(issues, "artifact.path.unsafe", error instanceof Error ? error.message : String(error), artifact.path);
       continue;
@@ -324,7 +345,7 @@ export async function validateManifestTree(root: string): Promise<ManifestValida
           if (responsive.document.applicability === "APPLICABLE" && !findingsArtifact) {
             addIssue(issues, "responsive.findings.missing", "Applicable responsive evidence requires FINDINGS.md", artifact.path);
           } else if (findingsArtifact) {
-            const findingsSource = await readFile(safeProjectPath(root, findingsArtifact.path), "utf8");
+            const findingsSource = await readFile(physicalArtifactPath(root, findingsArtifact.path, artifactDirectory), "utf8");
             for (const { candidate, findingId } of candidateFindings(responsive.document)) {
               if (!new RegExp(`(?:^|[^A-Z0-9-])${findingId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:$|[^A-Z0-9-])`, "m").test(findingsSource)) {
                 addIssue(
@@ -358,7 +379,7 @@ export async function validateManifestTree(root: string): Promise<ManifestValida
     let declarationPath: string | undefined;
     for (const path of declarationPaths) {
       try {
-        if ((await readFile(safeProjectPath(root, path), "utf8")).includes(responsiveContract)) {
+        if ((await readFile(physicalArtifactPath(root, path, artifactDirectory), "utf8")).includes(responsiveContract)) {
           declarationPath = path;
           break;
         }
@@ -381,9 +402,9 @@ export async function validateManifestTree(root: string): Promise<ManifestValida
 
 export async function resolveArtifacts(
   root: string,
-  options: { kind?: string; status?: ArtifactStatus } = {},
+  options: { kind?: string; status?: ArtifactStatus; artifactDirectory?: string } = {},
 ): Promise<ArtifactRecord[]> {
-  const validation = await validateManifestTree(root);
+  const validation = await validateManifestTree(root, { artifactDirectory: options.artifactDirectory });
   if (!validation.valid || !validation.manifest) {
     const details = validation.issues.map((entry) => `${entry.code}: ${entry.message}`).join("; ");
     throw new Error(`Artifact tree is invalid: ${details}`);

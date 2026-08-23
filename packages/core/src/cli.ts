@@ -40,7 +40,7 @@ function fail(error: unknown): never {
 program
   .name("rb-harness")
   .description("Deterministic contracts and artifact discovery for RB Harness")
-  .version("0.1.5");
+  .version("0.1.6");
 
 const contract = program.command("contract").description("Validate RB execution documents");
 contract
@@ -239,10 +239,11 @@ const tree = program.command("tree").description("Validate and resolve artifact 
 tree
   .command("validate")
   .argument("[root]", "project root", ".")
+  .option("--artifacts-dir <path>", "physical artifact directory relative to the project", ".rb")
   .option("--json", "emit JSON")
-  .action(async (root: string, options: { json?: boolean }) => {
+  .action(async (root: string, options: { artifactsDir: string; json?: boolean }) => {
     try {
-      const result = await validateManifestTree(root);
+      const result = await validateManifestTree(root, { artifactDirectory: options.artifactsDir });
       printIssues(result.issues, Boolean(options.json));
       if (!result.valid) process.exitCode = 1;
       else if (!options.json) process.stdout.write(`OK: artifact tree is valid (${result.manifest?.artifacts.length ?? 0} artifacts)\n`);
@@ -254,12 +255,13 @@ tree
 tree
   .command("resolve")
   .argument("[root]", "project root", ".")
+  .option("--artifacts-dir <path>", "physical artifact directory relative to the project", ".rb")
   .option("--kind <kind>", "artifact kind", "execution-plan")
   .option("--status <status>", "artifact status", "ready")
   .option("--format <format>", "json, tsv, or paths", "paths")
-  .action(async (root: string, options: { kind: string; status: ArtifactStatus; format: string }) => {
+  .action(async (root: string, options: { artifactsDir: string; kind: string; status: ArtifactStatus; format: string }) => {
     try {
-      const artifacts = await resolveArtifacts(root, { kind: options.kind, status: options.status });
+      const artifacts = await resolveArtifacts(root, { kind: options.kind, status: options.status, artifactDirectory: options.artifactsDir });
       if (options.format === "json") {
         process.stdout.write(`${JSON.stringify(artifacts, null, 2)}\n`);
       } else if (options.format === "tsv") {

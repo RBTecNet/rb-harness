@@ -143,12 +143,18 @@ node plugins/rb-harness/scripts/rb-harness.cjs project init . --name "My Project
 node plugins/rb-harness/scripts/rb-harness.cjs manifest sync .
 node plugins/rb-harness/scripts/rb-harness.cjs tree validate .
 node plugins/rb-harness/scripts/rb-harness.cjs tree resolve . --format tsv
+# Validate a physically relocated RB artifact tree without rewriting its logical paths
+node plugins/rb-harness/scripts/rb-harness.cjs tree validate . --artifacts-dir .spec
+node plugins/rb-harness/scripts/rb-harness.cjs tree resolve . --artifacts-dir .spec --format tsv
 node plugins/rb-harness/scripts/rb-harness.cjs inspect .
 ```
 
-`tree resolve --format tsv` reads `.rb/rb-manifest.json` and emits a stable,
-Bash-friendly list of ready execution plans. RB Ralph can consume that output
-without inferring the artifact layout.
+`tree resolve --format tsv` reads `.rb/rb-manifest.json` by default and emits a
+stable, Bash-friendly list of ready execution plans. `--artifacts-dir` changes
+only the physical root: manifest paths remain logical `.rb/...` contract paths,
+so relocating a package does not mutate its identity or hashes. RB Ralph can
+consume that output without inferring the artifact layout. Manifest-less
+compatibility importers and the `--fragments-dir` alias live in RB Ralph.
 
 ## RB Ralph discovery contract
 

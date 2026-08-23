@@ -47,9 +47,14 @@ export async function readJson<T>(path: string): Promise<T> {
   return JSON.parse(await readFile(path, "utf8")) as T;
 }
 
-export async function walkFiles(root: string, maxFiles = 10_000): Promise<string[]> {
+export async function walkFiles(
+  root: string,
+  maxFiles = 10_000,
+  excludedRootDirectories: ReadonlySet<string> = new Set(),
+): Promise<string[]> {
   const output: string[] = [];
-  async function visit(directory: string): Promise<void> {
+  const absoluteRoot = resolve(root);
+  async function visit(directory: string, atRoot = false): Promise<void> {
     if (output.length >= maxFiles) return;
     const entries = await readdir(directory, { withFileTypes: true });
     entries.sort((left, right) => left.name.localeCompare(right.name));
@@ -58,12 +63,12 @@ export async function walkFiles(root: string, maxFiles = 10_000): Promise<string
       if (entry.isSymbolicLink()) continue;
       const path = resolve(directory, entry.name);
       if (entry.isDirectory()) {
-        if (!IGNORED_DIRECTORIES.has(entry.name)) await visit(path);
+        if (!IGNORED_DIRECTORIES.has(entry.name) && !(atRoot && excludedRootDirectories.has(entry.name))) await visit(path);
       } else if (entry.isFile()) {
         output.push(path);
       }
     }
   }
-  await visit(resolve(root));
+  await visit(absoluteRoot, true);
   return output;
 }

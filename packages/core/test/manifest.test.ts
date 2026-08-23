@@ -1,4 +1,4 @@
-import { access, cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, mkdtemp, readFile, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -86,6 +86,36 @@ describe("artifact manifest", () => {
       expect.objectContaining({ kind: "regression-specification", path: ".rb/evolutions/service-order-stock/REGRESSION_MATRIX.md" }),
     ]));
     expect((await validateManifestTree(root)).valid).toBe(true);
+  });
+
+  it("never indexes Ralph runtime state under .rb/runs", async () => {
+    const root = await project();
+    const runRoot = resolve(root, ".rb/runs/example-execution-deadbeef1234");
+    await mkdir(resolve(runRoot, "evidence"), { recursive: true });
+    await mkdir(resolve(runRoot, "prompts"), { recursive: true });
+    await writeFile(resolve(runRoot, "evidence/P01-attempt-1.json"), "{}\n", "utf8");
+    await writeFile(resolve(runRoot, "prompts/P01-manager.md"), "# Runtime prompt\n", "utf8");
+
+    const manifest = await syncManifest(root);
+
+    expect(manifest.artifacts.some((artifact) => artifact.path.startsWith(".rb/runs/"))).toBe(false);
+    expect((await validateManifestTree(root)).valid).toBe(true);
+  });
+
+  it("validates and resolves a compatible manifest from a renamed artifact directory", async () => {
+    const root = await project();
+    await rename(resolve(root, ".rb"), resolve(root, ".spec"));
+
+    expect((await validateManifestTree(root)).valid).toBe(false);
+    expect((await validateManifestTree(root, { artifactDirectory: ".spec" })).valid).toBe(true);
+    const artifacts = await resolveArtifacts(root, {
+      artifactDirectory: ".spec",
+      kind: "execution-plan",
+      status: "ready",
+    });
+    expect(artifacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "init-minimal-execution", path: ".rb/init/PHASES.md" }),
+    ]));
   });
 
   it("grandfathers a legacy narrative responsive inventory without a contract declaration", async () => {
