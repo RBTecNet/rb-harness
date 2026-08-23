@@ -8,7 +8,7 @@ import { providerInvocation, runProvider } from "../src/harness-provider.js";
 import { inspectProjectInventory } from "../src/harness-inventory.js";
 import { composeHarnessSplash, harnessBrand, renderHarnessSplashFrame } from "../src/harness-splash.js";
 import { resolveWorkflowResourceRoot } from "../src/standalone-resources.js";
-import { runStandaloneWorkflow } from "../src/standalone-runner.js";
+import { nextInterviewRound, normalizeInterviewAnswer, runStandaloneWorkflow } from "../src/standalone-runner.js";
 import { assertNoEnvironmentSecrets, prepareGenerationWorkspace, recoverInterruptedPublication } from "../src/harness-workspace.js";
 import { validateManifestTree } from "../src/manifest.js";
 
@@ -17,6 +17,22 @@ const failingProvider = resolve(process.cwd(), "test/fixtures/standalone/failing
 const repairingProvider = resolve(process.cwd(), "test/fixtures/standalone/repairing-provider.mjs");
 
 describe("standalone RB Harness", () => {
+  it("continues durable and legacy interviews without reusing prior round logs", () => {
+    expect(nextInterviewRound({})).toBe(1);
+    expect(nextInterviewRound({ diagnostic: "interview exceeded six adaptive rounds" })).toBe(7);
+    expect(nextInterviewRound({ interviewRound: 7 })).toBe(8);
+    expect(nextInterviewRound({ interviewRound: 7, activeInterviewRound: 8 })).toBe(8);
+  });
+
+  it("normalizes recommendation shortcuts and numbered choices before persistence", () => {
+    const textQuestion = {
+      id: "limits", question: "Limits?", why: "Capacity", type: "text" as const, options: [], recommendation: "10 tokens; 1 MiB",
+    };
+    expect(normalizeInterviewAnswer(textQuestion, "use a recomendação")).toBe("10 tokens; 1 MiB");
+    expect(normalizeInterviewAnswer(textQuestion, "usar a recomendação")).toBe("10 tokens; 1 MiB");
+    expect(normalizeInterviewAnswer({ ...textQuestion, type: "single-choice", options: ["A", "B"] }, "2")).toBe("B");
+  });
+
   it("follows an installed bin symlink to the packaged workflow resources", async () => {
     const installation = await mkdtemp(resolve(tmpdir(), "rb-harness-linked-install-"));
     const packagedCli = resolve(installation, "lib/node_modules/@rb-harness/core/dist/cli.js");
@@ -217,6 +233,8 @@ describe("standalone RB Harness", () => {
       firstOutputTimeoutSeconds: 5,
     });
     expect(first.status).toBe("complete");
+    expect(first.interviewRound).toBe(2);
+    expect(first.activeInterviewRound).toBeUndefined();
     expect(first.artifactAudits?.map((audit) => audit.status)).toEqual(["pass"]);
     expect((await validateManifestTree(project, { artifactDirectory: ".spec" })).valid).toBe(true);
     expect(await readFile(resolve(project, ".spec/features/standalone-test/REQUEST.md"), "utf8")).toContain("isolated requested feature");

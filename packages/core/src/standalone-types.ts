@@ -126,6 +126,8 @@ export interface HarnessRunState {
   requestHash: string;
   provider: ProviderConfiguration;
   answers: InterviewAnswer[];
+  interviewRound?: number;
+  activeInterviewRound?: number;
   analysis?: InterviewAnalysis;
   artifactAudits?: ArtifactAuditRecord[];
   inventory: ProjectInventory;

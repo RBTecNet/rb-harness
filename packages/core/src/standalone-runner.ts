@@ -33,6 +33,16 @@ import {
   type StandaloneRunOptions,
 } from "./standalone-types.js";
 
+const MAX_ADAPTIVE_INTERVIEW_ROUNDS = 128;
+
+export function nextInterviewRound(
+  state: Pick<HarnessRunState, "interviewRound" | "activeInterviewRound" | "diagnostic">,
+): number {
+  if (state.activeInterviewRound) return state.activeInterviewRound;
+  const legacyCompletedRounds = state.diagnostic === "interview exceeded six adaptive rounds" ? 6 : 0;
+  return Math.max(state.interviewRound ?? 0, legacyCompletedRounds) + 1;
+}
+
 function hash(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -105,7 +115,14 @@ async function answerQuestion(
   } finally {
     resumeHarnessDashboard();
   }
-  if (/^(?:use recommendation|usar recomenda[cç][aã]o)$/i.test(answer) && question.recommendation) answer = question.recommendation;
+  return normalizeInterviewAnswer(question, answer);
+}
+
+export function normalizeInterviewAnswer(question: InterviewQuestion, suppliedAnswer: string): string {
+  let answer = suppliedAnswer.trim();
+  if (/^(?:use (?:the |a )?recommendation|use a recomenda[cç][aã]o|usar (?:a )?recomenda[cç][aã]o)$/i.test(answer) && question.recommendation) {
+    answer = question.recommendation;
+  }
   if (question.type === "single-choice" && /^[1-9][0-9]*$/.test(answer)) {
     const selected = question.options[Number(answer) - 1];
     if (!selected) throw new Error(`answer for ${question.id} selects an unknown option`);
@@ -119,6 +136,28 @@ async function answerQuestion(
   return answer.trim();
 }
 
+async function collectInterviewAnswers(
+  state: HarnessRunState,
+  questions: InterviewQuestion[],
+  provided: Record<string, string>,
+  terminal: Interface | undefined,
+): Promise<void> {
+  const unanswered = questions.filter((question) =>
+    !state.answers.some((answer) => answer.questionId === question.id));
+  for (let index = 0; index < unanswered.length; index += 1) {
+    const question = unanswered[index]!;
+    const rawAnswer = await answerQuestion(question, index, unanswered.length, provided, terminal);
+    state.answers.push({
+      questionId: question.id,
+      question: question.question,
+      rawAnswer,
+      disposition: "PENDING",
+      answeredAt: new Date().toISOString(),
+    });
+    await writeRunState(state);
+  }
+}
+
 async function interview(
   state: HarnessRunState,
   runRoot: string,
@@ -129,8 +168,31 @@ async function interview(
     ? createInterface({ input, output })
     : undefined;
   try {
-    for (let round = 1; round <= 6; round += 1) {
-      process.stdout.write(`[rb-harness] analisando lacunas da entrevista (rodada ${round})...\n`);
+    let normalizedCarriedAnswer = false;
+    for (const question of state.analysis?.questions ?? []) {
+      const answer = state.answers.find((entry) => entry.questionId === question.id && entry.disposition === "PENDING");
+      if (!answer) continue;
+      const normalized = normalizeInterviewAnswer(question, answer.rawAnswer);
+      if (normalized !== answer.rawAnswer) {
+        answer.rawAnswer = normalized;
+        normalizedCarriedAnswer = true;
+      }
+    }
+    if (normalizedCarriedAnswer) await writeRunState(state);
+    const carriedQuestions = state.analysis?.status === "needs_input"
+      ? state.analysis.questions.filter((question) =>
+        !state.answers.some((answer) => answer.questionId === question.id))
+      : [];
+    if (carriedQuestions.length) {
+      process.stdout.write(`[rb-harness] retomando ${carriedQuestions.length} pergunta(s) ainda não respondida(s) do checkpoint anterior.\n`);
+      await collectInterviewAnswers(state, carriedQuestions, provided, terminal);
+    }
+    const firstRound = nextInterviewRound(state);
+    for (let round = firstRound; round <= MAX_ADAPTIVE_INTERVIEW_ROUNDS; round += 1) {
+      state.activeInterviewRound = round;
+      state.diagnostic = undefined;
+      await writeRunState(state);
+      process.stdout.write(`[rb-harness] analisando lacunas da entrevista (rodada ${round}/${MAX_ADAPTIVE_INTERVIEW_ROUNDS})...\n`);
       state.analysis = await requestInterviewAnalysis(
         state,
         runRoot,
@@ -138,6 +200,8 @@ async function interview(
         options.timeoutSeconds,
         options.firstOutputTimeoutSeconds,
       );
+      state.interviewRound = round;
+      state.activeInterviewRound = undefined;
       applyAnswerReviews(state);
       state.diagnostic = undefined;
       await writeRunState(state);
@@ -151,23 +215,10 @@ async function interview(
       if (options.questionMode === "batch") {
         process.stdout.write(`\nO modelo encontrou ${state.analysis.questions.length} decisões materiais nesta rodada.\n`);
       }
-      const questions = state.analysis.questions;
-      for (let index = 0; index < questions.length; index += 1) {
-        const question = questions[index]!;
-        const rawAnswer = await answerQuestion(question, index, questions.length, provided, terminal);
-        const answer: InterviewAnswer = {
-          questionId: question.id,
-          question: question.question,
-          rawAnswer,
-          disposition: "PENDING",
-          answeredAt: new Date().toISOString(),
-        };
-        state.answers.push(answer);
-        await writeRunState(state);
-      }
+      await collectInterviewAnswers(state, state.analysis.questions, provided, terminal);
     }
     state.status = "blocked";
-    state.diagnostic = "interview exceeded six adaptive rounds";
+    state.diagnostic = `interview exceeded the safety ceiling of ${MAX_ADAPTIVE_INTERVIEW_ROUNDS} adaptive rounds`;
     await writeRunState(state);
     throw new Error(state.diagnostic);
   } finally {

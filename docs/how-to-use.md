@@ -123,6 +123,13 @@ rb-harness evolve --project . --file change.md \
 rb-harness resume --project . --dashboard
 ```
 
+The adaptive interview budget is 128 rounds across the complete run, not per
+resume. Round identity and unanswered questions are persisted: after power
+loss or cancellation, resume continues the active round or presents remaining
+questions before making another provider call. Each fresh call also receives
+the prior validated checkpoint as navigation so settled repository discovery
+does not need to be repeated from scratch.
+
 ## Independent artifact quality gate
 
 The writer does not approve its own documentation. After each structurally

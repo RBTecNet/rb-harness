@@ -170,6 +170,8 @@ function interviewPrompt(
     rejectedResponse ? `\nRejected response to repair faithfully:\n${rejectedResponse}` : "",
     `\nWorkflow: ${state.workflow}`,
     `\nDeveloper request:\n${state.request}`,
+    "\nPrior validated interview checkpoint is navigation, not source authority. Preserve settled discoveries and decisions; re-open repository evidence only when a pending answer materially changes them.",
+    `\nPrior validated interview checkpoint:\n${state.analysis ? JSON.stringify(state.analysis) : "none"}`,
     `\nExisting artifact inventory:\n${JSON.stringify(state.inventory)}`,
     `\nAll interview answers:\n${JSON.stringify(state.answers)}`,
     `\nAnswers requiring classification in this round:\n${JSON.stringify(pending)}`,

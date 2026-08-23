@@ -26,7 +26,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.3.3 is an executable rather than a workflow that must run inside
+RB Harness 0.3.4 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -47,7 +47,7 @@ the current shell. Verify the exact installed build with:
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.3.3
+# Both print 0.3.4
 ```
 
 Run without arguments to start the wizard:
@@ -230,6 +230,15 @@ Interview adapters may omit `options` for `text` and `confirm` questions; the
 Harness normalizes the field to an empty list. Only `single-choice` questions
 may carry two to six choices, preventing protocol repair from inventing a
 choice for an intentionally free-form follow-up.
+
+Adaptive interviews have a 128-round run-wide safety ceiling (up to 1,024
+distinct questions at the per-round contract limit). The completed and active
+round numbers are durable, so resume continues at the correct round without
+overwriting prior logs. A prior validated checkpoint is supplied as navigation
+to each fresh interview call, reducing repeated repository discovery while
+keeping code and tests as source authority. If input is interrupted partway
+through a question batch, resume presents the unanswered questions before
+starting another provider call.
 
 For automation, provide answers without opening a terminal:
 
