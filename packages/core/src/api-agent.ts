@@ -111,7 +111,9 @@ function runCapture(command: string, args: string[]): Promise<{ code: number; ou
   });
 }
 
-async function authorization(options: DirectApiAgentOptions): Promise<{ headers: Record<string, string>; protocol: string }> {
+async function authorization(
+  options: Pick<DirectApiAgentOptions, "provider" | "credential">,
+): Promise<{ headers: Record<string, string>; protocol: string; credentialId: string }> {
   const credential = await resolveCredential(options.provider, options.credential);
   if (credential.record.protocol === "google-adc") {
     let token: { code: number; output: string };
@@ -121,6 +123,7 @@ async function authorization(options: DirectApiAgentOptions): Promise<{ headers:
     const projectId = credential.record.attributes?.projectId;
     return {
       protocol: credential.record.protocol,
+      credentialId: credential.record.id,
       headers: {
         authorization: `Bearer ${token.output.trim()}`,
         ...(projectId ? { "x-goog-user-project": projectId } : {}),
@@ -129,17 +132,26 @@ async function authorization(options: DirectApiAgentOptions): Promise<{ headers:
   }
   if (!credential.secret) throw new Error(`credential ${credential.record.id} has no usable secret`);
   if (options.provider === "anthropic") {
-    return { protocol: credential.record.protocol, headers: { "x-api-key": credential.secret } };
+    return { protocol: credential.record.protocol, credentialId: credential.record.id, headers: { "x-api-key": credential.secret } };
   }
-  return { protocol: credential.record.protocol, headers: { authorization: `Bearer ${credential.secret}` } };
+  return {
+    protocol: credential.record.protocol,
+    credentialId: credential.record.id,
+    headers: { authorization: `Bearer ${credential.secret}` },
+  };
 }
 
-async function requestJson(url: string, headers: Record<string, string>, body: unknown): Promise<Record<string, unknown>> {
+async function requestJson(
+  url: string,
+  headers: Record<string, string>,
+  body: unknown,
+  timeoutMilliseconds = 15 * 60 * 1000,
+): Promise<Record<string, unknown>> {
   const response = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(15 * 60 * 1000),
+    signal: AbortSignal.timeout(timeoutMilliseconds),
   });
   const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
   if (!response.ok) {
@@ -149,6 +161,94 @@ async function requestJson(url: string, headers: Record<string, string>, body: u
     throw new Error(`provider HTTP ${response.status}: ${message}${retry ? `; retry after ${retry}s` : ""}`);
   }
   return payload;
+}
+
+export interface DirectProviderProbeOptions {
+  provider: DirectProviderId;
+  model: string;
+  effort?: string;
+  credential?: string;
+  timeoutSeconds?: number;
+}
+
+export interface DirectProviderProbeResult {
+  provider: DirectProviderId;
+  model: string;
+  protocol: string;
+  credentialId: string;
+  latencyMilliseconds: number;
+  response: string;
+  pong: boolean;
+  totalTokens: number;
+}
+
+function compactProbeResponse(value: string): string {
+  return value.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 240);
+}
+
+export async function probeDirectProvider(options: DirectProviderProbeOptions): Promise<DirectProviderProbeResult> {
+  if (!options.model?.trim()) throw new Error("provider connection test requires --model <provider-model-id>");
+  const timeoutSeconds = options.timeoutSeconds ?? 60;
+  if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 900) {
+    throw new Error("provider connection test timeout must be an integer between 1 and 900 seconds");
+  }
+  const definition = directProvider(options.provider);
+  const auth = await authorization({ provider: options.provider, credential: options.credential });
+  const prompt = "PING. Reply with exactly PONG and nothing else.";
+  const startedAt = Date.now();
+  let payload: Record<string, unknown>;
+  if (definition.dialect === "anthropic-messages") {
+    const body: Record<string, unknown> = {
+      model: options.model,
+      max_tokens: 64,
+      messages: [{ role: "user", content: prompt }],
+    };
+    if (options.effort) body.output_config = { effort: options.effort };
+    payload = await requestJson(definition.endpoint, {
+      ...auth.headers,
+      "anthropic-version": "2023-06-01",
+    }, body, timeoutSeconds * 1000);
+  } else {
+    const body: Record<string, unknown> = {
+      model: options.model,
+      messages: [{ role: "user", content: prompt }],
+      stream: false,
+    };
+    if (options.effort) body.reasoning_effort = options.effort;
+    payload = await requestJson(definition.endpoint, {
+      ...auth.headers,
+      ...(options.provider === "openrouter" ? { "http-referer": "https://github.com/RBTecNet/rb-harness", "x-openrouter-title": "RB Provider Test" } : {}),
+    }, body, timeoutSeconds * 1000);
+  }
+  const latencyMilliseconds = Date.now() - startedAt;
+  let responseText = "";
+  let totalTokens = 0;
+  if (definition.dialect === "anthropic-messages") {
+    const content = Array.isArray(payload.content) ? payload.content.map(parseObject) : [];
+    responseText = content.filter((block) => block.type === "text").map((block) => String(block.text ?? "")).join(" ");
+    const usage = parseObject(payload.usage);
+    totalTokens = number(usage.input_tokens) + number(usage.output_tokens);
+    if (!content.length) throw new Error("provider connection test returned no Anthropic content blocks");
+  } else {
+    const choices = Array.isArray(payload.choices) ? payload.choices : [];
+    const message = parseObject(parseObject(choices[0]).message);
+    if (!Object.keys(message).length) throw new Error("provider connection test returned no assistant message");
+    responseText = typeof message.content === "string"
+      ? message.content
+      : String(message.reasoning_content ?? "");
+    totalTokens = number(parseObject(payload.usage).total_tokens);
+  }
+  const response = compactProbeResponse(responseText) || "[assistant response received]";
+  return {
+    provider: options.provider,
+    model: options.model,
+    protocol: auth.protocol,
+    credentialId: auth.credentialId,
+    latencyMilliseconds,
+    response,
+    pong: /\bPONG\b/i.test(response),
+    totalTokens,
+  };
 }
 
 function openAiTools(context: ApiAgentToolContext): unknown[] {

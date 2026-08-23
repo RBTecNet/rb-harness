@@ -26,7 +26,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.3.0 is an executable rather than a workflow that must run inside
+RB Harness 0.3.1 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -47,7 +47,7 @@ the current shell. Verify the exact installed build with:
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.3.0
+# Both print 0.3.1
 ```
 
 Run without arguments to start the wizard:
@@ -96,6 +96,30 @@ rb-ralph --login
 rb-harness auth list
 rb-harness auth logout deepseek:pessoal
 ```
+
+Inspect the complete provider registry without exposing secrets, or verify one
+saved API credential/model with a single bounded `PING`/`PONG` request. Neither
+command starts a Harness workflow, creates run state, or writes artifacts:
+
+```bash
+rb-harness provider list
+rb-harness provider list --json
+
+rb-harness provider test \
+  --provider deepseek --model deepseek-v4-pro \
+  --credential pessoal --timeout 60
+```
+
+`provider list` distinguishes external CLI login, per-command custom adapters,
+configured native APIs, and native APIs without credentials. Its JSON contract
+is `rb-provider-list/v1`. `provider test --json` emits
+`rb-provider-test/v1`, including provider/model, credential ID, protocol,
+latency, bounded reply text, PONG recognition, and token usage when reported.
+Only safe credential metadata is returned, including which entry is the
+provider default; keys and OAuth tokens remain in the vault.
+`--credential` accepts the displayed full ID, the original label, or its
+normalized slug (for example, all of `deepseek:deepseek-api-oficial`,
+`DeepSeek Api Oficial`, and `deepseek-api-oficial`).
 
 The wizard first lists providers and then only the authentication protocols
 implemented for that provider. API-key input is hidden. OpenRouter OAuth uses

@@ -162,23 +162,31 @@ export async function saveCredential(input: {
   return record;
 }
 
-export async function listCredentials(provider?: DirectProviderId): Promise<Array<Omit<CredentialRecord, "secret">>> {
+export async function listCredentials(
+  provider?: DirectProviderId,
+): Promise<Array<Omit<CredentialRecord, "secret"> & { default: boolean }>> {
   const document = await loadDocument();
   return document.credentials
     .filter((entry) => !provider || entry.provider === provider)
-    .map(({ secret: _secret, ...entry }) => entry);
+    .map(({ secret: _secret, ...entry }) => ({
+      ...entry,
+      default: document.defaults[entry.provider] === entry.id,
+    }));
 }
 
 export async function resolveCredential(provider: DirectProviderId, selector?: string): Promise<ResolvedCredential> {
   const document = await loadDocument();
   const candidates = document.credentials.filter((entry) => entry.provider === provider);
+  const normalizedSelectorId = selector ? credentialId(provider, selector) : undefined;
   const record = selector
-    ? candidates.find((entry) => entry.id === selector || entry.label === selector)
+    ? candidates.find((entry) => entry.id === selector || entry.label === selector || entry.id === normalizedSelectorId)
     : candidates.find((entry) => entry.id === document.defaults[provider]) ?? (candidates.length === 1 ? candidates[0] : undefined);
   if (!record) {
-    const hint = candidates.length > 1 && !selector
-      ? `multiple credentials exist (${candidates.map((entry) => entry.label).join(", ")}); select one with --credential`
-      : `run rb-harness --login and configure ${provider}`;
+    const hint = selector && candidates.length
+      ? `selector '${selector}' did not match; available IDs: ${candidates.map((entry) => entry.id).join(", ")}`
+      : candidates.length > 1 && !selector
+        ? `multiple credentials exist (${candidates.map((entry) => entry.id).join(", ")}); select one with --credential`
+        : `run rb-harness --login and configure ${provider}`;
     throw new Error(`no usable credential for ${provider}: ${hint}`);
   }
   const { secret: encrypted, ...publicRecord } = record;

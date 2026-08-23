@@ -60,6 +60,22 @@ rb-harness auth list
 rb-harness auth logout deepseek:pessoal
 ```
 
+List supported providers and safe configuration status, or test one direct API
+connection without starting a documentation workflow:
+
+```bash
+rb-harness provider list
+rb-harness provider list --json
+
+rb-harness provider test --provider openrouter \
+  --model vendor/model --credential trabalho --timeout 60
+```
+
+The test sends one minimal `PING` and reports the reply, latency, selected
+credential ID/protocol, and provider-reported token count. It never writes
+artifacts or run state. Add `--json` for the stable `rb-provider-test/v1`
+result.
+
 The login first asks for a provider, then shows only the protocols implemented
 for it. OpenAI, Anthropic, DeepSeek, and MiniMax accept API keys; Gemini accepts
 an API key or Google Application Default Credentials; OpenRouter accepts an API

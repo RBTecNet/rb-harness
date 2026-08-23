@@ -10,6 +10,7 @@ import { runDirectApiAgentCli } from "./api-agent.js";
 import { PROVIDER_HELP, isCliProvider, isDirectProvider } from "./provider-registry.js";
 import { finishHarnessDashboard, startHarnessDashboard } from "./harness-dashboard.js";
 import { HARNESS_VERSION } from "./version.js";
+import { printProviderList, testProviderConnection } from "./provider-cli.js";
 import { listRunStates } from "./harness-state.js";
 import { runHarnessWizard } from "./harness-wizard.js";
 import {
@@ -511,6 +512,30 @@ auth.command("logout")
   .description("Remove one saved credential")
   .argument("<id-or-label>")
   .action(async (selector: string) => logoutCredential(selector));
+
+const providerCommands = program.command("provider").description("List and test supported providers without starting a workflow");
+providerCommands.command("list")
+  .description("List CLI/API providers and safe saved-credential metadata")
+  .option("--json", "emit rb-provider-list/v1 JSON")
+  .action(async (options: { json?: boolean }) => printProviderList(Boolean(options.json)));
+providerCommands.command("test")
+  .description("Send a minimal PING/PONG request to one direct API provider")
+  .requiredOption("--provider <name>", "openai, anthropic, gemini, deepseek, minimax, or openrouter")
+  .requiredOption("--model <id>", "exact provider model ID")
+  .option("--credential <id-or-label>", "saved credential selector")
+  .option("--effort <level>", "optional provider reasoning effort")
+  .option("--timeout <seconds>", "connection-test timeout (1-900)", "60")
+  .option("--json", "emit rb-provider-test/v1 JSON")
+  .action(async (options: {
+    provider: string; model: string; credential?: string; effort?: string; timeout: string; json?: boolean;
+  }) => testProviderConnection({
+    provider: options.provider,
+    model: options.model,
+    credential: options.credential,
+    effort: options.effort,
+    timeout: Number(options.timeout),
+    json: Boolean(options.json),
+  }));
 
 program.command("_provider-run")
   .description("Internal direct API agent adapter")

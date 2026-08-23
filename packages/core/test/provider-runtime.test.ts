@@ -3,10 +3,11 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { apiAgentToolDefinitions, executeApiAgentTool } from "../src/api-agent-tools.js";
-import { runDirectApiAgent } from "../src/api-agent.js";
+import { probeDirectProvider, runDirectApiAgent } from "../src/api-agent.js";
 import { credentialStorePaths, listCredentials, resolveCredential, saveCredential } from "../src/credential-store.js";
 import { renderHarnessDashboard } from "../src/harness-dashboard.js";
 import { providerInvocation } from "../src/harness-provider.js";
+import { providerListValue } from "../src/provider-cli.js";
 
 const originalCredentialHome = process.env.RB_CREDENTIAL_HOME;
 
@@ -29,6 +30,32 @@ describe("shared direct-provider credentials", () => {
       expect.objectContaining({ id: "deepseek:pessoal", provider: "deepseek", protocol: "api-key" }),
     ]);
     expect((await resolveCredential("deepseek", "pessoal")).secret).toBe("sk-secret-value-123456789");
+    expect((await resolveCredential("deepseek", "deepseek:pessoal")).secret).toBe("sk-secret-value-123456789");
+  });
+
+  test("accepts the normalized credential slug and reports valid IDs for a mismatch", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "rb-provider-selector-"));
+    process.env.RB_CREDENTIAL_HOME = root;
+    await saveCredential({ provider: "deepseek", protocol: "api-key", label: "DeepSeek Api Oficial", secret: "selector-secret-for-test" });
+
+    expect((await resolveCredential("deepseek", "deepseek-api-oficial")).secret).toBe("selector-secret-for-test");
+    await expect(resolveCredential("deepseek", "inexistente"))
+      .rejects.toThrow("available IDs: deepseek:deepseek-api-oficial");
+  });
+
+  test("lists provider configuration without returning secret material", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "rb-provider-list-"));
+    process.env.RB_CREDENTIAL_HOME = root;
+    await saveCredential({ provider: "openrouter", protocol: "api-key", label: "trabalho", secret: "openrouter-secret-for-test" });
+
+    const value = await providerListValue();
+    expect(value.contract).toBe("rb-provider-list/v1");
+    expect(value.providers.find((entry) => entry.id === "codex")).toEqual(expect.objectContaining({ configuration: "external-login" }));
+    expect(value.providers.find((entry) => entry.id === "openrouter")).toEqual(expect.objectContaining({
+      configuration: "configured",
+      credentials: [expect.objectContaining({ id: "openrouter:trabalho", protocol: "api-key", default: true })],
+    }));
+    expect(JSON.stringify(value)).not.toContain("openrouter-secret-for-test");
   });
 });
 
@@ -93,6 +120,28 @@ describe("local API agent policy", () => {
     expect(requests).toHaveLength(2);
     expect(JSON.stringify(requests[1])).toContain("README.md");
     expect(JSON.stringify(requests[1])).toContain("reasoning_content");
+  });
+
+  test("probes a direct provider with one bounded PING/PONG request", async () => {
+    const auth = await mkdtemp(resolve(tmpdir(), "rb-provider-probe-auth-"));
+    process.env.RB_CREDENTIAL_HOME = auth;
+    await saveCredential({ provider: "openai", protocol: "api-key", label: "teste", secret: "openai-secret-for-test" });
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      expect(new Headers(init.headers).get("authorization")).toBe("Bearer openai-secret-for-test");
+      expect(String(init.body)).toContain("PING");
+      return new Response(JSON.stringify({
+        choices: [{ message: { role: "assistant", content: "PONG" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 8, completion_tokens: 1, total_tokens: 9 },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(probeDirectProvider({ provider: "openai", model: "test-model", credential: "teste", timeoutSeconds: 30 }))
+      .resolves.toEqual(expect.objectContaining({
+        provider: "openai", model: "test-model", credentialId: "openai:teste", protocol: "api-key",
+        response: "PONG", pong: true, totalTokens: 9,
+      }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   test("runs an Anthropic Messages tool loop with API-key headers and read-only tools", async () => {
