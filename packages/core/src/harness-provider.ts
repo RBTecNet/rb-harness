@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { ProviderConfiguration } from "./standalone-types.js";
+import { isDirectProvider } from "./provider-registry.js";
+import { emitHarnessDashboard, harnessDashboardActive } from "./harness-dashboard.js";
 
 export type ProviderMode = "interview" | "generation" | "audit";
 
@@ -67,6 +69,22 @@ export function providerInvocation(
     delete environment.CLAUDECODE;
     return { command: process.env.RB_HARNESS_CLAUDE_BIN ?? "claude", args, environment };
   }
+  if (isDirectProvider(configuration.provider)) {
+    const role = mode === "generation" ? "harness-generation" : mode === "audit" ? "harness-audit" : "harness-interview";
+    const script = process.argv[1];
+    if (!script) throw new Error("could not resolve the installed RB Harness executable for the direct API runtime");
+    const args = [
+      script, "_provider-run",
+      "--provider", configuration.provider,
+      "--model", model,
+      "--role", role,
+      "--project", projectRoot,
+      "--permission", "protected",
+    ];
+    if (effort) args.push("--effort", effort);
+    if (configuration.credential) args.push("--credential", configuration.credential);
+    return { command: process.execPath, args, environment };
+  }
   const args = ["run", "--dir", projectRoot];
   if (model) args.push("--model", model);
   if (effort) args.push("--variant", effort);
@@ -119,6 +137,12 @@ async function writeProviderLog(
 
 export async function runProvider(options: ProviderRunOptions): Promise<ProviderRunResult> {
   const invocation = providerInvocation(options.configuration, options.mode, options.projectRoot);
+  emitHarnessDashboard({
+    type: "provider-start",
+    provider: options.configuration.provider,
+    model: options.configuration.model || "provider-default",
+    mode: options.mode,
+  });
   await mkdir(dirname(options.logPath), { recursive: true });
   const started = Date.now();
   let firstOutputAt: number | undefined;
@@ -150,7 +174,7 @@ export async function runProvider(options: ProviderRunOptions): Promise<Provider
     const firstTimer = options.firstOutputTimeoutSeconds > 0
       ? setTimeout(() => stop(`provider produced no output within ${options.firstOutputTimeoutSeconds}s`), options.firstOutputTimeoutSeconds * 1000)
       : undefined;
-    const showProgress = Boolean(options.streamOutput || process.stderr.isTTY);
+    const showProgress = !harnessDashboardActive() && Boolean(options.streamOutput || process.stderr.isTTY);
     const heartbeat = showProgress ? setInterval(() => {
       const elapsed = Math.floor((Date.now() - started) / 1000);
       if (firstOutputAt === undefined) process.stderr.write(`[rb-harness] provider ativo há ${elapsed}s; aguardando a primeira saída...\n`);
@@ -166,10 +190,15 @@ export async function runProvider(options: ProviderRunOptions): Promise<Provider
       }
       const text = chunk.toString("utf8");
       if (channel === "stdout") stdout += text; else stderr += text;
+      emitHarnessDashboard({
+        type: "provider-output",
+        bytes: Buffer.byteLength(stdout) + Buffer.byteLength(stderr),
+        ...(firstOutputAt ? { firstOutputMilliseconds: firstOutputAt - started } : {}),
+      });
       if (stdout.length + stderr.length > maxBytes) {
         stop("provider output exceeded 32 MiB");
       }
-      if (options.streamOutput) (channel === "stdout" ? process.stdout : process.stderr).write(text);
+      if (options.streamOutput && !harnessDashboardActive()) (channel === "stdout" ? process.stdout : process.stderr).write(text);
     };
     child.stdout.on("data", (chunk: Buffer) => observe(chunk, "stdout"));
     child.stderr.on("data", (chunk: Buffer) => observe(chunk, "stderr"));
@@ -199,9 +228,11 @@ export async function runProvider(options: ProviderRunOptions): Promise<Provider
     const diagnostic = error instanceof Error ? error.message : String(error);
     result = { exitCode: 70, stdout, stderr, ...(firstOutputAt ? { firstOutputMilliseconds: firstOutputAt - started } : {}) };
     await writeProviderLog(options, invocation.environment, result, diagnostic);
+    emitHarnessDashboard({ type: "provider-end", exitCode: 70, bytes: Buffer.byteLength(stdout) + Buffer.byteLength(stderr) });
     throw new Error(`${diagnostic}; see ${options.logPath}`);
   }
   await writeProviderLog(options, invocation.environment, result);
+  emitHarnessDashboard({ type: "provider-end", exitCode: result.exitCode, bytes: Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr) });
   if (result.exitCode !== 0) throw new Error(`provider ${options.configuration.provider} exited with code ${result.exitCode}; see ${options.logPath}`);
   return result;
 }

@@ -5,6 +5,8 @@ import { stdin as input, stdout as output } from "node:process";
 import { formatProjectInventory, inspectProjectInventory } from "./harness-inventory.js";
 import { playHarnessSplash } from "./harness-splash.js";
 import { resumableRuns, resumeStandaloneWorkflow, runStandaloneWorkflow } from "./standalone-runner.js";
+import { PROVIDER_HELP, isDirectProvider, isCliProvider } from "./provider-registry.js";
+import { finishHarnessDashboard, startHarnessDashboard } from "./harness-dashboard.js";
 import type { HarnessWorkflow, ProviderConfiguration } from "./standalone-types.js";
 
 function shellQuote(value: string): string {
@@ -96,25 +98,36 @@ export async function runHarnessWizard(version: string): Promise<void> {
       }
     }
 
-    const providerName = (await terminal.question("Provider (codex/claude/opencode/custom) [codex]: ")).trim() || "codex";
-    if (!["codex", "claude", "opencode", "custom"].includes(providerName)) throw new Error("provider inválido");
+    const providerName = (await terminal.question(`Provider (${PROVIDER_HELP}) [codex]: `)).trim() || "codex";
+    if (!isCliProvider(providerName) && !isDirectProvider(providerName)) throw new Error("provider inválido");
     const model = (await terminal.question("Modelo (vazio usa o padrão do provider): ")).trim();
+    if (isDirectProvider(providerName) && !model) throw new Error("providers de API direta exigem o ID explícito do modelo");
     const effort = (await terminal.question("Effort (vazio usa o padrão do provider): ")).trim();
     let command: string | undefined;
+    let credential: string | undefined;
     if (providerName === "custom") {
       command = (await terminal.question("Executável do adapter customizado: ")).trim();
       if (!command) throw new Error("adapter customizado não informado");
     }
+    if (isDirectProvider(providerName)) {
+      credential = (await terminal.question("Credencial salva (ID/rótulo; vazio usa a padrão): ")).trim() || undefined;
+      process.stdout.write("Se ainda não estiver autenticado, cancele e execute rb-harness --login.\n");
+    }
     const provider: ProviderConfiguration = {
-      provider: providerName as ProviderConfiguration["provider"], model, effort, ...(command ? { command } : {}),
+      provider: providerName as ProviderConfiguration["provider"], model, effort,
+      ...(command ? { command } : {}), ...(credential ? { credential } : {}),
     };
     const args = [workflow, "--project", projectRoot, "--output", artifactDirectory, "--provider", providerName];
     if (requestSource) args.push("--file", requestSource); else args.push("--prompt", requestForCommand);
     if (model) args.push("--model", model);
     if (effort) args.push("--effort", effort);
     if (command) args.push("--adapter", command);
+    if (credential) args.push("--credential", credential);
     if (depth) args.push("--depth", depth);
     if (planAllConfirmed) args.push("--plan-all-confirmed");
+    const dashboardAnswer = (await terminal.question("Usar o dashboard ao vivo? [S/n]: ")).trim();
+    const dashboard = !/^(?:n|nao|não|no)$/i.test(dashboardAnswer);
+    if (dashboard) args.push("--dashboard");
     process.stdout.write(`\nComando equivalente:\n  rb-harness ${args.map(shellQuote).join(" ")}\n`);
     const execute = (await terminal.question("\nExecutar agora? [S/n]: ")).trim();
     if (/^(?:n|nao|não|no)$/i.test(execute)) {
@@ -122,18 +135,23 @@ export async function runHarnessWizard(version: string): Promise<void> {
       return;
     }
     terminal.close();
-    await runStandaloneWorkflow({
-      workflow,
-      projectRoot,
-      artifactDirectory,
-      request: request.trim(),
-      requestSource,
-      provider,
-      questionMode: "one-by-one",
-      nonInteractive: false,
-      timeoutSeconds: 3600,
-      firstOutputTimeoutSeconds: 300,
-    });
+    if (dashboard) startHarnessDashboard(version);
+    try {
+      await runStandaloneWorkflow({
+        workflow,
+        projectRoot,
+        artifactDirectory,
+        request: request.trim(),
+        requestSource,
+        provider,
+        questionMode: "one-by-one",
+        nonInteractive: false,
+        timeoutSeconds: 3600,
+        firstOutputTimeoutSeconds: 300,
+      });
+    } finally {
+      if (dashboard) finishHarnessDashboard();
+    }
   } finally {
     terminal.close();
   }

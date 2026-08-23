@@ -40,12 +40,66 @@ The former Codex skills and Claude namespaced commands remain legacy adapters
 for compatibility. They are not required by the executable and should not be
 used for new automation.
 
-Built-in providers are `codex`, `claude`, and `opencode`. Use
+CLI providers are `codex`, `claude`, and `opencode`. Native API providers are
+`openai`, `anthropic`, `gemini`, `deepseek`, `minimax`, and `openrouter`. Use
 `--provider custom --adapter /absolute/path/to/executable` for another CLI. The
-adapter receives the prompt through stdin and model, effort, mode, and project
-metadata through `RB_HARNESS_*` environment variables. `RB_HARNESS_MODE` is
-`interview`, `generation`, or `audit`. Interview and audit calls are read-only
-by contract; generation calls may write only the isolated `.rb` staging tree.
+custom adapter receives the prompt through stdin and model, effort, mode, and
+project metadata through `RB_HARNESS_*` environment variables.
+`RB_HARNESS_MODE` is `interview`, `generation`, or `audit`. Interview and audit
+calls are read-only by contract; generation calls may write only the isolated
+`.rb` staging tree.
+
+## Login and native APIs
+
+Configure direct API access interactively; no API key needs to be placed in an
+environment variable or command argument:
+
+```bash
+rb-harness --login
+rb-harness auth list
+rb-harness auth logout deepseek:pessoal
+```
+
+The login first asks for a provider, then shows only the protocols implemented
+for it. OpenAI, Anthropic, DeepSeek, and MiniMax accept API keys; Gemini accepts
+an API key or Google Application Default Credentials; OpenRouter accepts an API
+key or its browser OAuth PKCE flow. OpenAI and Anthropic consumer CLI/browser
+sessions are not reused by the native API adapter—the existing `codex` and
+`claude` providers continue managing those sessions independently.
+
+Secrets are encrypted at rest in the shared per-user RB vault and never placed
+in process arguments, artifacts, logs, or dashboard state. Multiple labeled
+credentials may coexist for one provider. The vault encryption key is a
+separate private file under the same OS account; this prevents accidental
+plaintext disclosure, but it is not a defense against compromise of that
+account.
+
+```bash
+rb-harness review --project . --provider deepseek \
+  --model deepseek-v4-pro --credential pessoal --effort high --dashboard
+
+rb-harness plan --file change.md --provider openrouter \
+  --model vendor/model --credential trabalho --dashboard
+```
+
+Native API providers require the exact provider model ID. They execute a local
+tool loop governed by the Harness: interview and audit tools are read-only;
+generation can write only inside the staged `.rb` artifact tree.
+
+## Live dashboard
+
+Use `--dashboard` with a workflow or resume command to render pipeline stage,
+provider/model, elapsed time, first-output latency, observed output bytes,
+audit progress, and recent state transitions. The dashboard pauses cleanly for
+interactive interview questions and never displays request text, answers,
+provider output, or credentials.
+
+```bash
+rb-harness evolve --project . --file change.md \
+  --provider codex --model gpt-5.6-sol --effort high --dashboard
+
+rb-harness resume --project . --dashboard
+```
 
 ## Independent artifact quality gate
 

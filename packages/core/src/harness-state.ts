@@ -1,6 +1,7 @@
 import { chmod, mkdir, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { STANDALONE_STATE_CONTRACT, type HarnessRunState } from "./standalone-types.js";
+import { emitHarnessDashboard } from "./harness-dashboard.js";
 
 export function harnessStateRoot(projectRoot: string): string {
   return resolve(projectRoot, ".rb-harness/runs");
@@ -19,6 +20,7 @@ export async function writeRunState(state: HarnessRunState): Promise<void> {
   await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
   await rename(temporary, path);
   await chmod(path, 0o600).catch(() => undefined);
+  emitHarnessDashboard({ type: "state", state });
 }
 
 export async function readRunState(projectRoot: string, runId: string): Promise<HarnessRunState> {

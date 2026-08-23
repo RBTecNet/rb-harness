@@ -23,6 +23,7 @@ import {
   validateGeneratedWorkspace,
 } from "./harness-workspace.js";
 import { slugify } from "./manifest.js";
+import { pauseHarnessDashboard, resumeHarnessDashboard } from "./harness-dashboard.js";
 import {
   STANDALONE_STATE_CONTRACT,
   type ArtifactAuditRecord,
@@ -89,14 +90,20 @@ async function answerQuestion(
   provided: Record<string, string>,
   terminal: Interface | undefined,
 ): Promise<string> {
-  printQuestion(question, index, total);
-  let answer = provided[question.id];
-  if (answer) {
-    process.stdout.write(`Resposta fornecida: ${answer}\n`);
-  } else if (terminal) {
-    answer = (await terminal.question("\nResposta: ")).trim();
-  } else {
-    throw new Error(`interview requires answer '${question.id}'; provide --answers <json> or run in an interactive terminal`);
+  pauseHarnessDashboard();
+  let answer: string | undefined;
+  try {
+    printQuestion(question, index, total);
+    answer = provided[question.id];
+    if (answer) {
+      process.stdout.write(`Resposta fornecida: ${answer}\n`);
+    } else if (terminal) {
+      answer = (await terminal.question("\nResposta: ")).trim();
+    } else {
+      throw new Error(`interview requires answer '${question.id}'; provide --answers <json> or run in an interactive terminal`);
+    }
+  } finally {
+    resumeHarnessDashboard();
   }
   if (/^(?:use recommendation|usar recomenda[cç][aã]o)$/i.test(answer) && question.recommendation) answer = question.recommendation;
   if (question.type === "single-choice" && /^[1-9][0-9]*$/.test(answer)) {

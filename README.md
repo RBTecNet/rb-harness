@@ -26,7 +26,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.2.3 is an executable rather than a workflow that must run inside
+RB Harness 0.3.0 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -47,7 +47,7 @@ the current shell. Verify the exact installed build with:
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.2.3
+# Both print 0.3.0
 ```
 
 Run without arguments to start the wizard:
@@ -79,6 +79,79 @@ rb-harness plan --project /path/to/project --file change.md \
 rb-harness review --project . \
   --provider opencode --model opencode/mimo-v2.5-free --effort high \
   --depth balanced --focus frontend accessibility
+```
+
+### Native API login and shared credential vault
+
+The existing `codex`, `claude`, and `opencode` CLI providers remain unchanged.
+RB Harness also includes a local tool-using runtime for direct `openai`,
+`anthropic`, `gemini`, `deepseek`, `minimax`, and `openrouter` API calls. Start
+the credential wizard from either RB executable:
+
+```bash
+rb-harness --login
+# The same shared store is available through:
+rb-ralph --login
+
+rb-harness auth list
+rb-harness auth logout deepseek:pessoal
+```
+
+The wizard first lists providers and then only the authentication protocols
+implemented for that provider. API-key input is hidden. OpenRouter OAuth uses
+Authorization Code with PKCE, a random localhost callback, and a browser link.
+Gemini OAuth uses Google Application Default Credentials, requires `gcloud`
+and a desktop OAuth client JSON, and opens Google's login flow. Direct OpenAI
+and Anthropic end-user browser OAuth is not advertised: their documented API
+authentication is API key or workload identity, not a reusable “Sign in with
+ChatGPT/Claude” grant for third-party CLI calls. Codex CLI and Claude Code keep
+managing their own logins independently.
+
+Secrets are never accepted in command arguments, required environment
+variables, profiles, provider logs, generated artifacts, or dashboard state.
+Credential metadata and AES-256-GCM ciphertext live in the shared per-user RB
+configuration directory with `0700`/`0600` permissions; the local vault key is
+stored separately with `0600`. This protects against accidental plaintext
+disclosure but is not an OS-account boundary: a process already running as the
+same user can access both files. Use a dedicated OS account or external secret
+manager when that threat matters.
+
+Multiple labeled credentials can coexist. The provider default is used when
+there is only one/default entry; `--credential` selects another without
+revealing its secret:
+
+```bash
+rb-harness review --project . --provider deepseek \
+  --model deepseek-v4-pro --effort high --credential pessoal --dashboard
+
+rb-harness plan --file change.md --provider openrouter \
+  --model anthropic/claude-sonnet-4.6 --credential testes
+```
+
+Direct APIs are models, not filesystem agents. The bundled runtime supplies a
+bounded local tool loop. Interview and audit calls are read-only. Generation
+runs inside the existing isolated snapshot and can write only `.rb/`; manifest
+sync, deterministic validation, independent audit, and atomic publication
+remain owned by the Harness. Direct providers require an explicit provider
+model ID, and unsupported effort values fail at the provider instead of being
+silently discarded.
+
+### Live Harness dashboard
+
+Add `--dashboard` to a workflow or resume command. The dashboard uses the same
+terminal design language as Ralph while keeping Harness-specific stages:
+interview, generation, contract validation, independent audit, and atomic
+publication. It shows the active role, model, elapsed time, first-output
+latency, observed bytes, audit pass/findings, recent events, and terminal
+diagnostic. It never includes the request, interview answers, provider output,
+or credentials. During an interactive question the panel yields the terminal
+and resumes after the answer.
+
+```bash
+rb-harness evolve --project . --file change.md \
+  --provider codex --model gpt-5.6-sol --effort high --dashboard
+
+rb-harness resume --project . --dashboard
 ```
 
 The Harness has no execution profiles. Its command remains short; reusable

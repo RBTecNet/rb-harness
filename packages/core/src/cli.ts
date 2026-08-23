@@ -5,6 +5,11 @@ import { writeEvidence } from "./evidence.js";
 import { HEADLESS_HARNESS_SHA256, HEADLESS_HARNESS_VERSION, runHeadlessInit } from "./headless-runner.js";
 import { formatProjectInventory, inspectProjectInventory } from "./harness-inventory.js";
 import { harnessBrand, playHarnessSplash } from "./harness-splash.js";
+import { logoutCredential, printCredentialList, runLoginWizard } from "./auth-cli.js";
+import { runDirectApiAgentCli } from "./api-agent.js";
+import { PROVIDER_HELP, isCliProvider, isDirectProvider } from "./provider-registry.js";
+import { finishHarnessDashboard, startHarnessDashboard } from "./harness-dashboard.js";
+import { HARNESS_VERSION } from "./version.js";
 import { listRunStates } from "./harness-state.js";
 import { runHarnessWizard } from "./harness-wizard.js";
 import {
@@ -32,7 +37,6 @@ import type { ArtifactRecord, ArtifactStatus, ValidationIssue } from "./types.js
 import type { HarnessWorkflow, ProviderConfiguration } from "./standalone-types.js";
 
 const program = new Command();
-const HARNESS_VERSION = "0.2.3";
 
 function printIssues(issues: ValidationIssue[], json: boolean): void {
   if (json) {
@@ -55,6 +59,7 @@ program
   .description("Provider-neutral documentation harness and deterministic artifact contracts")
   .version(HARNESS_VERSION)
   .option("--ver", "output the version number (alias for --version)")
+  .option("--login", "configure a direct API provider credential interactively")
   .option("--splash", "play the RB Harness capybara splash and exit")
   .option("--no-splash", "skip the launch splash")
   .addHelpText("beforeAll", `${harnessBrand(HARNESS_VERSION)}\n\n`)
@@ -358,6 +363,7 @@ interface WorkflowCliOptions {
   provider: string;
   model: string;
   effort: string;
+  credential?: string;
   adapter?: string;
   answers?: string;
   questions: string;
@@ -368,6 +374,7 @@ interface WorkflowCliOptions {
   focus?: string[];
   planAllConfirmed?: boolean;
   findings?: string[];
+  dashboard?: boolean;
 }
 
 const REVIEW_FOCUS = new Set([
@@ -404,16 +411,18 @@ function applyWorkflowControls(workflow: HarnessWorkflow, request: string, optio
 }
 
 function providerConfiguration(options: WorkflowCliOptions): ProviderConfiguration {
-  if (!["codex", "claude", "opencode", "custom"].includes(options.provider)) {
-    throw new Error("--provider must be codex, claude, opencode, or custom");
+  if (!isCliProvider(options.provider) && !isDirectProvider(options.provider)) {
+    throw new Error(`--provider must be one of: ${PROVIDER_HELP}`);
   }
   if (options.provider === "custom" && !options.adapter) throw new Error("--provider custom requires --adapter <executable>");
   if (options.provider !== "custom" && options.adapter) throw new Error("--adapter is only valid with --provider custom");
+  if (!isDirectProvider(options.provider) && options.credential) throw new Error("--credential is valid only with a direct API provider");
   return {
     provider: options.provider as ProviderConfiguration["provider"],
     model: options.model,
     effort: options.effort,
     ...(options.adapter ? { command: options.adapter } : {}),
+    ...(options.credential ? { credential: options.credential } : {}),
   };
 }
 
@@ -433,19 +442,24 @@ async function workflowAction(
   if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 0) throw new Error("--timeout must be a non-negative integer");
   if (!Number.isInteger(firstOutputTimeoutSeconds) || firstOutputTimeoutSeconds < 0) throw new Error("--first-output-timeout must be a non-negative integer");
   if (!(["one-by-one", "batch"] as string[]).includes(options.questions)) throw new Error("--questions must be one-by-one or batch");
-  await runStandaloneWorkflow({
-    workflow,
-    projectRoot,
-    artifactDirectory: options.output,
-    request,
-    requestSource: source.source,
-    provider: providerConfiguration(options),
-    answersFile: options.answers,
-    questionMode: options.questions as "one-by-one" | "batch",
-    nonInteractive: Boolean(options.nonInteractive),
-    timeoutSeconds,
-    firstOutputTimeoutSeconds,
-  });
+  if (options.dashboard) startHarnessDashboard(HARNESS_VERSION);
+  try {
+    await runStandaloneWorkflow({
+      workflow,
+      projectRoot,
+      artifactDirectory: options.output,
+      request,
+      requestSource: source.source,
+      provider: providerConfiguration(options),
+      answersFile: options.answers,
+      questionMode: options.questions as "one-by-one" | "batch",
+      nonInteractive: Boolean(options.nonInteractive),
+      timeoutSeconds,
+      firstOutputTimeoutSeconds,
+    });
+  } finally {
+    if (options.dashboard) finishHarnessDashboard();
+  }
 }
 
 function configureWorkflowCommand(command: Command, workflow: HarnessWorkflow): Command {
@@ -455,15 +469,17 @@ function configureWorkflowCommand(command: Command, workflow: HarnessWorkflow): 
     .option("--file <path>", "read the complete request from a file")
     .option("--project <path>", "project root", ".")
     .option("--output <dir>", "project-relative artifact output directory", ".rb")
-    .option("--provider <name>", "codex, claude, opencode, or custom", process.env.RB_HARNESS_PROVIDER ?? "codex")
+    .option("--provider <name>", PROVIDER_HELP, process.env.RB_HARNESS_PROVIDER ?? "codex")
     .option("--model <id>", "provider model ID", process.env.RB_HARNESS_MODEL ?? "")
     .option("--effort <level>", "provider reasoning effort", process.env.RB_HARNESS_EFFORT ?? "")
+    .option("--credential <id-or-label>", "saved credential selector for a direct API provider")
     .option("--adapter <path>", "custom headless adapter executable")
     .option("--answers <json>", "non-interactive answers keyed by question ID")
     .option("--questions <mode>", "one-by-one or batch", "one-by-one")
     .option("--non-interactive", "never wait for terminal answers")
     .option("--timeout <seconds>", "provider wall timeout; 0 disables", "3600")
     .option("--first-output-timeout <seconds>", "provider first-output timeout; 0 disables", "300")
+    .option("--dashboard", "show the live Harness terminal dashboard")
     .action(async (request: string | undefined, options: WorkflowCliOptions) => workflowAction(workflow, request, options));
 }
 
@@ -479,6 +495,54 @@ configureWorkflowCommand(review, "review")
   .option("--findings <ids...>", "plan only the selected stable finding IDs");
 
 program.command("wizard").description("Start the interactive standalone Harness").action(async () => runHarnessWizard(HARNESS_VERSION));
+
+const auth = program.command("auth").description("Manage the shared RB provider credential vault");
+auth.command("login")
+  .description("Configure one provider interactively; secrets are never accepted as arguments")
+  .option("--provider <name>", "direct API provider")
+  .option("--protocol <name>", "api-key, oauth-pkce, or google-adc")
+  .option("--label <name>", "local credential label")
+  .action(async (options: { provider?: string; protocol?: string; label?: string }) => runLoginWizard(options));
+auth.command("list")
+  .description("List credential metadata without revealing secrets")
+  .option("--json", "emit JSON")
+  .action(async (options: { json?: boolean }) => printCredentialList(Boolean(options.json)));
+auth.command("logout")
+  .description("Remove one saved credential")
+  .argument("<id-or-label>")
+  .action(async (selector: string) => logoutCredential(selector));
+
+program.command("_provider-run")
+  .description("Internal direct API agent adapter")
+  .requiredOption("--provider <name>")
+  .requiredOption("--model <id>")
+  .option("--effort <level>", "", "")
+  .requiredOption("--role <role>")
+  .requiredOption("--project <path>")
+  .option("--permission <mode>", "", "protected")
+  .option("--credential <id-or-label>")
+  .option("--artifacts-dir <path>")
+  .option("--evidence-dir <path>")
+  .action(async (options: {
+    provider: string; model: string; effort: string; role: string; project: string; permission: string;
+    credential?: string; artifactsDir?: string; evidenceDir?: string;
+  }) => {
+    if (!isDirectProvider(options.provider)) throw new Error(`unsupported direct provider: ${options.provider}`);
+    const roles = ["harness-interview", "harness-generation", "harness-audit", "ralph-agent", "ralph-manager"] as const;
+    if (!(roles as readonly string[]).includes(options.role)) throw new Error(`unsupported direct API role: ${options.role}`);
+    if (!(["yolo", "protected"] as string[]).includes(options.permission)) throw new Error("--permission must be yolo or protected");
+    await runDirectApiAgentCli({
+      provider: options.provider,
+      model: options.model,
+      effort: options.effort,
+      role: options.role as typeof roles[number],
+      projectRoot: resolve(options.project),
+      permissionMode: options.permission as "yolo" | "protected",
+      credential: options.credential,
+      artifactDirectory: options.artifactsDir,
+      evidenceDirectory: options.evidenceDir,
+    });
+  });
 
 program
   .command("status")
@@ -507,8 +571,9 @@ program
   .option("--questions <mode>", "one-by-one or batch", "one-by-one")
   .option("--timeout <seconds>", "provider wall timeout", "3600")
   .option("--first-output-timeout <seconds>", "provider first-output timeout", "300")
+  .option("--dashboard", "show the live Harness terminal dashboard")
   .action(async (runId: string | undefined, options: {
-    project: string; answers?: string; nonInteractive?: boolean; questions: string; timeout: string; firstOutputTimeout: string;
+    project: string; answers?: string; nonInteractive?: boolean; questions: string; timeout: string; firstOutputTimeout: string; dashboard?: boolean;
   }) => {
     const projectRoot = resolve(options.project);
     if (!runId) {
@@ -516,13 +581,18 @@ program
       runId = runs.at(-1)?.id;
     }
     if (!runId) throw new Error("no incomplete Harness run was found");
-    await resumeStandaloneWorkflow(projectRoot, runId, {
-      answersFile: options.answers,
-      nonInteractive: Boolean(options.nonInteractive),
-      questionMode: options.questions as "one-by-one" | "batch",
-      timeoutSeconds: Number(options.timeout),
-      firstOutputTimeoutSeconds: Number(options.firstOutputTimeout),
-    });
+    if (options.dashboard) startHarnessDashboard(HARNESS_VERSION);
+    try {
+      await resumeStandaloneWorkflow(projectRoot, runId, {
+        answersFile: options.answers,
+        nonInteractive: Boolean(options.nonInteractive),
+        questionMode: options.questions as "one-by-one" | "batch",
+        timeoutSeconds: Number(options.timeout),
+        firstOutputTimeoutSeconds: Number(options.firstOutputTimeout),
+      });
+    } finally {
+      if (options.dashboard) finishHarnessDashboard();
+    }
   });
 
 const artifacts = program.command("artifacts").description("Inspect compatible artifact trees");
@@ -547,6 +617,10 @@ async function main(): Promise<void> {
       throw new Error("no command was provided and the terminal is not interactive");
     }
     await runHarnessWizard(HARNESS_VERSION);
+    return;
+  }
+  if (process.argv.length === 3 && process.argv[2] === "--login") {
+    await runLoginWizard();
     return;
   }
   if (process.argv.length === 3 && process.argv[2] === "--splash") {

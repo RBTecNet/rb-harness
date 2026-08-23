@@ -13,10 +13,11 @@ export type RunStatus =
   | "complete";
 
 export interface ProviderConfiguration {
-  provider: "codex" | "claude" | "opencode" | "custom";
+  provider: import("./provider-registry.js").ProviderId;
   model: string;
   effort: string;
   command?: string;
+  credential?: string;
 }
 
 export interface InterviewQuestion {
