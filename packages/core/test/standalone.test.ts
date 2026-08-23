@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -7,6 +7,7 @@ import { artifactAuditFingerprint, parseArtifactAudit } from "../src/harness-aud
 import { providerInvocation, runProvider } from "../src/harness-provider.js";
 import { inspectProjectInventory } from "../src/harness-inventory.js";
 import { composeHarnessSplash, harnessBrand, renderHarnessSplashFrame } from "../src/harness-splash.js";
+import { resolveWorkflowResourceRoot } from "../src/standalone-resources.js";
 import { runStandaloneWorkflow } from "../src/standalone-runner.js";
 import { assertNoEnvironmentSecrets, prepareGenerationWorkspace, recoverInterruptedPublication } from "../src/harness-workspace.js";
 import { validateManifestTree } from "../src/manifest.js";
@@ -16,18 +17,36 @@ const failingProvider = resolve(process.cwd(), "test/fixtures/standalone/failing
 const repairingProvider = resolve(process.cwd(), "test/fixtures/standalone/repairing-provider.mjs");
 
 describe("standalone RB Harness", () => {
+  it("follows an installed bin symlink to the packaged workflow resources", async () => {
+    const installation = await mkdtemp(resolve(tmpdir(), "rb-harness-linked-install-"));
+    const packagedCli = resolve(installation, "lib/node_modules/@rb-harness/core/dist/cli.js");
+    const packagedResources = resolve(installation, "lib/node_modules/@rb-harness/core/dist/resources");
+    const launcher = resolve(installation, "bin/rb-harness");
+    await mkdir(resolve(packagedResources, "references"), { recursive: true });
+    await mkdir(resolve(installation, "bin"), { recursive: true });
+    await writeFile(packagedCli, "#!/usr/bin/env node\n", "utf8");
+    await writeFile(resolve(packagedResources, "references/interview-policy.md"), "fixture\n", "utf8");
+    await symlink(packagedCli, launcher);
+
+    expect(await resolveWorkflowResourceRoot({
+      launcherPath: launcher,
+      workingDirectory: resolve(installation, "unrelated-project"),
+      configuredRoot: "",
+    })).toBe(packagedResources);
+  });
+
   it("preserves the versioned RB wordmark and capybara mascot", () => {
-    const brand = harnessBrand("0.2.1");
+    const brand = harnessBrand("0.2.2");
     expect(brand).toContain("◕      ◕");
     expect(brand).toContain("▪  ▪");
     expect(brand).toContain("◡◡");
-    expect(brand).toContain("capivara das especificações · v0.2.1");
+    expect(brand).toContain("capivara das especificações · v0.2.2");
   });
 
   it("centers a responsive Ralph-quality splash in both terminal dimensions", () => {
     const columns = 120;
     const rows = 30;
-    const lines = composeHarnessSplash("0.2.1", columns, rows);
+    const lines = composeHarnessSplash("0.2.2", columns, rows);
     expect(lines[0]).toContain("██████╗");
     expect(lines.every((line) => [...line].length <= columns)).toBe(true);
     expect(lines.filter(Boolean).every((line) => line.startsWith(" "))).toBe(true);
@@ -35,7 +54,7 @@ describe("standalone RB Harness", () => {
     const body = frame.slice("\u001b[H\u001b[2J".length);
     expect(body.match(/^\n*/)?.[0].length).toBe(Math.floor((rows - lines.length) / 2));
 
-    const compact = composeHarnessSplash("0.2.1", 50, 16);
+    const compact = composeHarnessSplash("0.2.2", 50, 16);
     expect(compact[0]).toContain("█▀█ █▄▄");
     expect(compact.every((line) => [...line].length <= 50)).toBe(true);
   });

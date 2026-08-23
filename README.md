@@ -26,7 +26,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.2.1 is an executable rather than a workflow that must run inside
+RB Harness 0.2.2 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -36,13 +36,18 @@ npm install --global --prefix "$HOME/.local" ./packages/core
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
+The installed package carries every workflow resource with it; it does not
+need the repository checkout or either legacy plugin at runtime. The release
+check packs the actual npm archive and executes a complete workflow through
+the same symbolic `bin/rb-harness` launcher created by a user installation.
+
 The last export belongs in `~/.bashrc`, `~/.zshrc`, or the startup file used by
 the current shell. Verify the exact installed build with:
 
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.2.1
+# Both print 0.2.2
 ```
 
 Run without arguments to start the wizard:

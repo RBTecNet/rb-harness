@@ -1,15 +1,34 @@
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, realpath } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type { HarnessWorkflow } from "./standalone-types.js";
 
-async function resourceRoot(): Promise<string> {
-  const executableDirectory = dirname(resolve(process.argv[1] ?? process.cwd()));
+interface ResourceRootOptions {
+  launcherPath?: string;
+  workingDirectory?: string;
+  configuredRoot?: string;
+}
+
+export async function resolveWorkflowResourceRoot(options: ResourceRootOptions = {}): Promise<string> {
+  const workingDirectory = resolve(options.workingDirectory ?? process.cwd());
+  const launcherPath = resolve(options.launcherPath ?? process.argv[1] ?? workingDirectory);
+  let installedLauncherPath = launcherPath;
+  try {
+    installedLauncherPath = await realpath(launcherPath);
+  } catch {
+    // Source runners and embedders may not expose a filesystem-backed argv[1].
+  }
+  const launcherDirectories = [...new Set([
+    dirname(installedLauncherPath),
+    dirname(launcherPath),
+  ])];
   const candidates = [
-    process.env.RB_HARNESS_RESOURCE_ROOT,
-    resolve(executableDirectory, "resources"),
-    resolve(executableDirectory, "../standalone-resources"),
-    resolve(process.cwd(), "resources"),
-    resolve(process.cwd(), "../../resources"),
+    options.configuredRoot ?? process.env.RB_HARNESS_RESOURCE_ROOT,
+    ...launcherDirectories.flatMap((directory) => [
+      resolve(directory, "resources"),
+      resolve(directory, "../standalone-resources"),
+    ]),
+    resolve(workingDirectory, "resources"),
+    resolve(workingDirectory, "../../resources"),
   ].filter((entry): entry is string => Boolean(entry));
   for (const candidate of candidates) {
     try {
@@ -23,7 +42,7 @@ async function resourceRoot(): Promise<string> {
 }
 
 export async function loadWorkflowResources(workflow: HarnessWorkflow): Promise<string> {
-  const root = await resourceRoot();
+  const root = await resolveWorkflowResourceRoot();
   const paths = [
     "references/interview-policy.md",
     "references/artifact-conventions.md",
