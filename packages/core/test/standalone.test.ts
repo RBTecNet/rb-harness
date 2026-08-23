@@ -2,7 +2,7 @@ import { chmod, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/pro
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseInterviewAnalysis } from "../src/harness-interview.js";
+import { parseInterviewAnalysis, recoverInterviewAnalysis } from "../src/harness-interview.js";
 import { artifactAuditFingerprint, parseArtifactAudit } from "../src/harness-audit.js";
 import { providerInvocation, runProvider } from "../src/harness-provider.js";
 import { inspectProjectInventory } from "../src/harness-inventory.js";
@@ -36,17 +36,17 @@ describe("standalone RB Harness", () => {
   });
 
   it("preserves the versioned RB wordmark and capybara mascot", () => {
-    const brand = harnessBrand("0.2.2");
+    const brand = harnessBrand("0.2.3");
     expect(brand).toContain("◕      ◕");
     expect(brand).toContain("▪  ▪");
     expect(brand).toContain("◡◡");
-    expect(brand).toContain("capivara das especificações · v0.2.2");
+    expect(brand).toContain("capivara das especificações · v0.2.3");
   });
 
   it("centers a responsive Ralph-quality splash in both terminal dimensions", () => {
     const columns = 120;
     const rows = 30;
-    const lines = composeHarnessSplash("0.2.2", columns, rows);
+    const lines = composeHarnessSplash("0.2.3", columns, rows);
     expect(lines[0]).toContain("██████╗");
     expect(lines.every((line) => [...line].length <= columns)).toBe(true);
     expect(lines.filter(Boolean).every((line) => line.startsWith(" "))).toBe(true);
@@ -54,7 +54,7 @@ describe("standalone RB Harness", () => {
     const body = frame.slice("\u001b[H\u001b[2J".length);
     expect(body.match(/^\n*/)?.[0].length).toBe(Math.floor((rows - lines.length) / 2));
 
-    const compact = composeHarnessSplash("0.2.2", 50, 16);
+    const compact = composeHarnessSplash("0.2.3", 50, 16);
     expect(compact[0]).toContain("█▀█ █▄▄");
     expect(compact.every((line) => [...line].length <= 50)).toBe(true);
   });
@@ -84,6 +84,36 @@ describe("standalone RB Harness", () => {
     };
     expect(() => parseInterviewAnalysis(`RB_HARNESS_INTERVIEW_JSON_BEGIN\n${JSON.stringify(ambiguousWithoutFollowUp)}\nRB_HARNESS_INTERVIEW_JSON_END`, pending)).toThrow("no focused follow-up");
     expect(() => parseInterviewAnalysis(`RB_HARNESS_INTERVIEW_JSON_BEGIN\n${JSON.stringify(acceptedWithoutDecision)}\nRB_HARNESS_INTERVIEW_JSON_END\nextra`, pending)).toThrow("no surrounding text");
+  });
+
+  it("accepts safe compact and descriptive uppercase interview question IDs", () => {
+    const source = (id: string) => `RB_HARNESS_INTERVIEW_JSON_BEGIN\n${JSON.stringify({
+      contract: "rb-harness-interview/v1",
+      status: "needs_input",
+      summary: "One decision remains.",
+      discoveries: [],
+      assumptions: [],
+      unresolved: ["Decision"],
+      answerReviews: [],
+      questions: [{ id, question: "Choose?", why: "It changes scope.", type: "confirm", options: [] }],
+    })}\nRB_HARNESS_INTERVIEW_JSON_END`;
+    expect(parseInterviewAnalysis(source("q1"), []).questions[0]?.id).toBe("q1");
+    expect(parseInterviewAnalysis(source("EVO-MEMORY-001"), []).questions[0]?.id).toBe("EVO-MEMORY-001");
+    expect(() => parseInterviewAnalysis(source("q"), [])).toThrow("2-80 ASCII");
+  });
+
+  it("recovers a now-valid interview envelope from a successful provider log", async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), "rb-harness-interview-recovery-"));
+    const log = resolve(directory, "interview.log");
+    const envelope = `RB_HARNESS_INTERVIEW_JSON_BEGIN\n${JSON.stringify({
+      contract: "rb-harness-interview/v1",
+      status: "needs_input",
+      summary: "One decision remains.",
+      discoveries: [], assumptions: [], unresolved: ["Decision"], answerReviews: [],
+      questions: [{ id: "q1", question: "Choose?", why: "It changes scope.", type: "confirm", options: [] }],
+    })}\nRB_HARNESS_INTERVIEW_JSON_END`;
+    await writeFile(log, `provider=custom\nexit_code=0\n\n--- stdout ---\n${envelope}\n--- stderr ---\nprovider trace\n`, "utf8");
+    expect((await recoverInterviewAnalysis(log, []))?.questions[0]?.id).toBe("q1");
   });
 
   it("enforces a strict exhaustive artifact-audit envelope and stable root-cause fingerprint", () => {

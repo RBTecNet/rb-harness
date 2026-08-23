@@ -32,7 +32,7 @@ import type { ArtifactRecord, ArtifactStatus, ValidationIssue } from "./types.js
 import type { HarnessWorkflow, ProviderConfiguration } from "./standalone-types.js";
 
 const program = new Command();
-const HARNESS_VERSION = "0.2.2";
+const HARNESS_VERSION = "0.2.3";
 
 function printIssues(issues: ValidationIssue[], json: boolean): void {
   if (json) {
