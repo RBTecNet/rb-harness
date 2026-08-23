@@ -3,6 +3,7 @@ import { basename, extname, resolve, sep } from "node:path";
 import { validateExecutionMarkdown } from "./execution-contract.js";
 import { atomicWrite, readJson, relativeProjectPath, safeProjectPath, walkFiles } from "./fs-utils.js";
 import { sha256File } from "./hash.js";
+import { isIsoDateTime } from "./headless-contract.js";
 import { validateOperationalJson } from "./operational-contract.js";
 import { candidateFindings, validateResponsiveInventoryJson } from "./responsive-inventory.js";
 import type {
@@ -14,6 +15,67 @@ import type {
 } from "./types.js";
 
 const MANIFEST_VERSION = "rb-manifest/v1" as const;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function schemaIssue(issues: ValidationIssue[], code: string, message: string, path: string): void {
+  issues.push({ code, message, severity: "error", path });
+}
+
+function denseArray(value: unknown, issues: ValidationIssue[], path: string): value is unknown[] {
+  if (!Array.isArray(value)) return false;
+  for (let index = 0; index < value.length; index += 1) {
+    if (!(index in value)) {
+      schemaIssue(issues, "manifest.schema.array.sparse", "Manifest arrays must not contain empty entries", `${path}[${index}]`);
+      return false;
+    }
+  }
+  return true;
+}
+
+function schemaObject(
+  value: unknown,
+  allowed: readonly string[],
+  required: readonly string[],
+  issues: ValidationIssue[],
+  path: string,
+): Record<string, unknown> | undefined {
+  if (!isRecord(value)) {
+    schemaIssue(issues, "manifest.schema.object", "Manifest values must be objects", path);
+    return undefined;
+  }
+  for (const key of Object.keys(value)) if (!allowed.includes(key)) schemaIssue(issues, "manifest.schema.property.unknown", `Unknown property ${key}`, `${path}.${key}`);
+  for (const key of required) if (!(key in value)) schemaIssue(issues, "manifest.schema.property.required", `Missing required property ${key}`, `${path}.${key}`);
+  return value;
+}
+
+export function validateManifestValue(value: unknown): ManifestValidation {
+  const issues: ValidationIssue[] = [];
+  const root = schemaObject(value, ["manifestVersion", "project", "artifactRoot", "generatedAt", "artifacts"], ["manifestVersion", "project", "artifactRoot", "generatedAt", "artifacts"], issues, "$");
+  if (!root) return { valid: false, issues };
+  if (root.manifestVersion !== MANIFEST_VERSION) schemaIssue(issues, "manifest.schema.version", "manifestVersion must be rb-manifest/v1", "$.manifestVersion");
+  const project = schemaObject(root.project, ["id", "name"], ["id", "name"], issues, "$.project");
+  if (project) {
+    if (typeof project.id !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(project.id)) schemaIssue(issues, "manifest.schema.project.id", "project.id is invalid", "$.project.id");
+    if (typeof project.name !== "string" || !project.name.trim()) schemaIssue(issues, "manifest.schema.project.name", "project.name is required", "$.project.name");
+  }
+  if (root.artifactRoot !== ".rb") schemaIssue(issues, "manifest.schema.root", "artifactRoot must be .rb", "$.artifactRoot");
+  if (!isIsoDateTime(root.generatedAt)) schemaIssue(issues, "manifest.schema.generatedAt", "generatedAt must be a date-time", "$.generatedAt");
+  if (!denseArray(root.artifacts, issues, "$.artifacts")) schemaIssue(issues, "manifest.schema.artifacts", "artifacts must be an array", "$.artifacts");
+  else root.artifacts.forEach((value, index) => {
+    const artifact = schemaObject(value, ["id", "kind", "path", "status", "sha256", "contract"], ["id", "kind", "path", "status", "sha256"], issues, `$.artifacts[${index}]`);
+    if (!artifact) return;
+    if (typeof artifact.id !== "string") schemaIssue(issues, "manifest.schema.artifact.id", "artifact.id must be a string", `$.artifacts[${index}].id`);
+    if (typeof artifact.kind !== "string") schemaIssue(issues, "manifest.schema.artifact.kind", "artifact.kind must be a string", `$.artifacts[${index}].kind`);
+    if (typeof artifact.path !== "string") schemaIssue(issues, "manifest.schema.artifact.path", "artifact.path must be a string", `$.artifacts[${index}].path`);
+    if (!["draft", "ready", "blocked", "invalid"].includes(String(artifact.status))) schemaIssue(issues, "manifest.schema.artifact.status", "artifact.status is invalid", `$.artifacts[${index}].status`);
+    if (typeof artifact.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(artifact.sha256)) schemaIssue(issues, "manifest.schema.artifact.sha256", "artifact.sha256 is invalid", `$.artifacts[${index}].sha256`);
+    if ("contract" in artifact && typeof artifact.contract !== "string") schemaIssue(issues, "manifest.schema.artifact.contract", "artifact.contract must be a string", `$.artifacts[${index}].contract`);
+  });
+  return { valid: issues.length === 0, issues, ...(issues.length === 0 ? { manifest: root as unknown as ArtifactManifest } : {}) };
+}
 
 export function slugify(value: string): string {
   return value
@@ -167,6 +229,7 @@ export async function writeManifest(root: string, manifest: ArtifactManifest): P
 export async function syncManifest(root: string): Promise<ArtifactManifest> {
   const absoluteRoot = resolve(root);
   const existing = await loadManifest(absoluteRoot);
+  if (!validateManifestValue(existing).valid) throw new Error("manifest_schema_invalid");
   const rbRoot = resolve(absoluteRoot, ".rb");
   // `.rb/runs` is append-only Ralph control-plane state, not a portable
   // project artifact. Indexing it makes the manifest depend on a live run and
@@ -239,6 +302,7 @@ export async function validateManifestTree(
     addIssue(issues, "manifest.missing", error instanceof Error ? error.message : String(error));
     return { valid: false, issues };
   }
+  issues.push(...validateManifestValue(manifest).issues);
   if (manifest.manifestVersion !== MANIFEST_VERSION) {
     addIssue(issues, "manifest.version", `Unsupported manifest version: ${String(manifest.manifestVersion)}`);
   }

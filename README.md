@@ -8,9 +8,12 @@ an LLM or consumed by RB Ralph.
 
 The repository contains:
 
-- `packages/core/` — deterministic TypeScript CLI for contracts, manifests,
-  source hashes, staleness, and repository evidence.
-- `plugins/rb-harness/` — Codex skills and Claude Code commands/agents.
+- `packages/core/` — standalone Node/TypeScript executable, provider adapters,
+  interview controller, resumable generation, contracts, manifests, source
+  hashes, staleness, and repository evidence.
+- `resources/` — provider-neutral workflow instructions owned by the executable.
+- `plugins/rb-harness/` — legacy Codex/Claude compatibility adapters; the
+  standalone executable does not depend on a plugin host.
 - `contracts/` — versioned execution and artifact-tree contracts.
 - `tests/fixtures/` — shared valid and invalid contract examples.
 
@@ -21,7 +24,128 @@ mobile, CLI, data, infrastructure, and mixed repositories use the same
 artifact and execution contracts; project-specific capabilities are documented
 only when evidence or the developer requires them.
 
-## Claude Code installation
+## Standalone installation
+
+RB Harness 0.2.0 is an executable rather than a workflow that must run inside
+Codex or Claude. Node.js 20 or newer is required. From the repository:
+
+```bash
+npm install
+npm run build
+npm install --global --prefix "$HOME/.local" ./packages/core
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+The last export belongs in `~/.bashrc`, `~/.zshrc`, or the startup file used by
+the current shell. Verify the exact installed build with:
+
+```bash
+rb-harness --version
+# 0.2.0
+```
+
+Run without arguments to start the wizard:
+
+```bash
+rb-harness
+```
+
+The capybara splash is terminal-only and never pollutes CI or redirected logs:
+
+```bash
+rb-harness --splash
+rb-harness --no-splash plan --file change.md --provider codex
+RB_HARNESS_SPLASH=0 rb-harness review --project . --provider claude
+```
+
+Direct commands accept prompt text, `@file`, a bare existing file, `--file`, or
+`--prompt`, plus provider-neutral model and effort selection:
+
+```bash
+rb-harness init --file project-brief.md \
+  --provider codex --model gpt-5.6-sol --effort high
+
+rb-harness plan --project /path/to/project --file change.md \
+  --provider claude --model opus --effort high --output .spec
+
+rb-harness review --project . \
+  --provider opencode --model opencode/mimo-v2.5-free --effort high \
+  --depth balanced --focus frontend accessibility
+```
+
+The Harness has no execution profiles. Its command remains short; reusable
+profiles belong only to RB Ralph, whose operational command has many more
+controls.
+
+The selected model returns a structured gap analysis. The executable queues
+any question batch and presents one question at a time, classifies every answer
+as `ACCEPTED`, `PARTIAL`, `AMBIGUOUS`, `DEFERRED`, or `CONTRADICTED`, and
+requires focused follow-up for material ambiguity before generation. Use
+`--questions batch` only to announce the whole round before answering it.
+
+Generation is not trusted on self-declaration. After structural validation, a
+fresh read-only invocation audits the complete artifact tree for source
+fidelity, contradictions, traceability, bounded tasks, and proofability. In
+particular, a RIGID rule cannot ask deterministic code to infer unlimited
+natural-language meaning unless the documentation names an exact grammar,
+typed authority, finite matrix, or an explicit classifier and failure
+contract. The auditor returns all material findings grouped by invariant; the
+writer receives the batch in a fresh repair pass. Publication is blocked when
+the same root-cause fingerprint repeats or three passes do not converge.
+
+Every generation uses an isolated source copy and a staging `.rb` tree. The
+writer and auditor cannot publish directly. RB Harness synchronizes and
+validates the manifest and contracts, requires the independent audit to pass,
+then atomically swaps the selected `--output` tree.
+The previous artifact tree remains under `.rb-harness/runs/<run-id>/` and a
+power-loss interruption is resumed with:
+
+```bash
+rb-harness status --project . --output .rb
+rb-harness resume --project .
+rb-harness resume <run-id> --project .
+```
+
+For automation, provide answers without opening a terminal:
+
+```bash
+rb-harness plan --file change.md --provider codex --non-interactive \
+  --answers interview-answers.json
+```
+
+The JSON object is keyed by the stable question IDs printed by a prior blocked
+non-interactive run. Missing material answers fail instead of hanging or being
+invented.
+
+Codex, Claude, and OpenCode are built in. A custom adapter is an executable
+that receives the complete prompt on stdin, runs with the isolated project as
+its working directory, and reads `RB_HARNESS_MODE`, `RB_HARNESS_PROJECT_ROOT`,
+`RB_HARNESS_PROVIDER`, `RB_HARNESS_MODEL`, and `RB_HARNESS_EFFORT` from the
+environment. `RB_HARNESS_MODE` is `interview`, `generation`, or `audit`; only
+`generation` may write the isolated workspace:
+
+```bash
+rb-harness plan --file change.md --provider custom \
+  --adapter /absolute/path/to/adapter --model local-model --effort high
+```
+
+The default first-output deadline is 300 seconds and the wall deadline is one
+hour. While an interactive provider is quiet, the Harness emits a heartbeat so
+"thinking" is distinguishable from a dead process. Override those guards with
+`--first-output-timeout` and `--timeout`; zero disables the corresponding
+deadline.
+
+## Legacy plugin compatibility
+
+Existing plugin-generated `.rb` trees, manifests, contracts, IDs, logical
+paths, and relocated physical artifact directories remain supported. The
+deterministic `contract`, `operations`, `project`, `manifest`, `tree`, and
+`inspect` commands are unchanged. `headless init` also retains its versioned
+Memory integration contract.
+
+The old Codex skills and Claude commands remain temporarily available as a
+transition adapter, but new work should use `rb-harness` directly. To install
+the legacy Claude adapter during migration:
 
 Register the repository root as a local marketplace and install the plugin:
 
@@ -35,17 +159,17 @@ The marketplace source must be the repository root containing
 
 ## Workflows
 
-The conceptual workflows are `init`, `ai-context`, `review`, `evolve`, and
-`plan`. Host adapters
-expose them using their native command conventions:
+The workflows are `init`, `ai-context`, `review`, `evolve`, and `plan`. The
+standalone executable is authoritative; legacy host adapters expose equivalent
+commands during the compatibility window:
 
-| Workflow | Codex skill | Claude Code command | Result |
+| Workflow | Standalone | Legacy Codex/Claude | Result |
 |---|---|---|---|
-| New project | `$rb-init <text or @file>` | `/rb-harness:init <text or @file>` | Project intent and initial plan under `.rb/init/` |
-| Existing project | `$rb-ai-context [path]` | `/rb-harness:ai-context [path]` | Evidence-grounded AS IS context under `.rb/context/` |
-| Whole-product audit | `$rb-review [path]` | `/rb-harness:review [path]` | Grounded findings and optional selected remediation under `.rb/reviews/<id>/` |
-| Existing behavior evolution | `$rb-evolve <text or @file>` | `/rb-harness:evolve <text or @file>` | AS IS/TO BE delta, impact, preservation, regression, and execution under `.rb/evolutions/<slug>/` |
-| Scoped change | `$rb-plan <text or @file>` | `/rb-harness:plan <text or @file>` | Request, spec, plan, and execution view under `.rb/features/<slug>/` |
+| New project | `rb-harness init` | `$rb-init` / `/rb-harness:init` | Project intent and initial plan under `.rb/init/` |
+| Existing project | `rb-harness ai-context` | `$rb-ai-context` / `/rb-harness:ai-context` | Evidence-grounded AS IS context under `.rb/context/` |
+| Whole-product audit | `rb-harness review` | `$rb-review` / `/rb-harness:review` | Grounded findings and optional selected remediation under `.rb/reviews/<id>/` |
+| Existing behavior evolution | `rb-harness evolve` | `$rb-evolve` / `/rb-harness:evolve` | AS IS/TO BE delta, impact, preservation, regression, and execution under `.rb/evolutions/<slug>/` |
+| Scoped change | `rb-harness plan` | `$rb-plan` / `/rb-harness:plan` | Request, spec, plan, and execution view under `.rb/features/<slug>/` |
 
 `init` and `plan` accept free text, `@path`, `--file path`, or an existing bare
 file path. `ai-context` inspects the repository before interviewing. Balanced
@@ -113,8 +237,8 @@ reads the generated artifacts instead of inheriting the audit conversation.
 For example:
 
 ```text
-$rb-review /path/to/project --balanced --plan-all-confirmed
-/rb-harness:review /path/to/project --balanced --plan-all-confirmed
+rb-harness review --project /path/to/project \
+  --provider codex --depth balanced --plan-all-confirmed
 ```
 
 This produces remediation documents only when at least one confirmed finding
@@ -129,24 +253,25 @@ npm run build
 npm run check
 ```
 
-After the build, the distributable CLI is bundled at
-`plugins/rb-harness/scripts/rb-harness.cjs`.
+After the build, the standalone executable is
+`packages/core/dist/cli.js`. The build also refreshes the legacy compatibility
+bundle at `plugins/rb-harness/scripts/rb-harness.cjs`.
 
 ## Deterministic CLI
 
 ```sh
-node plugins/rb-harness/scripts/rb-harness.cjs contract validate <PHASES.md>
-node plugins/rb-harness/scripts/rb-harness.cjs contract inspect <PHASES.md> --format tsv
-node plugins/rb-harness/scripts/rb-harness.cjs contract extract <PHASES.md> --phase P01
-node plugins/rb-harness/scripts/rb-harness.cjs review validate-responsive <RESPONSIVE_INVENTORY.json>
-node plugins/rb-harness/scripts/rb-harness.cjs project init . --name "My Project"
-node plugins/rb-harness/scripts/rb-harness.cjs manifest sync .
-node plugins/rb-harness/scripts/rb-harness.cjs tree validate .
-node plugins/rb-harness/scripts/rb-harness.cjs tree resolve . --format tsv
+rb-harness contract validate <PHASES.md>
+rb-harness contract inspect <PHASES.md> --format tsv
+rb-harness contract extract <PHASES.md> --phase P01
+rb-harness review validate-responsive <RESPONSIVE_INVENTORY.json>
+rb-harness project init . --name "My Project"
+rb-harness manifest sync .
+rb-harness tree validate .
+rb-harness tree resolve . --format tsv
 # Validate a physically relocated RB artifact tree without rewriting its logical paths
-node plugins/rb-harness/scripts/rb-harness.cjs tree validate . --artifacts-dir .spec
-node plugins/rb-harness/scripts/rb-harness.cjs tree resolve . --artifacts-dir .spec --format tsv
-node plugins/rb-harness/scripts/rb-harness.cjs inspect .
+rb-harness tree validate . --artifacts-dir .spec
+rb-harness tree resolve . --artifacts-dir .spec --format tsv
+rb-harness inspect .
 ```
 
 `tree resolve --format tsv` reads `.rb/rb-manifest.json` by default and emits a

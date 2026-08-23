@@ -1,7 +1,7 @@
 {
   "name": "@rb-harness/core",
-  "version": "0.1.6",
-  "description": "Deterministic contracts and artifact discovery for RB Harness",
+  "version": "0.2.0",
+  "description": "Standalone provider-neutral documentation harness and deterministic artifact contracts",
   "type": "module",
   "bin": {
     "rb-harness": "dist/cli.js"
@@ -9,11 +9,15 @@
   "exports": {
     ".": "./dist/index.js"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "build": "node ./scripts/build.mjs && tsc --emitDeclarationOnly",
+    "build": "node ./scripts/build.mjs && tsc --emitDeclarationOnly --project tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "prepack": "npm run build"
   },
   "dependencies": {
     "commander": "^14.0.0"

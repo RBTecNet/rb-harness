@@ -6,41 +6,82 @@ capable coding CLI/model or consumed by RB Ralph.
 
 ## Before the first use
 
-The plugin source lives at `plugins/rb-harness/`. Build and validate the
-bundled deterministic CLI once from the RB Harness repository:
+Install the standalone executable from the RB Harness repository:
 
 ```bash
 npm install
-npm run check
+npm run build
+npm install --global --prefix "$HOME/.local" ./packages/core
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
-The current repository is ready for local plugin registration but does not yet
-publish an installer or marketplace package. After the plugin is enabled in the
-chosen host, open that host in the root of the project to be documented.
+Start the guided interface from the project or any other directory:
 
-Codex exposes the workflows as skills. Claude Code exposes the same workflows
-as namespaced slash commands:
+```bash
+rb-harness
+```
 
-| Workflow | Codex | Claude Code |
+The wizard inspects compatible existing artifacts, reports ready plans and
+Ralph runs, offers interrupted-run recovery, then asks for workflow, request,
+provider, model, effort, project, and output directory. Provider question
+batches are normalized and shown one at a time.
+
+The direct commands are:
+
+| Workflow | Command |
 |---|---|---|
-| New project | `$rb-init` | `/rb-harness:init` |
-| Existing project | `$rb-ai-context` | `/rb-harness:ai-context` |
-| Whole-product audit | `$rb-review` | `/rb-harness:review` |
-| Evolve existing behavior | `$rb-evolve` | `/rb-harness:evolve` |
-| Feature, fix, refactor, or migration | `$rb-plan` | `/rb-harness:plan` |
+| New project | `rb-harness init` |
+| Existing project | `rb-harness ai-context` |
+| Whole-product audit | `rb-harness review` |
+| Evolve existing behavior | `rb-harness evolve` |
+| Feature, fix, refactor, or migration | `rb-harness plan` |
+
+The former Codex skills and Claude namespaced commands remain legacy adapters
+for compatibility. They are not required by the executable and should not be
+used for new automation.
+
+Built-in providers are `codex`, `claude`, and `opencode`. Use
+`--provider custom --adapter /absolute/path/to/executable` for another CLI. The
+adapter receives the prompt through stdin and model, effort, mode, and project
+metadata through `RB_HARNESS_*` environment variables. `RB_HARNESS_MODE` is
+`interview`, `generation`, or `audit`. Interview and audit calls are read-only
+by contract; generation calls may write only the isolated `.rb` staging tree.
+
+## Independent artifact quality gate
+
+The writer does not approve its own documentation. After each structurally
+valid generation, RB Harness starts the selected provider again in a fresh,
+read-only audit context. The auditor checks the complete staged tree and must
+return one strict `rb-harness-artifact-audit/v1` result.
+
+The audit rejects a RIGID requirement when its implementation mechanism cannot
+prove the requested behavior. For example, deterministic code cannot be told
+to recognize every natural-language phrase that implies a concept unless the
+documentation defines a finite grammar or typed authority. A keyword list or a
+set of examples is not treated as exhaustive. The same rule covers external
+standards, dialects, formats, source-of-truth ambiguity, derived bundle parity,
+and acceptance criteria without an observable owner.
+
+`revise` sends the complete root-cause batch to a fresh writer pass. `blocked`
+stops for a missing material developer decision. `pass` permits atomic
+publication. A repeated canonical finding batch stops instead of consuming
+more model calls, and the generation is also blocked after three unsuccessful
+passes. Current artifacts remain untouched in every blocked or failed case.
 
 ## Start a new project
 
 Use a description directly:
 
-```text
-$rb-init Quero criar uma plataforma de agendamento para clínicas com múltiplas unidades.
+```bash
+rb-harness init \
+  --prompt "Quero criar uma plataforma de agendamento para clínicas com múltiplas unidades." \
+  --provider codex --model gpt-5.6-sol --effort high
 ```
 
 Or keep a longer brief in a file:
 
-```text
-$rb-init @docs/project-brief.md
+```bash
+rb-harness init @docs/project-brief.md --provider codex
 ```
 
 `--file docs/project-brief.md` and an existing bare file path are also valid.
@@ -71,8 +112,8 @@ conditional. They are not generated merely to fill a fixed template.
 
 Run from the existing project root:
 
-```text
-$rb-ai-context . --balanced
+```bash
+rb-harness ai-context --project . --provider codex --model gpt-5.6-sol --effort high
 ```
 
 Available interview depths:
@@ -85,8 +126,10 @@ Available interview depths:
 
 The workflow inspects manifests, source, tests, CI, and configuration before
 asking anything. It excludes secrets, generated dependencies, build outputs,
-and RB intent documents from behavioral evidence. Its output is `AGENTS.md`
-plus conditional documents under `.rb/context/`.
+and RB intent documents from behavioral evidence. Its output includes the
+portable `.rb/context/AGENTS.md` index plus conditional documents in the same
+directory. A pre-existing project-root `AGENTS.md` is source evidence and is
+never silently overwritten by standalone publication.
 
 Every material claim is classified as `OBSERVED`, `CONFIRMED`, `INFERRED`,
 `UNKNOWN`, or `CONFLICT` so future agents can distinguish evidence from human
@@ -103,8 +146,11 @@ the source manifest for auditability.
 
 Use review when the goal is discovery rather than one already-scoped change:
 
-```text
-$rb-review . --balanced --focus frontend,security,tenancy,tests
+```bash
+rb-harness review --project . \
+  --prompt "Audit frontend, security, tenancy, operations, and test quality." \
+  --provider codex --model gpt-5.6-sol --effort high \
+  --depth balanced --focus frontend security tenancy tests
 ```
 
 The audit records evidence-grounded findings, reviewed journeys, runtime/static
@@ -137,29 +183,33 @@ it to generate remediation `PLAN.md`, `PHASES.md`, and optional
 
 Use evolve when the request changes an established flow or its consumers:
 
-```text
-$rb-evolve Vincular materiais de estoque à abertura da ordem de serviço.
+```bash
+rb-harness evolve \
+  --prompt "Vincular materiais de estoque à abertura da ordem de serviço." \
+  --provider codex
 ```
 
 The workflow proves AS IS behavior first, then documents TO BE, readers/writers,
 impact, preservation, migration, compatibility, and a regression matrix under
 `.rb/evolutions/<slug>/`. It routes by impact rather than the phrase "new
 feature" and preserves existing behavior that the accepted delta does not
-change. Use ordinary `rb-plan` for genuinely isolated new behavior or a scoped
+change. Use ordinary `rb-harness plan` for genuinely isolated new behavior or a scoped
 fix that does not need this transition analysis.
 
 ## Plan a change
 
-After `rb-init` or `rb-ai-context`, describe the change:
+After `rb-harness init` or `rb-harness ai-context`, describe the change:
 
-```text
-$rb-plan Corrigir a duplicação de cobrança quando o gateway demora para responder.
+```bash
+rb-harness plan \
+  --prompt "Corrigir a duplicação de cobrança quando o gateway demora para responder." \
+  --provider codex
 ```
 
 Or reference a request file:
 
-```text
-$rb-plan @docs/requests/idempotent-charge.md
+```bash
+rb-harness plan @docs/requests/idempotent-charge.md --provider codex
 ```
 
 The workflow detects whether the request is a feature, bug, refactor,
@@ -186,13 +236,11 @@ The workflows run these checks automatically. They are also available for
 manual inspection:
 
 ```bash
-RB_CLI="/path/to/rb-harness/plugins/rb-harness/scripts/rb-harness.cjs"
-
-node "$RB_CLI" contract validate .rb/features/<slug>/PHASES.md
-node "$RB_CLI" operations validate .rb/features/<slug>/OPERATIONS.json
-node "$RB_CLI" manifest sync .
-node "$RB_CLI" tree validate .
-node "$RB_CLI" tree resolve . --format tsv
+rb-harness contract validate .rb/features/<slug>/PHASES.md
+rb-harness operations validate .rb/features/<slug>/OPERATIONS.json
+rb-harness manifest sync .
+rb-harness tree validate .
+rb-harness tree resolve . --format tsv
 ```
 
 Do not start implementation when readiness is `BLOCKED`. Resolve the listed
@@ -345,13 +393,13 @@ resume, and future memory boundary.
 For a new project:
 
 ```text
-rb-init -> review PHASES.md + OPERATIONS.json -> validate -> execute
+rb-harness init -> review PHASES.md + OPERATIONS.json -> validate -> execute
 ```
 
 For an existing project:
 
 ```text
-rb-ai-context -> rb-review for discovery, rb-evolve for established-flow changes, or rb-plan for isolated work -> validate -> execute
+rb-harness ai-context -> rb-harness review for discovery, rb-harness evolve for established-flow changes, or rb-harness plan for isolated work -> validate -> execute
 ```
 
 Commit generated documentation only after reviewing the scope, assumptions,

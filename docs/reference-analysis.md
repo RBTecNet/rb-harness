@@ -54,7 +54,8 @@ context budgets instead of parsing undocumented producer conventions.
 
 ## Deliberate current boundary
 
-This implementation contains the documentation plugin, deterministic core,
-contracts, and Ralph discovery adapter. It does not yet implement the new Ralph
-execution loop or the optional RB Memory MCP/web application. Both remain
-optional consumers so the repository artifacts stay portable and sufficient.
+RB Harness now owns the standalone documentation executable, deterministic
+core, versioned contracts, and compatibility adapters. RB Ralph and RB Memory
+are implemented in separate repositories and remain optional consumers. The
+Harness neither executes application plans nor makes generated documentation
+depend on hosted memory, a plugin host, a provider, or a particular model.

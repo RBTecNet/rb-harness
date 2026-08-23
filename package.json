@@ -1,6 +1,6 @@
 {
   "name": "rb-harness",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -11,7 +11,8 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "check": "npm run build && npm run typecheck && npm test && bash scripts/test-bash-compat.sh && node scripts/check-plugin.mjs",
     "test": "npm run test --workspaces --if-present",
-    "test:coverage": "npm run test:coverage --workspaces --if-present"
+    "test:coverage": "npm run test:coverage --workspaces --if-present",
+    "install:user": "npm install --global --prefix \"$HOME/.local\" ./packages/core"
   },
   "engines": {
     "node": ">=20"

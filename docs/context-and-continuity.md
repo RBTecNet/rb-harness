@@ -1,9 +1,9 @@
 # Context, Token, and Continuity Policy
 
 RB Harness and RB Ralph treat repository artifacts as the durable source of
-truth. A provider conversation is disposable: changing from Codex to Claude or
-another adapter must not change the meaning of a plan or erase accepted run
-history.
+truth. A provider conversation is disposable: changing from Codex to Claude,
+OpenCode, or another adapter must not change the meaning of a plan or erase
+accepted run history.
 
 ## Context layers
 
@@ -12,6 +12,9 @@ into every prompt:
 
 | Invocation | Required prompt content | Read on demand from the repository |
 |---|---|---|
+| Harness interview controller | Request, existing artifact inventory, prior normalized answers, workflow resources | Implemented project evidence and existing artifacts |
+| Harness artifact writer | Accepted decisions, explicit assumptions, current artifact summary, workflow resources | Isolated project copy and compatible existing artifact tree |
+| Harness artifact auditor | Request, accepted decisions, assumptions, workflow resources | Complete staged artifact tree, excluding runtime runs |
 | Sequential implementation agent | Current validated phase | Declared context paths, code, tests, and prior validation evidence |
 | Parallel implementation agent | Its task and enclosing phase metadata | Only the files needed for that task |
 | Technical manager | Current phase and evidence paths | Actual diff, agent logs, validation log, and declared context |
@@ -21,6 +24,14 @@ Provider adapters use fresh, non-persistent invocations. This prevents an old
 chat history from silently outranking the current specification. It also means
 that every decision needed for implementation must exist in reviewed `.rb/`
 artifacts, project evidence, or the current run logs.
+
+Harness generation state lives separately at `.rb-harness/runs/<run-id>/`.
+It records the request hash, selected provider/model/effort, raw answers,
+accepted normalized decisions, validation state, artifact-audit batches and
+their canonical fingerprints, private provider logs, and any prior artifact
+revision replaced by successful publication. `rb-harness resume`
+can restart an interrupted interview or generation without relying on a hidden
+provider session. This state is not part of the portable artifact contract.
 
 ## Deterministic guards
 

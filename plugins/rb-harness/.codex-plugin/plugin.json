@@ -1,7 +1,7 @@
 {
   "name": "rb-harness",
-  "version": "0.1.6+codex.20260823125850",
-  "description": "Provider-neutral project context, product review, evolution, specification, and execution-plan documentation.",
+  "version": "0.2.0+codex.20260823150000",
+  "description": "Legacy host adapter for the standalone provider-neutral RB Harness executable.",
   "author": {
     "name": "RB Harness contributors"
   },

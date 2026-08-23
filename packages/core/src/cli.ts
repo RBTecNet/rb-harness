@@ -2,6 +2,17 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Command } from "commander";
 import { writeEvidence } from "./evidence.js";
+import { HEADLESS_HARNESS_SHA256, HEADLESS_HARNESS_VERSION, runHeadlessInit } from "./headless-runner.js";
+import { formatProjectInventory, inspectProjectInventory } from "./harness-inventory.js";
+import { harnessBrand, playHarnessSplash } from "./harness-splash.js";
+import { listRunStates } from "./harness-state.js";
+import { runHarnessWizard } from "./harness-wizard.js";
+import {
+  defaultRequestForWorkflow,
+  resolveStandaloneRequest,
+  resumeStandaloneWorkflow,
+  runStandaloneWorkflow,
+} from "./standalone-runner.js";
 import {
   extractExecutionPhaseMarkdown,
   extractExecutionTaskMarkdown,
@@ -18,8 +29,10 @@ import {
   validateManifestTree,
 } from "./manifest.js";
 import type { ArtifactRecord, ArtifactStatus, ValidationIssue } from "./types.js";
+import type { HarnessWorkflow, ProviderConfiguration } from "./standalone-types.js";
 
 const program = new Command();
+const HARNESS_VERSION = "0.2.0";
 
 function printIssues(issues: ValidationIssue[], json: boolean): void {
   if (json) {
@@ -39,8 +52,19 @@ function fail(error: unknown): never {
 
 program
   .name("rb-harness")
-  .description("Deterministic contracts and artifact discovery for RB Harness")
-  .version("0.1.6");
+  .description("Provider-neutral documentation harness and deterministic artifact contracts")
+  .version(HARNESS_VERSION)
+  .option("--splash", "play the RB Harness capybara splash and exit")
+  .option("--no-splash", "skip the launch splash")
+  .addHelpText("beforeAll", `${harnessBrand(HARNESS_VERSION)}\n\n`)
+  .addHelpText("after", [
+    "",
+    "Standalone examples:",
+    "  rb-harness                         Start the interactive wizard",
+    "  rb-harness plan --file change.md --provider codex --model gpt-5.6-sol --effort high",
+    "  rb-harness review --project . --provider claude --model opus --output .rb",
+    "  rb-harness status --project .     Summarize existing artifacts and resumable runs",
+  ].join("\n"));
 
 const contract = program.command("contract").description("Validate RB execution documents");
 contract
@@ -74,7 +98,7 @@ operations
     }
   });
 
-const review = program.command("review").description("Validate RB review evidence contracts");
+const review = program.command("review").description("Audit a product or validate RB review evidence contracts");
 review
   .command("validate-responsive")
   .argument("<path>", "RESPONSIVE_INVENTORY.json path")
@@ -221,6 +245,32 @@ project
     }
   });
 
+const headless = program.command("headless").description("Run versioned provider-neutral automation contracts");
+headless
+  .command("version")
+  .description("Print the versioned headless-init boundary identity as JSON")
+  .action(() => {
+    process.stdout.write(`${JSON.stringify({
+      contract: "rb-headless-init/v1",
+      version: HEADLESS_HARNESS_VERSION,
+      sha256: HEADLESS_HARNESS_SHA256,
+    })}\n`);
+  });
+headless
+  .command("init")
+  .requiredOption("--output <path>", "absolute isolated output root")
+  .action(async (options: { output: string }) => {
+    const input = await new Promise<Buffer>((resolveInput, reject) => {
+      const chunks: Buffer[] = [];
+      process.stdin.on("data", (chunk: Buffer | string) => chunks.push(Buffer.from(chunk)));
+      process.stdin.once("error", reject);
+      process.stdin.once("end", () => resolveInput(Buffer.concat(chunks)));
+    });
+    const outcome = await runHeadlessInit({ input, outputRoot: options.output });
+    process.stdout.write(`${JSON.stringify(outcome.result)}\n`);
+    process.exitCode = outcome.exitCode;
+  });
+
 const manifest = program.command("manifest").description("Manage the artifact manifest");
 manifest
   .command("sync")
@@ -299,7 +349,205 @@ program
     }
   });
 
+interface WorkflowCliOptions {
+  prompt?: string;
+  file?: string;
+  project: string;
+  output: string;
+  provider: string;
+  model: string;
+  effort: string;
+  adapter?: string;
+  answers?: string;
+  questions: string;
+  nonInteractive?: boolean;
+  timeout: string;
+  firstOutputTimeout: string;
+  depth?: string;
+  focus?: string[];
+  planAllConfirmed?: boolean;
+  findings?: string[];
+}
+
+const REVIEW_FOCUS = new Set([
+  "product", "security", "tenancy", "frontend", "design", "accessibility",
+  "performance", "tests", "data", "operations", "supply-chain",
+]);
+
+function applyWorkflowControls(workflow: HarnessWorkflow, request: string, options: WorkflowCliOptions): string {
+  const controls: string[] = [];
+  const focus = options.focus?.flatMap((entry) => entry.split(",")).map((entry) => entry.trim()).filter(Boolean) ?? [];
+  const findings = options.findings?.flatMap((entry) => entry.split(",")).map((entry) => entry.trim()).filter(Boolean) ?? [];
+  if (options.depth) {
+    if (!["quick", "balanced", "deep"].includes(options.depth)) throw new Error("--depth must be quick, balanced, or deep");
+    controls.push(`Inspection depth: ${options.depth}.`);
+  }
+  if (focus.length) {
+    const invalid = focus.filter((entry) => !REVIEW_FOCUS.has(entry));
+    if (invalid.length) throw new Error(`unknown --focus area: ${invalid.join(", ")}`);
+    controls.push(`Review focus areas: ${focus.join(", ")}. Cross-boundary evidence remains required.`);
+  }
+  if (options.planAllConfirmed && findings.length) {
+    throw new Error("--plan-all-confirmed and --findings are mutually exclusive");
+  }
+  if (options.planAllConfirmed) {
+    controls.push("Remediation selector: plan every and only CONFIRMED finding after the audit set is frozen; do not create a zero-finding plan.");
+  }
+  if (findings.length) {
+    controls.push(`Remediation selector: plan only these stable finding IDs: ${findings.join(", ")}.`);
+  }
+  if ((focus.length || options.planAllConfirmed || findings.length) && workflow !== "review") {
+    throw new Error("--focus, --plan-all-confirmed, and --findings are valid only for review");
+  }
+  return controls.length ? `${request}\n\nRB Harness operator controls (authoritative):\n- ${controls.join("\n- ")}` : request;
+}
+
+function providerConfiguration(options: WorkflowCliOptions): ProviderConfiguration {
+  if (!["codex", "claude", "opencode", "custom"].includes(options.provider)) {
+    throw new Error("--provider must be codex, claude, opencode, or custom");
+  }
+  if (options.provider === "custom" && !options.adapter) throw new Error("--provider custom requires --adapter <executable>");
+  if (options.provider !== "custom" && options.adapter) throw new Error("--adapter is only valid with --provider custom");
+  return {
+    provider: options.provider as ProviderConfiguration["provider"],
+    model: options.model,
+    effort: options.effort,
+    ...(options.adapter ? { command: options.adapter } : {}),
+  };
+}
+
+async function workflowAction(
+  workflow: HarnessWorkflow,
+  positional: string | undefined,
+  options: WorkflowCliOptions,
+): Promise<void> {
+  const projectRoot = resolve(options.project);
+  const source = await resolveStandaloneRequest(projectRoot, positional, options.prompt, options.file);
+  const baseRequest = source.request || defaultRequestForWorkflow(workflow, projectRoot);
+  if (!baseRequest) throw new Error(`${workflow} requires request text, @file, or --file <path>`);
+  const request = applyWorkflowControls(workflow, baseRequest, options);
+  if (program.opts<{ splash?: boolean }>().splash !== false) await playHarnessSplash(HARNESS_VERSION);
+  const timeoutSeconds = Number(options.timeout);
+  const firstOutputTimeoutSeconds = Number(options.firstOutputTimeout);
+  if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 0) throw new Error("--timeout must be a non-negative integer");
+  if (!Number.isInteger(firstOutputTimeoutSeconds) || firstOutputTimeoutSeconds < 0) throw new Error("--first-output-timeout must be a non-negative integer");
+  if (!(["one-by-one", "batch"] as string[]).includes(options.questions)) throw new Error("--questions must be one-by-one or batch");
+  await runStandaloneWorkflow({
+    workflow,
+    projectRoot,
+    artifactDirectory: options.output,
+    request,
+    requestSource: source.source,
+    provider: providerConfiguration(options),
+    answersFile: options.answers,
+    questionMode: options.questions as "one-by-one" | "batch",
+    nonInteractive: Boolean(options.nonInteractive),
+    timeoutSeconds,
+    firstOutputTimeoutSeconds,
+  });
+}
+
+function configureWorkflowCommand(command: Command, workflow: HarnessWorkflow): Command {
+  return command
+    .argument("[request]", "request text, @file, or an existing file path")
+    .option("--prompt <text>", "request text supplied explicitly")
+    .option("--file <path>", "read the complete request from a file")
+    .option("--project <path>", "project root", ".")
+    .option("--output <dir>", "project-relative artifact output directory", ".rb")
+    .option("--provider <name>", "codex, claude, opencode, or custom", process.env.RB_HARNESS_PROVIDER ?? "codex")
+    .option("--model <id>", "provider model ID", process.env.RB_HARNESS_MODEL ?? "")
+    .option("--effort <level>", "provider reasoning effort", process.env.RB_HARNESS_EFFORT ?? "")
+    .option("--adapter <path>", "custom headless adapter executable")
+    .option("--answers <json>", "non-interactive answers keyed by question ID")
+    .option("--questions <mode>", "one-by-one or batch", "one-by-one")
+    .option("--non-interactive", "never wait for terminal answers")
+    .option("--timeout <seconds>", "provider wall timeout; 0 disables", "3600")
+    .option("--first-output-timeout <seconds>", "provider first-output timeout; 0 disables", "300")
+    .action(async (request: string | undefined, options: WorkflowCliOptions) => workflowAction(workflow, request, options));
+}
+
+configureWorkflowCommand(program.command("init").description("Document and plan a new project"), "init");
+configureWorkflowCommand(program.command("ai-context").description("Reverse-engineer an implemented project into AS IS context"), "ai-context")
+  .option("--depth <mode>", "quick, balanced, or deep inspection", "balanced");
+configureWorkflowCommand(program.command("plan").description("Plan an isolated feature, fix, migration, or technical change"), "plan");
+configureWorkflowCommand(program.command("evolve").description("Plan a safe change to established product behavior"), "evolve");
+configureWorkflowCommand(review, "review")
+  .option("--depth <mode>", "quick, balanced, or deep audit", "balanced")
+  .option("--focus <areas...>", "one or more review focus areas")
+  .option("--plan-all-confirmed", "plan every and only confirmed finding after the audit")
+  .option("--findings <ids...>", "plan only the selected stable finding IDs");
+
+program.command("wizard").description("Start the interactive standalone Harness").action(async () => runHarnessWizard(HARNESS_VERSION));
+
+program
+  .command("status")
+  .description("Summarize existing artifacts, Ralph evidence, and Harness runs")
+  .option("--project <path>", "project root", ".")
+  .option("--output <dir>", "project-relative artifact directory", ".rb")
+  .option("--json", "emit JSON")
+  .action(async (options: { project: string; output: string; json?: boolean }) => {
+    const projectRoot = resolve(options.project);
+    const inventory = await inspectProjectInventory(projectRoot, options.output);
+    const runs = await listRunStates(projectRoot);
+    if (options.json) process.stdout.write(`${JSON.stringify({ inventory, runs }, null, 2)}\n`);
+    else {
+      process.stdout.write(`${formatProjectInventory(inventory)}\n\nGerações do Harness: ${runs.length}\n`);
+      for (const state of runs.slice(-20)) process.stdout.write(`  ${state.id}\t${state.workflow}\t${state.status}\n`);
+    }
+  });
+
+program
+  .command("resume")
+  .description("Resume an interrupted standalone Harness generation")
+  .argument("[run-id]", "run ID; defaults to the newest incomplete run")
+  .option("--project <path>", "project root", ".")
+  .option("--answers <json>", "answers keyed by question ID")
+  .option("--non-interactive", "never wait for terminal answers")
+  .option("--questions <mode>", "one-by-one or batch", "one-by-one")
+  .option("--timeout <seconds>", "provider wall timeout", "3600")
+  .option("--first-output-timeout <seconds>", "provider first-output timeout", "300")
+  .action(async (runId: string | undefined, options: {
+    project: string; answers?: string; nonInteractive?: boolean; questions: string; timeout: string; firstOutputTimeout: string;
+  }) => {
+    const projectRoot = resolve(options.project);
+    if (!runId) {
+      const runs = (await listRunStates(projectRoot)).filter((state) => state.status !== "complete");
+      runId = runs.at(-1)?.id;
+    }
+    if (!runId) throw new Error("no incomplete Harness run was found");
+    await resumeStandaloneWorkflow(projectRoot, runId, {
+      answersFile: options.answers,
+      nonInteractive: Boolean(options.nonInteractive),
+      questionMode: options.questions as "one-by-one" | "batch",
+      timeoutSeconds: Number(options.timeout),
+      firstOutputTimeoutSeconds: Number(options.firstOutputTimeout),
+    });
+  });
+
+const artifacts = program.command("artifacts").description("Inspect compatible artifact trees");
+artifacts
+  .command("inspect")
+  .option("--project <path>", "project root", ".")
+  .option("--output <dir>", "project-relative artifact directory", ".rb")
+  .option("--json", "emit JSON")
+  .action(async (options: { project: string; output: string; json?: boolean }) => {
+    const inventory = await inspectProjectInventory(resolve(options.project), options.output);
+    process.stdout.write(options.json ? `${JSON.stringify(inventory, null, 2)}\n` : `${formatProjectInventory(inventory)}\n`);
+  });
+
 async function main(): Promise<void> {
+  if (process.argv.length === 2) {
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      program.outputHelp();
+      throw new Error("no command was provided and the terminal is not interactive");
+    }
+    await runHarnessWizard(HARNESS_VERSION);
+    return;
+  }
+  if (process.argv.length === 3 && process.argv[2] === "--splash") {
+    await playHarnessSplash(HARNESS_VERSION, true);
+    return;
+  }
   await program.parseAsync(process.argv);
 }
 

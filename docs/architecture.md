@@ -4,9 +4,10 @@
 
 | Component | Responsibility |
 |---|---|
-| Core CLI | Deterministic parsing, validation, hashing, evidence, and discovery |
-| Codex adapter | Skills for init, context, review, evolution, and scoped planning workflows |
-| Claude adapter | Commands and agents implementing the same workflows |
+| Standalone executable | Wizard, provider invocation, adaptive interview, isolated generation, publication, deterministic parsing, validation, hashing, evidence, and discovery |
+| Workflow resources | Provider-neutral generation rules and artifact shapes loaded by the executable |
+| Codex adapter | Legacy skills exposing the same workflows during migration |
+| Claude adapter | Legacy commands exposing the same workflows during migration |
 | Contract | Provider-neutral `PHASES.md` grammar and artifact manifest |
 | RB Ralph | Optional Bash executor with manager review, deterministic gates, bounded provider waits, and isolated task parallelism |
 | RB Memory | Optional provider-neutral MCP, API, web, and SQLite continuity service; not an execution dependency |
@@ -14,6 +15,9 @@
 ## Artifact tree
 
 ```text
+.rb-harness/
+  runs/<run-id>/         private Harness state, provider logs, isolated workspace, and preserved prior revision
+
 .rb/
   rb-manifest.json       canonical machine-readable discovery document
   artifacts.tsv          generated Bash-compatible discovery projection
@@ -26,6 +30,12 @@
   manifests/             source hashes and auxiliary provenance
   runs/                  Ralph prompts, logs, phase snapshots, patches, and append-only run events
 ```
+
+The Harness provider writes only inside a private isolated workspace. The
+executable validates the generated manifest and contracts before atomically
+publishing `.rb` or the project-relative directory selected with `--output`.
+Existing compatible documents are copied into the workspace as context, and
+the replaced revision remains under `.rb-harness/runs/<run-id>/`.
 
 RB Ralph resolves execution inputs from `rb-manifest.json`. It does not scan
 for a preferred filename or assume that initial and feature plans share a
@@ -41,6 +51,7 @@ format consumable by a pure Bash loop.
 | Review findings | Current evidence plus `.rb/reviews` provenance and baseline |
 | Execution discovery | `.rb/rb-manifest.json` |
 | Execution grammar | `rb-execution/v1` |
+| Harness generation state | `.rb-harness/runs/<run-id>/state.json` |
 | Active run state | `.rb/runs/<artifact-id>-<plan-sha12>/` |
 | Cross-session memory | Optional `rb-memory/v1` service, keyed by tenant plus manifest `project.id` |
 
@@ -63,7 +74,33 @@ same tenant connects to the same project memory, while another tenant may use
 the same project ID without seeing or overwriting it. The deployment
 administrator creates tenants and revocable credentials through `/admin`.
 
-## Execution layers
+## Harness generation layers
+
+RB Harness keeps generation responsibilities separated:
+
+1. The executable inventories existing compatible artifacts and Ralph evidence.
+2. A read-only provider invocation returns a strict interview contract.
+3. The executable accepts, rejects, or follows up on answers one question at a
+   time and persists the normalized checkpoint.
+4. A fresh provider invocation receives that checkpoint and writes only in an
+   isolated project copy.
+5. Manifest synchronization and workflow-specific deterministic gates validate
+   the staged tree.
+6. A fresh read-only artifact auditor inspects the whole tree, returns one
+   structured batch grouped by invariant, and rejects ambiguous RIGID rules,
+   mechanism/requirement mismatches, contradictions, missing authority,
+   untraceable criteria, or over-broad tasks.
+7. A rejected draft receives the complete audit as a bounded repair handoff.
+   Canonical finding fingerprints stop an unchanged root-cause loop, and three
+   unsuccessful passes block publication.
+8. Only a structurally valid, independently audited tree is published
+   atomically; a failed generation never replaces the current artifact tree.
+
+The provider-specific Codex, Claude, OpenCode, or custom adapter is an
+invocation detail. It is not recorded as an execution dependency in generated
+project documentation.
+
+## Ralph execution layers
 
 RB Ralph keeps responsibilities separated:
 
@@ -90,6 +127,16 @@ turn into an unbounded wait loop.
 ## Invariants
 
 - Documentation generation is provider-neutral.
+- Existing plugin-generated artifact trees remain readable without the plugin
+  host, and relocated physical artifact roots preserve logical `.rb/...` paths.
+- A provider cannot publish an unvalidated artifact tree directly.
+- Artifact readiness requires an independent fresh-context audit; the writer's
+  completion statement is never sufficient.
+- A deterministic implementation requirement must name a finite
+  machine-checkable authority instead of delegating open-ended language
+  interpretation to examples or keyword growth.
+- Harness run logs and state are private runtime evidence under `.rb-harness/`;
+  generated portable documentation remains under the selected artifact root.
 - Only `PHASES.md` is constrained by the execution grammar; rich documents may
   use structures appropriate to their subject.
 - Every execution task traces to requirements and carries binary acceptance
