@@ -26,7 +26,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.2.0 is an executable rather than a workflow that must run inside
+RB Harness 0.2.1 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -41,7 +41,8 @@ the current shell. Verify the exact installed build with:
 
 ```bash
 rb-harness --version
-# 0.2.0
+rb-harness --ver
+# Both print 0.2.1
 ```
 
 Run without arguments to start the wizard:
@@ -50,7 +51,9 @@ Run without arguments to start the wizard:
 rb-harness
 ```
 
-The capybara splash is terminal-only and never pollutes CI or redirected logs:
+The responsive capybara splash uses the Ralph layout engine to center its
+wordmark, mascot, and labels horizontally and vertically. It selects a compact
+composition for small terminals and never pollutes CI or redirected logs:
 
 ```bash
 rb-harness --splash

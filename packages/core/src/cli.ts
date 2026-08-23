@@ -32,7 +32,7 @@ import type { ArtifactRecord, ArtifactStatus, ValidationIssue } from "./types.js
 import type { HarnessWorkflow, ProviderConfiguration } from "./standalone-types.js";
 
 const program = new Command();
-const HARNESS_VERSION = "0.2.0";
+const HARNESS_VERSION = "0.2.1";
 
 function printIssues(issues: ValidationIssue[], json: boolean): void {
   if (json) {
@@ -54,6 +54,7 @@ program
   .name("rb-harness")
   .description("Provider-neutral documentation harness and deterministic artifact contracts")
   .version(HARNESS_VERSION)
+  .option("--ver", "output the version number (alias for --version)")
   .option("--splash", "play the RB Harness capybara splash and exit")
   .option("--no-splash", "skip the launch splash")
   .addHelpText("beforeAll", `${harnessBrand(HARNESS_VERSION)}\n\n`)
@@ -536,6 +537,10 @@ artifacts
   });
 
 async function main(): Promise<void> {
+  if (process.argv.slice(2).includes("--ver")) {
+    process.stdout.write(`${HARNESS_VERSION}\n`);
+    return;
+  }
   if (process.argv.length === 2) {
     if (!process.stdin.isTTY || !process.stdout.isTTY) {
       program.outputHelp();

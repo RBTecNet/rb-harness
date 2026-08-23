@@ -6,7 +6,7 @@ import { parseInterviewAnalysis } from "../src/harness-interview.js";
 import { artifactAuditFingerprint, parseArtifactAudit } from "../src/harness-audit.js";
 import { providerInvocation, runProvider } from "../src/harness-provider.js";
 import { inspectProjectInventory } from "../src/harness-inventory.js";
-import { harnessBrand } from "../src/harness-splash.js";
+import { composeHarnessSplash, harnessBrand, renderHarnessSplashFrame } from "../src/harness-splash.js";
 import { runStandaloneWorkflow } from "../src/standalone-runner.js";
 import { assertNoEnvironmentSecrets, prepareGenerationWorkspace, recoverInterruptedPublication } from "../src/harness-workspace.js";
 import { validateManifestTree } from "../src/manifest.js";
@@ -17,11 +17,27 @@ const repairingProvider = resolve(process.cwd(), "test/fixtures/standalone/repai
 
 describe("standalone RB Harness", () => {
   it("preserves the versioned RB wordmark and capybara mascot", () => {
-    const brand = harnessBrand("0.2.0");
+    const brand = harnessBrand("0.2.1");
     expect(brand).toContain("◕      ◕");
     expect(brand).toContain("▪  ▪");
     expect(brand).toContain("◡◡");
-    expect(brand).toContain("capivara das especificações · v0.2.0");
+    expect(brand).toContain("capivara das especificações · v0.2.1");
+  });
+
+  it("centers a responsive Ralph-quality splash in both terminal dimensions", () => {
+    const columns = 120;
+    const rows = 30;
+    const lines = composeHarnessSplash("0.2.1", columns, rows);
+    expect(lines[0]).toContain("██████╗");
+    expect(lines.every((line) => [...line].length <= columns)).toBe(true);
+    expect(lines.filter(Boolean).every((line) => line.startsWith(" "))).toBe(true);
+    const frame = renderHarnessSplashFrame(lines, 0, true, rows, columns);
+    const body = frame.slice("\u001b[H\u001b[2J".length);
+    expect(body.match(/^\n*/)?.[0].length).toBe(Math.floor((rows - lines.length) / 2));
+
+    const compact = composeHarnessSplash("0.2.1", 50, 16);
+    expect(compact[0]).toContain("█▀█ █▄▄");
+    expect(compact.every((line) => [...line].length <= 50)).toBe(true);
   });
 
   it("maps provider-neutral model and effort settings without a profile layer", () => {
