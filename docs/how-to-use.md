@@ -67,6 +67,9 @@ connection without starting a documentation workflow:
 rb-harness provider list
 rb-harness provider list --json
 
+# Guided connection test
+rb-harness provider test
+
 rb-harness provider test --provider openrouter \
   --model vendor/model --credential trabalho --timeout 60
 ```
@@ -74,7 +77,10 @@ rb-harness provider test --provider openrouter \
 The test sends one minimal `PING` and reports the reply, latency, selected
 credential ID/protocol, and provider-reported token count. It never writes
 artifacts or run state. Add `--json` for the stable `rb-provider-test/v1`
-result.
+result. With provider or model omitted in an interactive terminal, a wizard
+lists configured APIs and credentials, asks for the remaining model, effort
+and timeout values, prints the equivalent command, and confirms before making
+the request. Non-interactive callers must provide both required values.
 
 The login first asks for a provider, then shows only the protocols implemented
 for it. OpenAI, Anthropic, DeepSeek, and MiniMax accept API keys; Gemini accepts

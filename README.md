@@ -26,7 +26,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.3.1 is an executable rather than a workflow that must run inside
+RB Harness 0.3.2 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -47,7 +47,7 @@ the current shell. Verify the exact installed build with:
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.3.1
+# Both print 0.3.2
 ```
 
 Run without arguments to start the wizard:
@@ -105,6 +105,10 @@ command starts a Harness workflow, creates run state, or writes artifacts:
 rb-harness provider list
 rb-harness provider list --json
 
+# Interactive: choose a configured provider/credential, model, effort and timeout
+rb-harness provider test
+
+# Non-interactive equivalent
 rb-harness provider test \
   --provider deepseek --model deepseek-v4-pro \
   --credential pessoal --timeout 60
@@ -117,6 +121,13 @@ is `rb-provider-list/v1`. `provider test --json` emits
 latency, bounded reply text, PONG recognition, and token usage when reported.
 Only safe credential metadata is returned, including which entry is the
 provider default; keys and OAuth tokens remain in the vault.
+When `provider test` is called without both `--provider` and `--model` in a
+terminal, its wizard lists only configured direct APIs, chooses among saved
+credentials without revealing their secrets, asks for model, optional effort
+and timeout, prints the equivalent command, and asks before sending the probe.
+Outside an interactive terminal, provider and model remain mandatory. The
+wizard is intentionally unavailable with an incomplete `--json` command so
+machine output always remains valid JSON.
 `--credential` accepts the displayed full ID, the original label, or its
 normalized slug (for example, all of `deepseek:deepseek-api-oficial`,
 `DeepSeek Api Oficial`, and `deepseek-api-oficial`).

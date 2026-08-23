@@ -10,7 +10,7 @@ import { runDirectApiAgentCli } from "./api-agent.js";
 import { PROVIDER_HELP, isCliProvider, isDirectProvider } from "./provider-registry.js";
 import { finishHarnessDashboard, startHarnessDashboard } from "./harness-dashboard.js";
 import { HARNESS_VERSION } from "./version.js";
-import { printProviderList, testProviderConnection } from "./provider-cli.js";
+import { printProviderList, runProviderTestCommand } from "./provider-cli.js";
 import { listRunStates } from "./harness-state.js";
 import { runHarnessWizard } from "./harness-wizard.js";
 import {
@@ -70,6 +70,7 @@ program
     "  rb-harness                         Start the interactive wizard",
     "  rb-harness plan --file change.md --provider codex --model gpt-5.6-sol --effort high",
     "  rb-harness review --project . --provider claude --model opus --output .rb",
+    "  rb-harness provider test          Test a configured API through the guided wizard",
     "  rb-harness status --project .     Summarize existing artifacts and resumable runs",
   ].join("\n"));
 
@@ -519,16 +520,16 @@ providerCommands.command("list")
   .option("--json", "emit rb-provider-list/v1 JSON")
   .action(async (options: { json?: boolean }) => printProviderList(Boolean(options.json)));
 providerCommands.command("test")
-  .description("Send a minimal PING/PONG request to one direct API provider")
-  .requiredOption("--provider <name>", "openai, anthropic, gemini, deepseek, minimax, or openrouter")
-  .requiredOption("--model <id>", "exact provider model ID")
+  .description("Send a minimal PING/PONG request; missing provider/model starts a wizard")
+  .option("--provider <name>", "openai, anthropic, gemini, deepseek, minimax, or openrouter")
+  .option("--model <id>", "exact provider model ID")
   .option("--credential <id-or-label>", "saved credential selector")
   .option("--effort <level>", "optional provider reasoning effort")
   .option("--timeout <seconds>", "connection-test timeout (1-900)", "60")
   .option("--json", "emit rb-provider-test/v1 JSON")
   .action(async (options: {
-    provider: string; model: string; credential?: string; effort?: string; timeout: string; json?: boolean;
-  }) => testProviderConnection({
+    provider?: string; model?: string; credential?: string; effort?: string; timeout: string; json?: boolean;
+  }) => runProviderTestCommand({
     provider: options.provider,
     model: options.model,
     credential: options.credential,

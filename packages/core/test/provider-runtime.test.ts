@@ -7,7 +7,7 @@ import { probeDirectProvider, runDirectApiAgent } from "../src/api-agent.js";
 import { credentialStorePaths, listCredentials, resolveCredential, saveCredential } from "../src/credential-store.js";
 import { renderHarnessDashboard } from "../src/harness-dashboard.js";
 import { providerInvocation } from "../src/harness-provider.js";
-import { providerListValue } from "../src/provider-cli.js";
+import { collectProviderTestWizardOptions, providerListValue } from "../src/provider-cli.js";
 
 const originalCredentialHome = process.env.RB_CREDENTIAL_HOME;
 
@@ -56,6 +56,43 @@ describe("shared direct-provider credentials", () => {
       credentials: [expect.objectContaining({ id: "openrouter:trabalho", protocol: "api-key", default: true })],
     }));
     expect(JSON.stringify(value)).not.toContain("openrouter-secret-for-test");
+  });
+
+  test("builds an interactive provider test from configured non-secret metadata", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "rb-provider-test-wizard-"));
+    process.env.RB_CREDENTIAL_HOME = root;
+    await saveCredential({ provider: "deepseek", protocol: "api-key", label: "Produção", secret: "wizard-secret-for-test" });
+    const answers = ["1", "deepseek-v4-pro", "high", "45", ""];
+    let rendered = "";
+
+    const options = await collectProviderTestWizardOptions({ timeout: 60 }, {
+      interactive: true,
+      question: async (prompt) => {
+        rendered += prompt;
+        return answers.shift() ?? "";
+      },
+      write: (value) => { rendered += value; },
+    });
+
+    expect(options).toEqual({
+      provider: "deepseek",
+      model: "deepseek-v4-pro",
+      credential: "deepseek:produ-o",
+      effort: "high",
+      timeout: 45,
+    });
+    expect(rendered).toContain("Provedores configurados");
+    expect(rendered).toContain("Comando equivalente");
+    expect(rendered).not.toContain("wizard-secret-for-test");
+    expect(answers).toEqual([]);
+  });
+
+  test("refuses to wait for wizard answers outside a terminal", async () => {
+    await expect(collectProviderTestWizardOptions({ timeout: 60 }, {
+      interactive: false,
+      question: async () => "",
+      write: () => undefined,
+    })).rejects.toThrow("requires --provider and --model outside an interactive terminal");
   });
 });
 
