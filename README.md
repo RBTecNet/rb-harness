@@ -28,7 +28,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.3.13 is an executable rather than a workflow that must run inside
+RB Harness 0.3.14 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -49,7 +49,7 @@ the current shell. Verify the exact installed build with:
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.3.13
+# Both print 0.3.14
 ```
 
 Run without arguments to start the wizard:
@@ -429,7 +429,6 @@ rb-harness artifacts verify \
 # Second call: reuse the newest compatible failed report.
 rb-harness artifacts verify \
   --project . --artifacts-dir .rb \
-  --against docs/original-request.md \
   --provider codex --model gpt-5.6-sol --effort high \
   --remediate --questions one-by-one --dashboard
 ```
@@ -439,7 +438,9 @@ Use `--from-report <path>` to select a specific report and `--answers <json>
 the exact current artifact and source-authority fingerprints. If an artifact,
 original request, or accepted decision changed after the audit, remediation
 fails as stale and asks for a fresh read-only verification; it never applies
-old findings to new documentation.
+old findings to new documentation. When the original audit used `--against`,
+remediation inherits that authority path from the report; repeating the option
+is allowed but not required.
 
 Remediation classifies technical gaps as writer work and asks only for missing
 product-observable decisions. After the adaptive interview reaches a valid

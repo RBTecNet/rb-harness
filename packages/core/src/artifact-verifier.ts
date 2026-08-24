@@ -65,6 +65,7 @@ export interface VerifyArtifactsOptions {
   projectRoot: string;
   artifactDirectory: string;
   againstFile?: string;
+  authorityRunId?: string;
   provider: ProviderConfiguration;
   deterministicOnly: boolean;
   timeoutSeconds: number;
@@ -264,9 +265,11 @@ async function authorityState(
   manifest: ArtifactManifest | undefined,
 ): Promise<{ state: HarnessRunState; authority: ArtifactVerificationReport["authority"]; missing: boolean }> {
   const generatedAt = manifest ? Date.parse(manifest.generatedAt) : Number.NaN;
-  const runs = (await listRunStates(options.projectRoot))
+  const completedRuns = (await listRunStates(options.projectRoot))
+    .filter((state) => state.status === "complete" && state.artifactDirectory === options.artifactDirectory);
+  const runs = completedRuns
     .filter((state) => {
-      if (state.status !== "complete" || state.artifactDirectory !== options.artifactDirectory || !state.publishedAt) return false;
+      if (!state.publishedAt) return false;
       const publishedAt = Date.parse(state.publishedAt);
       return Number.isFinite(generatedAt)
         && Number.isFinite(publishedAt)
@@ -274,7 +277,9 @@ async function authorityState(
         && publishedAt - generatedAt <= 5 * 60 * 1000;
     })
     .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
-  const existing = runs.at(-1);
+  const existing = options.authorityRunId
+    ? completedRuns.find((state) => state.id === options.authorityRunId)
+    : runs.at(-1);
   let request: string | undefined;
   let path: string | undefined;
   if (options.againstFile) {
@@ -286,7 +291,12 @@ async function authorityState(
   }
   if (existing) {
     return {
-      state: { ...existing, request: request ?? existing.request, provider: options.provider },
+      state: {
+        ...existing,
+        request: request ?? existing.request,
+        ...(path ? { requestSource: path } : {}),
+        provider: options.provider,
+      },
       authority: {
         source: options.againstFile ? "against-file" : "harness-run",
         ...(path ? { path } : {}),
@@ -381,6 +391,22 @@ async function loadRemediationReport(
   artifactFingerprint: string,
   authorityFingerprint: string,
 ): Promise<ArtifactVerificationReport> {
+  const reports = await remediationReports(options);
+  const matching = reports
+    .filter((report) => report.artifactDirectory === options.artifactDirectory
+      && report.artifactFingerprint === artifactFingerprint
+      && report.authorityFingerprint === authorityFingerprint)
+    .sort((left, right) => left.verifiedAt.localeCompare(right.verifiedAt));
+  const selected = matching.at(-1);
+  if (selected) return selected;
+  const explicit = options.fromReportPath ? resolve(options.projectRoot, options.fromReportPath) : undefined;
+  const qualifier = explicit ? `The selected report is missing, invalid, or stale: ${explicit}.` : "No compatible verification report was found.";
+  throw new Error(`${qualifier} Run rb-harness artifacts verify without --remediate against the current artifact tree first.`);
+}
+
+async function remediationReports(
+  options: RemediateArtifactsOptions,
+): Promise<ArtifactVerificationReport[]> {
   const projectRoot = resolve(options.projectRoot);
   const explicit = options.fromReportPath ? resolve(projectRoot, options.fromReportPath) : undefined;
   const candidates = explicit
@@ -394,15 +420,7 @@ async function loadRemediationReport(
       if (parsed) reports.push(parsed);
     } catch { /* malformed or concurrently incomplete reports are ignored */ }
   }
-  const matching = reports
-    .filter((report) => report.artifactDirectory === options.artifactDirectory
-      && report.artifactFingerprint === artifactFingerprint
-      && report.authorityFingerprint === authorityFingerprint)
-    .sort((left, right) => left.verifiedAt.localeCompare(right.verifiedAt));
-  const selected = matching.at(-1);
-  if (selected) return selected;
-  const qualifier = explicit ? `The selected report is missing, invalid, or stale: ${explicit}.` : "No compatible verification report was found.";
-  throw new Error(`${qualifier} Run rb-harness artifacts verify without --remediate against the current artifact tree first.`);
+  return reports;
 }
 
 function sourceAuthorityFingerprint(state: HarnessRunState): string {
@@ -542,13 +560,37 @@ export async function verifyAndRemediateArtifacts(
   const projectRoot = resolve(options.projectRoot);
   const artifactFingerprint = await artifactTreeFingerprint(projectRoot, options.artifactDirectory);
   const tree = await validateManifestTree(projectRoot, { artifactDirectory: options.artifactDirectory });
-  const authority = await authorityState({ ...options, projectRoot }, tree.manifest);
+  const storedReports = await remediationReports({ ...options, projectRoot });
+  if (options.fromReportPath && !storedReports.length) {
+    throw new Error(
+      `The selected report is missing, invalid, or stale: ${resolve(projectRoot, options.fromReportPath)}. Run rb-harness artifacts verify without --remediate against the current artifact tree first.`,
+    );
+  }
+  const artifactReport = storedReports
+    .filter((report) => report.artifactDirectory === options.artifactDirectory
+      && report.artifactFingerprint === artifactFingerprint)
+    .sort((left, right) => left.verifiedAt.localeCompare(right.verifiedAt))
+    .at(-1);
+  const authorityReport = artifactReport ?? (options.fromReportPath ? storedReports.at(-1) : undefined);
+  const inheritedAgainstFile = !options.againstFile && authorityReport?.authority.source === "against-file"
+    ? authorityReport.authority.path
+    : undefined;
+  const inheritedAuthorityRunId = !options.againstFile && !inheritedAgainstFile
+    ? authorityReport?.authority.harnessRunId
+    : undefined;
+  const effectiveOptions: RemediateArtifactsOptions = {
+    ...options,
+    projectRoot,
+    againstFile: options.againstFile ?? inheritedAgainstFile,
+    authorityRunId: options.authorityRunId ?? inheritedAuthorityRunId,
+  };
+  const authority = await authorityState(effectiveOptions, tree.manifest);
   if (authority.missing) {
     throw new Error("artifact remediation requires the original request authority; provide --against <request-file>");
   }
   const authorityFingerprint = sourceAuthorityFingerprint(authority.state);
   const initialReport = await loadRemediationReport(
-    { ...options, projectRoot },
+    effectiveOptions,
     artifactFingerprint,
     authorityFingerprint,
   );
@@ -579,8 +621,7 @@ export async function verifyAndRemediateArtifacts(
   });
   process.stdout.write("[rb-harness] reemissão concluída; executando a única verificação pós-remediação.\n");
   const finalReport = await verifyArtifacts({
-    ...options,
-    projectRoot,
+    ...effectiveOptions,
     reportPath: options.reportPath,
   });
   return {

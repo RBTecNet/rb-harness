@@ -212,13 +212,14 @@ not repeated:
 
 ```bash
 rb-harness artifacts verify --project . --artifacts-dir .rb \
-  --against docs/original-request.md \
   --provider codex --model gpt-5.6-sol --effort high \
   --remediate --questions one-by-one
 ```
 
 `--from-report <path>` selects a particular report. A report becomes stale when
 the artifacts, original request, or accepted interview authority changes.
+An `--against` authority used by the original audit is inherited from the
+selected report, so it does not need to be repeated during remediation.
 The remediation interview asks only decisions absent from accepted authority;
 technical findings remain writer responsibilities. Harness performs one full
 isolated re-emission, preserves the old artifact tree, and runs one final

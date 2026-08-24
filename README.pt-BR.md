@@ -15,7 +15,7 @@ separadamente com `rb-harness artifacts verify`.
 
 ## Instalação do executável
 
-O RB Harness 0.3.13 exige Node.js 20 ou superior. No clone do repositório:
+O RB Harness 0.3.14 exige Node.js 20 ou superior. No clone do repositório:
 
 ```bash
 npm install
@@ -34,7 +34,7 @@ Confira a versão instalada:
 ```bash
 rb-harness --version
 rb-harness --ver
-# 0.3.13
+# 0.3.14
 ```
 
 Executar apenas `rb-harness` abre o assistente interativo. O splash com a
@@ -236,7 +236,6 @@ rb-harness artifacts verify \
 # 2. Consome automaticamente o relatório compatível mais recente.
 rb-harness artifacts verify \
   --project . --artifacts-dir .rb \
-  --against docs/solicitacao-original.md \
   --provider codex --model gpt-5.6-sol --effort high \
   --remediate --questions one-by-one --dashboard
 ```
@@ -246,7 +245,6 @@ Para escolher um relatório específico:
 ```bash
 rb-harness artifacts verify \
   --project . --artifacts-dir .rb \
-  --against docs/solicitacao-original.md \
   --provider codex --remediate \
   --from-report .rb-harness/verifications/<id>/report.json
 ```
@@ -254,7 +252,9 @@ rb-harness artifacts verify \
 As impressões digitais do relatório devem ser idênticas à árvore e à autoridade
 atuais. Se qualquer byte dos artefatos, a solicitação original ou uma decisão
 aceita mudou após a auditoria, o relatório é rejeitado como stale e uma nova
-execução sem `--remediate` é exigida.
+execução sem `--remediate` é exigida. Quando a auditoria original usou
+`--against`, a remediação herda o caminho da autoridade registrado no
+relatório; repetir a opção é permitido, mas não é necessário.
 
 O fluxo de remediação é deliberadamente limitado:
 

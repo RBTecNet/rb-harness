@@ -145,8 +145,10 @@ describe("artifact verifier", () => {
       expect(initial.authorityFingerprint).toMatch(/^[a-f0-9]{64}$/);
       expect(initial.findings.some((finding) => finding.id === "proofability.scope-authority")).toBe(true);
 
+      const remediationOptions: Omit<typeof options, "againstFile"> & { againstFile?: string } = { ...options };
+      delete remediationOptions.againstFile;
       const result = await verifyAndRemediateArtifacts({
-        ...options,
+        ...remediationOptions,
         questionMode: "one-by-one",
         nonInteractive: true,
       });
@@ -165,7 +167,7 @@ describe("artifact verifier", () => {
         .toEqual(["audit", "interview", "generation", "audit"]);
 
       await expect(verifyAndRemediateArtifacts({
-        ...options,
+        ...remediationOptions,
         fromReportPath: initial.reportPath,
         questionMode: "one-by-one",
         nonInteractive: true,
