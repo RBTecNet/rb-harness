@@ -88,6 +88,36 @@ describe("artifact manifest", () => {
     expect((await validateManifestTree(root)).valid).toBe(true);
   });
 
+  it("allocates stable unique IDs for long and normalization-colliding artifact paths", async () => {
+    const root = await project();
+    const sources = resolve(root, ".rb/evolutions/studio-web-workflows/sources/normative");
+    await mkdir(sources, { recursive: true });
+    const longPaths = [
+      resolve(sources, "rb-headless-init-v1.md"),
+      resolve(sources, "rb-headless-interview-v1.md"),
+    ];
+    const punctuationPaths = [
+      resolve(root, ".rb/evolutions/studio-web-workflows/contracts/a+b.md"),
+      resolve(root, ".rb/evolutions/studio-web-workflows/contracts/a b.md"),
+    ];
+    await mkdir(dirname(punctuationPaths[0]!), { recursive: true });
+    for (const path of [...longPaths, ...punctuationPaths]) await writeFile(path, `# ${path}\n`, "utf8");
+
+    const first = await syncManifest(root);
+    const selected = first.artifacts.filter((artifact) => [...longPaths, ...punctuationPaths]
+      .some((path) => artifact.path.endsWith(path.slice(resolve(root, ".rb").length).split("\\").join("/").replace(/^\//, ""))));
+    expect(selected).toHaveLength(4);
+    expect(new Set(selected.map((artifact) => artifact.id)).size).toBe(4);
+    expect(selected.every((artifact) => artifact.id.length <= 64)).toBe(true);
+
+    const second = await syncManifest(root);
+    expect(second.artifacts
+      .filter((artifact) => selected.some((entry) => entry.path === artifact.path))
+      .map((artifact) => [artifact.path, artifact.id]))
+      .toEqual(selected.map((artifact) => [artifact.path, artifact.id]));
+    expect((await validateManifestTree(root)).valid).toBe(true);
+  });
+
   it("never indexes Ralph runtime state under .rb/runs", async () => {
     const root = await project();
     const runRoot = resolve(root, ".rb/runs/example-execution-deadbeef1234");

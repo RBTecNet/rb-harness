@@ -1,10 +1,13 @@
 #!/usr/bin/env node
-import { mkdir, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const chunks = [];
 for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
 const prompt = Buffer.concat(chunks).toString("utf8");
+if (process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE) {
+  await appendFile(process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE, `${process.env.RB_HARNESS_MODE ?? "unknown"}\n`, "utf8");
+}
 
 if (process.env.RB_HARNESS_MODE === "interview") {
   const pending = prompt.includes('"disposition":"PENDING"');

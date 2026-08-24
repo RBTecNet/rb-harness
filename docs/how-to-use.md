@@ -183,6 +183,13 @@ a role limit or timeout stops the provider and every discovered descendant,
 including tools that opened a separate process session. The run remains
 resumable and the failed provider log records the precise limit diagnostic.
 
+If the writer completed and a later manifest/contract gate failed, run the
+normal `rb-harness resume <run-id> --project .` command. The Harness recognizes
+the complete generation checkpoint, revalidates deterministic indexes with the
+installed runtime, and proceeds to the independent audit without repeating the
+writer call. Long or normalization-colliding artifact paths receive stable
+hash-suffixed IDs during manifest sync.
+
 ## Start a new project
 
 Use a description directly:

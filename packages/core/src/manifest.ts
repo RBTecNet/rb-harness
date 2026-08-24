@@ -2,7 +2,7 @@ import { access, mkdir, readFile } from "node:fs/promises";
 import { basename, extname, resolve, sep } from "node:path";
 import { validateExecutionMarkdown } from "./execution-contract.js";
 import { atomicWrite, readJson, relativeProjectPath, safeProjectPath, walkFiles } from "./fs-utils.js";
-import { sha256File } from "./hash.js";
+import { sha256File, sha256Text } from "./hash.js";
 import { isIsoDateTime } from "./headless-contract.js";
 import { validateOperationalJson } from "./operational-contract.js";
 import { candidateFindings, validateResponsiveInventoryJson } from "./responsive-inventory.js";
@@ -78,13 +78,16 @@ export function validateManifestValue(value: unknown): ManifestValidation {
 }
 
 export function slugify(value: string): string {
+  return normalizedIdentifier(value).slice(0, 64) || "project";
+}
+
+function normalizedIdentifier(value: string): string {
   return value
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 64) || "project";
+    .replace(/^-+|-+$/g, "");
 }
 
 function artifactDirectoryPath(root: string, artifactDirectory = ".rb"): string {
@@ -147,7 +150,22 @@ async function responsiveMetadata(path: string): Promise<{
 }
 
 function pathArtifactId(relativePath: string): string {
-  return slugify(relativePath.replace(/^\.rb\//, "").replace(/\.[^.]+$/, ""));
+  const source = relativePath.replace(/^\.rb\//, "").replace(/\.[^.]+$/, "");
+  const readable = normalizedIdentifier(source) || "artifact";
+  if (readable.length <= 64) return readable;
+  const suffix = sha256Text(relativePath).slice(0, 12);
+  return `${readable.slice(0, 51).replace(/-+$/g, "")}-${suffix}`;
+}
+
+function collisionArtifactId(relativePath: string, claimed: Set<string>): string {
+  const readable = normalizedIdentifier(relativePath.replace(/^\.rb\//, "").replace(/\.[^.]+$/, "")) || "artifact";
+  for (const suffixLength of [12, 16, 24, 32]) {
+    const suffix = sha256Text(relativePath).slice(0, suffixLength);
+    const head = readable.slice(0, 63 - suffixLength).replace(/-+$/g, "") || "artifact";
+    const candidate = `${head}-${suffix}`;
+    if (!claimed.has(candidate)) return candidate;
+  }
+  throw new Error(`Unable to allocate a stable artifact ID for ${relativePath}`);
 }
 
 async function executionMetadata(path: string): Promise<{
@@ -271,6 +289,17 @@ export async function syncManifest(root: string): Promise<ArtifactManifest> {
     });
   }
   artifacts.sort((left, right) => left.path.localeCompare(right.path));
+  const explicitPaths = new Set(artifacts
+    .filter((artifact) => artifact.kind === "execution-plan")
+    .map((artifact) => artifact.path));
+  const claimed = new Set(artifacts
+    .filter((artifact) => explicitPaths.has(artifact.path))
+    .map((artifact) => artifact.id));
+  for (const artifact of artifacts) {
+    if (explicitPaths.has(artifact.path)) continue;
+    if (claimed.has(artifact.id)) artifact.id = collisionArtifactId(artifact.path, claimed);
+    claimed.add(artifact.id);
+  }
   const manifest: ArtifactManifest = {
     ...existing,
     generatedAt: new Date().toISOString(),

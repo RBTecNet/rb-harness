@@ -103,6 +103,17 @@ before termination. It signals both the provider process group and descendants
 that created nested sessions, then escalates to `SIGKILL`; output overflow and
 timeouts therefore cannot leave sandboxed tools orphaned.
 
+Manifest synchronization derives collision-safe IDs from logical artifact
+paths. It preserves short readable IDs, adds a deterministic path-hash suffix
+before truncating long IDs, and hashes a later candidate when two normalized
+short paths still collide. Explicit execution-plan IDs remain authoritative
+and are never silently rewritten.
+
+After a writer exits successfully, the run records a durable generation
+checkpoint before deterministic validation. Validation or audit infrastructure
+failures can therefore resume from the staged `.rb` tree without invoking the
+writer again; a checkpoint is reused only for the matching logical pass.
+
 The provider-specific Codex, Claude, OpenCode, or custom adapter is an
 invocation detail. It is not recorded as an execution dependency in generated
 project documentation.

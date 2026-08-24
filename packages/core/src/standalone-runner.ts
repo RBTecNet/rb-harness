@@ -269,26 +269,55 @@ async function generationPrompt(
 }
 
 async function generate(state: HarnessRunState, runRoot: string, options: StandaloneRunOptions): Promise<void> {
-  const workspace = await prepareGenerationWorkspace(state, runRoot);
   const maximumPasses = 3;
   let validation: Awaited<ReturnType<typeof validateGeneratedWorkspace>> | undefined;
   let priorAudit = state.artifactAudits?.at(-1);
-  for (let pass = 1; pass <= maximumPasses; pass += 1) {
-    state.status = "generating";
-    state.diagnostic = undefined;
-    await writeRunState(state);
-    process.stdout.write(`[rb-harness] workspace isolado pronto; geração ${pass}/${maximumPasses} com ${state.provider.provider}/${state.provider.model || "provider-default"}...\n`);
-    await runProvider({
-      configuration: state.provider,
-      mode: "generation",
-      projectRoot: workspace,
-      prompt: await generationPrompt(state, workspace, priorAudit),
-      logPath: resolve(runRoot, `logs/generation-pass-${pass}.log`),
-      timeoutSeconds: options.timeoutSeconds,
-      firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
-      streamOutput: true,
-    });
+  const nextPass = Math.min(maximumPasses, Math.max(1, (priorAudit?.pass ?? 0) + 1));
+  const stagedWorkspace = resolve(runRoot, "workspace");
+  const legacyValidationFailure = state.status === "generation-failed"
+    && state.diagnostic?.startsWith("generated artifact tree is invalid:");
+  const checkpointMatches = state.generationCheckpoint?.contract === "rb-harness-generation-checkpoint/v1"
+    && state.generationCheckpoint.pass === nextPass;
+  let reuseGeneratedWorkspace = false;
+  if (legacyValidationFailure || checkpointMatches) {
+    try {
+      const workspaceInfo = await lstat(stagedWorkspace);
+      const artifactInfo = await lstat(resolve(stagedWorkspace, ".rb"));
+      reuseGeneratedWorkspace = workspaceInfo.isDirectory() && !workspaceInfo.isSymbolicLink()
+        && artifactInfo.isDirectory() && !artifactInfo.isSymbolicLink();
+    } catch { /* an incomplete checkpoint is regenerated safely */ }
+  }
+  const workspace = reuseGeneratedWorkspace
+    ? stagedWorkspace
+    : await prepareGenerationWorkspace(state, runRoot);
+  for (let pass = nextPass; pass <= maximumPasses; pass += 1) {
+    if (reuseGeneratedWorkspace) {
+      process.stdout.write(`[rb-harness] saída completa da geração ${pass}/${maximumPasses} recuperada; retomando da validação sem reinvocar o provider.\n`);
+      reuseGeneratedWorkspace = false;
+    } else {
+      state.status = "generating";
+      state.diagnostic = undefined;
+      state.generationCheckpoint = undefined;
+      await writeRunState(state);
+      process.stdout.write(`[rb-harness] workspace isolado pronto; geração ${pass}/${maximumPasses} com ${state.provider.provider}/${state.provider.model || "provider-default"}...\n`);
+      await runProvider({
+        configuration: state.provider,
+        mode: "generation",
+        projectRoot: workspace,
+        prompt: await generationPrompt(state, workspace, priorAudit),
+        logPath: resolve(runRoot, `logs/generation-pass-${pass}.log`),
+        timeoutSeconds: options.timeoutSeconds,
+        firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
+        streamOutput: true,
+      });
+      state.generationCheckpoint = {
+        contract: "rb-harness-generation-checkpoint/v1",
+        pass,
+        providerCompletedAt: new Date().toISOString(),
+      };
+    }
     state.status = "validating";
+    state.diagnostic = undefined;
     await writeRunState(state);
     validation = await validateGeneratedWorkspace(workspace, state.workflow);
     process.stdout.write(`[rb-harness] validação estrutural verde: ${validation.artifacts} artefatos, ${validation.readyPlans} planos prontos.\n`);
@@ -337,6 +366,7 @@ async function generate(state: HarnessRunState, runRoot: string, options: Standa
     }
     process.stdout.write(`[rb-harness] auditoria pediu revisão completa (${findingList}); iniciando nova geração em contexto fresco.\n`);
     priorAudit = record;
+    state.generationCheckpoint = undefined;
   }
   if (!validation) throw new Error("artifact generation produced no validated pass");
   state.status = "publishing";
@@ -344,6 +374,7 @@ async function generate(state: HarnessRunState, runRoot: string, options: Standa
   const previous = await publishGeneratedArtifacts(state, runRoot, workspace);
   state.previousArtifacts = previous;
   state.status = "complete";
+  state.generationCheckpoint = undefined;
   state.publishedAt = new Date().toISOString();
   state.diagnostic = undefined;
   await writeRunState(state);

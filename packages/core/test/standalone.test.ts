@@ -8,9 +8,10 @@ import { providerInvocation, providerOutputLimit, runProvider } from "../src/har
 import { inspectProjectInventory } from "../src/harness-inventory.js";
 import { composeHarnessSplash, harnessBrand, renderHarnessSplashFrame } from "../src/harness-splash.js";
 import { loadWorkflowResources, requestNeedsHeadlessContracts, resolveWorkflowResourceRoot } from "../src/standalone-resources.js";
-import { hasReadyInterviewCheckpoint, nextInterviewRound, normalizeInterviewAnswer, runStandaloneWorkflow } from "../src/standalone-runner.js";
+import { hasReadyInterviewCheckpoint, nextInterviewRound, normalizeInterviewAnswer, resumeStandaloneWorkflow, runStandaloneWorkflow } from "../src/standalone-runner.js";
 import { assertNoEnvironmentSecrets, prepareGenerationWorkspace, recoverInterruptedPublication, validateGeneratedWorkspace } from "../src/harness-workspace.js";
 import { validateManifestTree } from "../src/manifest.js";
+import { writeRunState } from "../src/harness-state.js";
 
 const fakeProvider = resolve(process.cwd(), "test/fixtures/standalone/fake-provider.mjs");
 const failingProvider = resolve(process.cwd(), "test/fixtures/standalone/failing-provider.mjs");
@@ -368,5 +369,52 @@ describe("standalone RB Harness", () => {
     expect(state.artifactAudits?.map((audit) => audit.status)).toEqual(["revise", "pass"]);
     expect(await readFile(resolve(project, ".rb/features/audit-repair/SPEC.md"), "utf8")).toContain("request.targetMode");
     await expect(readFile(resolve(project, ".rb/features/audit-repair/SPEC.md"), "utf8")).resolves.not.toContain("every phrase");
+  }, 30_000);
+
+  it("resumes a completed provider generation at deterministic validation without reinvoking the writer", async () => {
+    const project = await mkdtemp(resolve(tmpdir(), "rb-harness-validation-resume-"));
+    await writeFile(resolve(project, "package.json"), '{"name":"validation-resume-fixture"}\n', "utf8");
+    const answers = resolve(project, "answers.json");
+    await writeFile(answers, '{"scope-boundary":"Yes"}\n', "utf8");
+    await chmod(fakeProvider, 0o755);
+    const completed = await runStandaloneWorkflow({
+      workflow: "plan",
+      projectRoot: project,
+      artifactDirectory: ".rb",
+      request: "Plan a validated resumable feature.",
+      provider: { provider: "custom", model: "fixture-model", effort: "high", command: fakeProvider },
+      answersFile: answers,
+      questionMode: "one-by-one",
+      nonInteractive: true,
+      timeoutSeconds: 30,
+      firstOutputTimeoutSeconds: 5,
+    });
+    const id = "validation-recovery-run";
+    const runRoot = resolve(project, ".rb-harness/runs", id);
+    const recovery = {
+      ...completed,
+      id,
+      status: "generation-failed" as const,
+      artifactAudits: undefined,
+      generationCheckpoint: undefined,
+      previousArtifacts: undefined,
+      publishedAt: undefined,
+      diagnostic: "generated artifact tree is invalid: artifact.id.duplicate: fixture",
+    };
+    await prepareGenerationWorkspace(recovery, runRoot);
+    await writeRunState(recovery);
+    const modes = resolve(project, "provider-modes.log");
+    process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE = modes;
+    try {
+      const resumed = await resumeStandaloneWorkflow(project, id, {
+        timeoutSeconds: 30,
+        firstOutputTimeoutSeconds: 5,
+      });
+      expect(resumed.status).toBe("complete");
+      expect((await readFile(modes, "utf8")).trim().split("\n")).toEqual(["audit"]);
+      expect(resumed.generationCheckpoint).toBeUndefined();
+    } finally {
+      delete process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE;
+    }
   }, 30_000);
 });

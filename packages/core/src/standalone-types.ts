@@ -90,6 +90,12 @@ export interface ArtifactAuditRecord extends ArtifactAudit {
   auditedAt: string;
 }
 
+export interface GenerationCheckpoint {
+  contract: "rb-harness-generation-checkpoint/v1";
+  pass: number;
+  providerCompletedAt: string;
+}
+
 export interface ProjectInventory {
   projectRoot: string;
   artifactDirectory: string;
@@ -130,6 +136,7 @@ export interface HarnessRunState {
   activeInterviewRound?: number;
   analysis?: InterviewAnalysis;
   artifactAudits?: ArtifactAuditRecord[];
+  generationCheckpoint?: GenerationCheckpoint;
   inventory: ProjectInventory;
   createdAt: string;
   updatedAt: string;

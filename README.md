@@ -26,7 +26,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.3.8 is an executable rather than a workflow that must run inside
+RB Harness 0.3.9 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -47,7 +47,7 @@ the current shell. Verify the exact installed build with:
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.3.8
+# Both print 0.3.9
 ```
 
 Run without arguments to start the wizard:
@@ -219,6 +219,11 @@ and audit remain capped at 32 MiB. Limits are measured as UTF-8 bytes. Timeout
 or output overflow terminates the complete descendant tree, including nested
 sandbox sessions, before the resumable failure is recorded.
 
+Automatic manifest IDs remain readable for ordinary paths. Long paths receive
+a deterministic SHA-256 suffix before the 64-character boundary, and any
+remaining normalization collision receives the same stable fallback. Manifest
+sync therefore cannot silently assign one ID to two different artifacts.
+
 The previous artifact tree remains under `.rb-harness/runs/<run-id>/` and a
 power-loss interruption is resumed with:
 
@@ -228,7 +233,13 @@ rb-harness resume --project .
 rb-harness resume <run-id> --project .
 ```
 
-On resume, the Harness first revalidates any successful provider response that
+When a writer has already completed but deterministic manifest or contract
+validation fails, the private workspace remains checkpointed. Resume
+revalidates that exact staged tree and continues with the independent audit
+without paying for a second writer call. The workspace is regenerated only
+when no complete checkpoint can be proven.
+
+On resume, the Harness also first revalidates any successful interview provider response that
 was already written to the private run log. If the current protocol accepts
 it and it still matches the pending-answer state, the response is reused
 without spending another provider call.
