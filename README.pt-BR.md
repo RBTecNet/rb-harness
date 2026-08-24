@@ -15,7 +15,7 @@ autoria semântica acontece exatamente uma vez.
 
 ## Instalação do executável
 
-O RB Harness 0.4.1 exige Node.js 20 ou superior. No clone do repositório:
+O RB Harness 0.4.2 exige Node.js 20 ou superior. No clone do repositório:
 
 ```bash
 npm install
@@ -34,7 +34,7 @@ Confira a versão instalada:
 ```bash
 rb-harness --version
 rb-harness --ver
-# 0.4.1
+# 0.4.2
 ```
 
 Executar apenas `rb-harness` abre o assistente interativo. O splash com a
@@ -139,11 +139,51 @@ Harness declara explicitamente o que consegue ou não medir:
 
 | Adapter | Controle interno | Orçamento de turns/tools | Métricas de uso | Confinamento de leitura | Transporte do stdout |
 |---|---|---|---|---|---|
-| APIs diretas | aplicado localmente | aplicado | reportado quando o provider devolve `usage` | aplicado em processo | texto final |
+| APIs diretas | aplicado localmente | aplicado | reportado quando o provider devolve `usage` | aplicado em processo | texto final (streaming interno) |
 | `opencode` | consumido via `run --format json` | aplicado | não reportado pela CLI — não medido | nenhum | eventos JSONL |
 | `codex` | `exec --json` anunciado, não consumido | não alegado | não medido | nenhum | texto final |
 | `claude` | `--output-format stream-json` anunciado, não consumido | não alegado | não medido | nenhum | texto final |
 | `custom` | nada declarado | não alegado | não medido | nenhum | texto final |
+
+### APIs diretas usam streaming interno
+
+Um provider de API direta roda pelo runtime embutido, que agora pede uma
+resposta incremental e a consome conforme ela chega — SSE de chat completions no
+dialeto compatível com OpenAI e o stream de eventos no Anthropic Messages. Texto,
+reasoning, nomes de tool calls e argumentos fragmentados são remontados dentro do
+runtime; os argumentos só são parseados quando a resposta termina.
+
+Isso muda a observabilidade, não o resultado. **O stdout do subprocesso continua
+carregando exatamente uma coisa: a resposta final completa do modelo, byte a
+byte.** Nenhum fragmento do envelope documental é escrito no stdout. Enquanto a
+chamada está em andamento, o runtime informa atividade remota real por um canal
+separado no stderr, em marcadores sem conteúdo — um tipo como `content-delta`,
+nunca um token, um trecho de reasoning, um argumento de tool ou um segredo.
+
+É por isso que o `--first-output-timeout` volta a ter significado:
+
+- **`--first-output-timeout`** (padrão 300 s) mede o tempo até o provider
+  *realmente começar a responder* — o primeiro evento remoto. Um runtime sem
+  streaming ficava mudo até o loop inteiro terminar, então esse limite matava
+  gerações legítimas e já pagas.
+- **`--timeout`** (padrão 3600 s) continua sendo o limite total da chamada.
+
+Não existe heartbeat local de propósito. Um timer disparado pelo próprio Harness
+provaria apenas que o Harness está vivo e transformaria silenciosamente o
+first-output em um segundo wall timeout. O progresso só é renovado por um novo
+evento remoto; um comentário keep-alive do SSE é consumido e não renova nada. A
+saída no terminal continua compacta — *"provider respondeu após 3s; recebendo
+stream..."* e depois *"provider ativo há 15s; 42 eventos remotos recebidos"* — e
+nunca imprime tokens nem documentos parciais. O log da execução registra
+`remote_events` e `first_remote_event_ms`, e nenhum conteúdo do stream.
+
+O suporte a streaming é declarado por provider no registry, nunca inferido pelo
+id do provider em cada ponto do código. Um provider que não sirva o protocolo de
+streaming do seu dialeto falha com diagnóstico explícito; o runtime nunca repete
+a mesma requisição sem streaming, porque isso poderia pagar duas vezes pela mesma
+resposta. Em timeout, `SIGINT` ou `SIGTERM`, o fetch e o leitor do stream são
+abortados, nenhuma tool nova é executada, nenhuma resposta parcial é publicada e
+o usage que o provider não entregou permanece desconhecido em vez de virar zero.
 
 Controle e transporte são colunas separadas porque são fatos separados. Um
 provider de API direta roda pelo runtime embutido, que é dono do catálogo de

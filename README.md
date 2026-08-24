@@ -28,7 +28,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.4.1 is an executable rather than a workflow that must run inside
+RB Harness 0.4.2 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -49,7 +49,7 @@ the current shell. Verify the exact installed build with:
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.4.1
+# Both print 0.4.2
 ```
 
 Run without arguments to start the wizard:
@@ -282,11 +282,51 @@ states plainly what it can and cannot account for:
 
 | Adapter | Internal control | Turn/tool budget | Usage metrics | Read confinement | stdout transport |
 |---|---|---|---|---|---|
-| direct APIs | enforced locally | enforced | reported when the provider returns `usage` | enforced in process | final text |
+| direct APIs | enforced locally | enforced | reported when the provider returns `usage` | enforced in process | final text (streamed internally) |
 | `opencode` | consumed via `run --format json` | enforced | not reported by the CLI — unmeasured | none | JSONL events |
 | `codex` | `exec --json` advertised, not consumed | not claimed | unmeasured | none | final text |
 | `claude` | `--output-format stream-json` advertised, not consumed | not claimed | unmeasured | none | final text |
 | `custom` | none declared | not claimed | unmeasured | none | final text |
+
+### Direct APIs stream internally
+
+A direct API provider runs through the bundled runtime, which now requests an
+incremental response and consumes it as it arrives — SSE chat completions for
+the OpenAI-compatible dialect, the event stream for Anthropic Messages. Text,
+reasoning, tool-call names, and fragmented tool-call arguments are reassembled
+in the runtime; arguments are parsed only once the response is complete.
+
+That changes observability, not the result. **The subprocess's stdout still
+carries exactly one thing: the model's complete final answer, byte for byte.**
+No fragment of the document envelope is ever written to stdout. While the call
+is in flight the runtime reports real remote activity on a separate stderr
+channel as content-free markers — a kind such as `content-delta`, never a token,
+a reasoning trace, a tool argument, or a secret.
+
+This is why `--first-output-timeout` is meaningful again:
+
+- **`--first-output-timeout`** (default 300 s) measures the time until the
+  provider *really starts answering* — the first remote event. A non-streaming
+  runtime was silent until the whole loop finished, so this deadline used to kill
+  legitimate, already-paid generations.
+- **`--timeout`** (default 3600 s) remains the total wall limit for the call.
+
+There is deliberately no local heartbeat. A timer the Harness fires itself would
+prove only that the Harness is alive, and would quietly turn the first-output
+deadline into a second wall timeout. Progress is renewed only by a new remote
+event; an SSE keep-alive comment is consumed and renews nothing. The terminal
+output stays compact — *"provider respondeu após 3s; recebendo stream..."*, then
+*"provider ativo há 15s; 42 eventos remotos recebidos"* — and never prints tokens
+or partial documents. The run log records `remote_events` and
+`first_remote_event_ms` and no stream content.
+
+Streaming support is declared per provider in the registry, never inferred from
+a provider id at a call site. A provider that cannot serve its dialect's
+streaming protocol fails with an explicit diagnostic; the runtime never retries
+the same request without streaming, because that could pay for one answer twice.
+On timeout, `SIGINT`, or `SIGTERM` the fetch and the stream reader are aborted,
+no further tool runs, no partial answer is published, and usage the provider
+never delivered stays unknown rather than being recorded as zero.
 
 Control and transport are separate columns because they are separate facts. A
 direct API provider runs through the bundled runtime, which owns the tool

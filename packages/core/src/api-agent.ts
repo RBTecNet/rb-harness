@@ -14,6 +14,11 @@ import {
 import { HARNESS_BUDGET } from "./harness-budget.js";
 import { resolveCredential } from "./credential-store.js";
 import { directProvider, type DirectProviderId } from "./provider-registry.js";
+import {
+  ActivityReporter,
+  readAnthropicStream,
+  readOpenAiStream,
+} from "./api-stream.js";
 
 export interface DirectApiAgentOptions {
   provider: DirectProviderId;
@@ -26,6 +31,10 @@ export interface DirectApiAgentOptions {
   artifactDirectory?: string;
   evidenceDirectory?: string;
   prompt: string;
+  /** Test seam: point the dialect at a local server instead of the provider. */
+  endpoint?: string;
+  /** Cancels the active request and its stream reader. */
+  signal?: AbortSignal;
 }
 
 interface UsageTotals {
@@ -194,6 +203,50 @@ async function requestJson(
   return payload;
 }
 
+/**
+ * Open a streaming completion.
+ *
+ * The response body is returned unread so the dialect reader can consume it
+ * incrementally; an HTTP failure is still reported from the parsed error body,
+ * exactly as the non-streaming path does.
+ */
+async function requestStream(
+  url: string,
+  headers: Record<string, string>,
+  body: unknown,
+  signal: AbortSignal,
+): Promise<ReadableStream<Uint8Array>> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "text/event-stream", ...headers },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+    const error = payload.error as Record<string, unknown> | undefined;
+    const message = String(error?.message ?? payload.message ?? response.statusText ?? "provider request failed").slice(0, 2000);
+    const retry = response.headers.get("retry-after");
+    throw new Error(`provider HTTP ${response.status}: ${message}${retry ? `; retry after ${retry}s` : ""}`);
+  }
+  if (!response.body) throw new Error("the provider accepted the request but returned no stream body");
+  return response.body;
+}
+
+/**
+ * The signal governing one agent run: the caller's cancellation combined with
+ * the wall limit. Aborting it tears down the fetch and the SSE reader, and no
+ * further tool is executed.
+ */
+function runSignal(options: DirectApiAgentOptions): AbortSignal {
+  const deadline = AbortSignal.timeout(15 * 60 * 1000);
+  return options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
+}
+
+function dialectEndpoint(options: DirectApiAgentOptions): string {
+  return options.endpoint ?? directProvider(options.provider).endpoint;
+}
+
 export interface DirectProviderProbeOptions {
   provider: DirectProviderId;
   model: string;
@@ -248,7 +301,7 @@ export async function probeDirectProvider(options: DirectProviderProbeOptions): 
     if (options.effort) body.reasoning_effort = options.effort;
     payload = await requestJson(definition.endpoint, {
       ...auth.headers,
-      ...(options.provider === "openrouter" ? { "http-referer": "https://github.com/RBTecNet/rb-harness", "x-openrouter-title": "RB Provider Test" } : {}),
+      ...(definition.headers ?? {}),
     }, body, timeoutSeconds * 1000);
   }
   const latencyMilliseconds = Date.now() - startedAt;
@@ -343,6 +396,8 @@ async function runOpenAiDialect(
   context: ApiAgentToolContext,
   usage: UsageTotals,
   counters: { toolCalls: number },
+  reporter: ActivityReporter,
+  signal: AbortSignal,
 ): Promise<string> {
   const definition = directProvider(options.provider);
   // Byte-stable prefix: system instruction, prompt, and tool catalog are
@@ -353,26 +408,36 @@ async function runOpenAiDialect(
     { role: "user", content: options.prompt },
   ];
   const turns = maximumTurns(options.role);
+  if (!definition.streaming.supported) {
+    // Declared per provider in the registry. A provider that cannot serve the
+    // dialect's streaming protocol fails here rather than silently retrying
+    // without it, which would risk paying for the same answer twice.
+    throw new Error(`provider ${options.provider} does not support the streaming chat-completions protocol`);
+  }
   for (let turn = 1; turn <= turns; turn += 1) {
     const body: Record<string, unknown> = {
       model: options.model,
       messages,
       tools,
       tool_choice: "auto",
-      stream: false,
+      stream: true,
+      ...(definition.streaming.usageOption ? { stream_options: { include_usage: true } } : {}),
+      ...(definition.requestExtensions ?? {}),
     };
     if (options.effort) body.reasoning_effort = options.effort;
-    if (options.provider === "deepseek") body.thinking = { type: "enabled" };
-    const payload = await requestJson(definition.endpoint, {
-      ...headers,
-      ...(options.provider === "openrouter" ? { "http-referer": "https://github.com/RBTecNet/rb-harness", "x-openrouter-title": "RB Harness / RB Ralph" } : {}),
-    }, body);
-    addOpenAiUsage(usage, parseObject(payload.usage));
-    const choices = Array.isArray(payload.choices) ? payload.choices : [];
-    const choice = parseObject(choices[0]);
-    const message = parseObject(choice.message);
-    if (!Object.keys(message).length) throw new Error("provider response did not contain an assistant message");
+    const stream = await requestStream(
+      dialectEndpoint(options),
+      { ...headers, ...(definition.headers ?? {}) },
+      body,
+      signal,
+    );
+    const streamed = await readOpenAiStream(stream, reporter, signal);
+    // Exactly one usage accounting per response, whether or not the provider
+    // reported figures: the request itself is always counted.
+    addOpenAiUsage(usage, streamed.usage);
+    const message = streamed.message;
     messages.push(message);
+    const choice = { finish_reason: streamed.finishReason };
     const rawCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
     const calls = rawCalls.map((raw, index): ToolCall => {
       const entry = parseObject(raw);
@@ -401,11 +466,17 @@ async function runAnthropicDialect(
   context: ApiAgentToolContext,
   usage: UsageTotals,
   counters: { toolCalls: number },
+  reporter: ActivityReporter,
+  signal: AbortSignal,
 ): Promise<string> {
   const tools = anthropicTools(context);
   const system = [{ type: "text", text: systemInstruction(options), cache_control: { type: "ephemeral" } }];
   const messages: Array<Record<string, unknown>> = [{ role: "user", content: options.prompt }];
   const turns = maximumTurns(options.role);
+  const definition = directProvider(options.provider);
+  if (!definition.streaming.supported) {
+    throw new Error(`provider ${options.provider} does not support the streaming Messages protocol`);
+  }
   for (let turn = 1; turn <= turns; turn += 1) {
     const body: Record<string, unknown> = {
       model: options.model,
@@ -413,14 +484,17 @@ async function runAnthropicDialect(
       system,
       messages,
       tools,
+      stream: true,
     };
     if (options.effort) body.output_config = { effort: options.effort };
-    const payload = await requestJson(directProvider(options.provider).endpoint, {
+    const stream = await requestStream(dialectEndpoint(options), {
       ...headers,
+      ...(definition.headers ?? {}),
       "anthropic-version": "2023-06-01",
-    }, body);
-    addAnthropicUsage(usage, parseObject(payload.usage));
-    const content = Array.isArray(payload.content) ? payload.content.map(parseObject) : [];
+    }, body, signal);
+    const streamed = await readAnthropicStream(stream, reporter, signal);
+    addAnthropicUsage(usage, streamed.usage);
+    const content = streamed.content;
     messages.push({ role: "assistant", content });
     const calls = content.filter((block) => block.type === "tool_use").map((block, index): ToolCall => ({
       id: String(block.id ?? `tool-${turn}-${index}`),
@@ -429,7 +503,7 @@ async function runAnthropicDialect(
     })).filter((call) => call.name);
     if (!calls.length) {
       const text = content.filter((block) => block.type === "text").map((block) => String(block.text ?? "")).join("\n");
-      if (!text.trim()) throw new Error(`Anthropic stopped without a final text response (stop_reason=${String(payload.stop_reason ?? "unknown")})`);
+      if (!text.trim()) throw new Error(`Anthropic stopped without a final text response (stop_reason=${streamed.stopReason || "unknown"})`);
       return text;
     }
     counters.toolCalls += calls.length;
@@ -459,12 +533,17 @@ export async function runDirectApiAgent(options: DirectApiAgentOptions): Promise
   };
   const auth = await authorization(options);
   const counters = { toolCalls: 0 };
+  // Content-free activity markers on stderr. They tell the orchestrator that
+  // the remote API is really answering, without ever carrying prompt text,
+  // reasoning, tool arguments, or a fragment of the document envelope.
+  const reporter = new ActivityReporter((line) => process.stderr.write(line));
+  const signal = runSignal(options);
   const usage: UsageTotals = { requests: 0, inputTokens: 0, cachedInputTokens: 0, cacheCreationInputTokens: 0, outputTokens: 0, totalTokens: 0 };
   try {
     const definition = directProvider(options.provider);
     const result = definition.dialect === "anthropic-messages"
-      ? await runAnthropicDialect(options, auth.headers, context, usage, counters)
-      : await runOpenAiDialect(options, auth.headers, context, usage, counters);
+      ? await runAnthropicDialect(options, auth.headers, context, usage, counters, reporter, signal)
+      : await runOpenAiDialect(options, auth.headers, context, usage, counters, reporter, signal);
     await writeTelemetry(options, usage);
     await writeHarnessUsage(usage, counters.toolCalls);
     return result;

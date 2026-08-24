@@ -13,11 +13,30 @@ export interface ProviderAuthProtocol {
   description: string;
 }
 
+/**
+ * How a direct provider streams, declared once per provider instead of being
+ * inferred from its id at each call site.
+ */
+export interface DirectProviderStreaming {
+  /** The provider serves the dialect's documented incremental protocol. */
+  supported: boolean;
+  /**
+   * The provider documents `stream_options: { include_usage: true }`. Where it
+   * does not, usage simply stays unmeasured — it is never guessed.
+   */
+  usageOption: boolean;
+}
+
 export interface DirectProviderDefinition {
   id: DirectProviderId;
   label: string;
   dialect: ProviderDialect;
   endpoint: string;
+  streaming: DirectProviderStreaming;
+  /** Provider-specific request fields merged into every completion body. */
+  requestExtensions?: Record<string, unknown>;
+  /** Provider-specific headers merged into every request. */
+  headers?: Record<string, string>;
   auth: ProviderAuthProtocol[];
 }
 
@@ -33,6 +52,7 @@ export const DIRECT_PROVIDERS: readonly DirectProviderDefinition[] = [
     label: "OpenAI API",
     dialect: "openai-chat",
     endpoint: "https://api.openai.com/v1/chat/completions",
+    streaming: { supported: true, usageOption: true },
     auth: [API_KEY],
   },
   {
@@ -40,6 +60,7 @@ export const DIRECT_PROVIDERS: readonly DirectProviderDefinition[] = [
     label: "Claude API (Anthropic)",
     dialect: "anthropic-messages",
     endpoint: "https://api.anthropic.com/v1/messages",
+    streaming: { supported: true, usageOption: false },
     auth: [API_KEY],
   },
   {
@@ -47,6 +68,9 @@ export const DIRECT_PROVIDERS: readonly DirectProviderDefinition[] = [
     label: "Gemini API",
     dialect: "openai-chat",
     endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    // The OpenAI compatibility endpoint streams, but does not document
+    // `stream_options`; usage therefore stays unmeasured rather than guessed.
+    streaming: { supported: true, usageOption: false },
     auth: [
       API_KEY,
       {
@@ -61,6 +85,8 @@ export const DIRECT_PROVIDERS: readonly DirectProviderDefinition[] = [
     label: "DeepSeek API",
     dialect: "openai-chat",
     endpoint: "https://api.deepseek.com/chat/completions",
+    streaming: { supported: true, usageOption: true },
+    requestExtensions: { thinking: { type: "enabled" } },
     auth: [API_KEY],
   },
   {
@@ -68,6 +94,7 @@ export const DIRECT_PROVIDERS: readonly DirectProviderDefinition[] = [
     label: "MiniMax API",
     dialect: "openai-chat",
     endpoint: "https://api.minimax.io/v1/chat/completions",
+    streaming: { supported: true, usageOption: true },
     auth: [API_KEY],
   },
   {
@@ -75,6 +102,11 @@ export const DIRECT_PROVIDERS: readonly DirectProviderDefinition[] = [
     label: "OpenRouter",
     dialect: "openai-chat",
     endpoint: "https://openrouter.ai/api/v1/chat/completions",
+    streaming: { supported: true, usageOption: true },
+    headers: {
+      "http-referer": "https://github.com/RBTecNet/rb-harness",
+      "x-openrouter-title": "RB Harness / RB Ralph",
+    },
     auth: [
       API_KEY,
       {

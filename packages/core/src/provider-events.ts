@@ -139,6 +139,15 @@ export class ProviderStreamObserver {
     };
   }
 
+  /**
+   * Renew the progress window from a real remote event observed outside the
+   * stdout stream — an activity marker from the direct-API runtime. A
+   * keep-alive comment never reaches here, so an idle socket cannot renew it.
+   */
+  noteActivity(): void {
+    this.lastProgressAt = Date.now();
+  }
+
   /** Whether the progress window has elapsed with nothing new in it. */
   stalled(now = Date.now()): boolean {
     return this.options.noProgressMilliseconds > 0

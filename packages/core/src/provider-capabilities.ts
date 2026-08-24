@@ -66,6 +66,12 @@ export interface ProviderCapabilities {
    */
   readConfinement: AdapterCapability;
   /**
+   * A side channel on stderr carrying content-free markers for real remote
+   * activity. Where it exists, first-output and the progress window are driven
+   * by those markers rather than by any byte the subprocess happens to write.
+   */
+  activityChannel: AdapterCapability;
+  /**
    * The format of this adapter's stdout. Independent of every capability
    * above: an adapter can be fully controlled and still speak plain text.
    */
@@ -90,6 +96,7 @@ const CODEX: ProviderCapabilities = {
   cooperativeCancellation: NONE,
   usageMetrics: NONE,
   readConfinement: NONE,
+  activityChannel: NONE,
   // The Harness does not pass `--json`, so codex writes its final text.
   stdoutTransport: "final-text",
   inspectedVersion: "codex-cli 0.149.1",
@@ -108,6 +115,7 @@ const CLAUDE: ProviderCapabilities = {
   cooperativeCancellation: NONE,
   usageMetrics: { advertised: true, verified: false, mechanism: "claude --max-budget-usd" },
   readConfinement: NONE,
+  activityChannel: NONE,
   // The Harness does not pass `--output-format stream-json`.
   stdoutTransport: "final-text",
   inspectedVersion: "2.1.241 (Claude Code)",
@@ -128,6 +136,7 @@ const OPENCODE: ProviderCapabilities = {
   cooperativeCancellation: NONE,
   usageMetrics: NONE,
   readConfinement: NONE,
+  activityChannel: NONE,
   // `run --format json` really is consumed, so this stream is reconstructed.
   stdoutTransport: "jsonl-events",
   inspectedVersion: "1.18.21",
@@ -142,6 +151,7 @@ const DIRECT: ProviderCapabilities = {
   cooperativeCancellation: { advertised: true, verified: true, mechanism: "bundled direct-API runtime" },
   usageMetrics: { advertised: true, verified: true, mechanism: "provider usage field" },
   readConfinement: { advertised: true, verified: true, mechanism: "in-process path policy" },
+  activityChannel: { advertised: true, verified: true, mechanism: "[rb-api-event] markers on stderr" },
   // The control is real and lives inside the subprocess; its stdout carries
   // only the model's final answer, envelope included.
   stdoutTransport: "final-text",
@@ -156,6 +166,7 @@ const CUSTOM: ProviderCapabilities = {
   cooperativeCancellation: NONE,
   usageMetrics: NONE,
   readConfinement: NONE,
+  activityChannel: NONE,
   stdoutTransport: "final-text",
   notes: "A custom adapter declares nothing; it is governed entirely by the conservative time, output, and progress limits, and its stdout is treated as final text.",
 };
@@ -220,4 +231,12 @@ export function describeReadConfinement(provider: ProviderId): string {
   }
   return "sem confinamento de leitura no nível do SO: a projeção de evidências remove o estado de controle de todo caminho relativo "
     + "e não entrega o caminho absoluto do projeto real, mas este adapter não é sandbox de leitura";
+}
+
+/**
+ * Whether this adapter reports real remote activity out of band. Only then may
+ * first-output be attributed to the provider actually answering.
+ */
+export function emitsActivityEvents(provider: ProviderId): boolean {
+  return providerCapabilities(provider).activityChannel.verified;
 }

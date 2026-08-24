@@ -13,6 +13,26 @@ import { collectProviderTestWizardOptions, providerListValue } from "../src/prov
 
 const originalCredentialHome = process.env.RB_CREDENTIAL_HOME;
 
+/**
+ * An SSE response body. The runtime streams now, so a mocked provider must
+ * speak the incremental protocol its dialect really uses.
+ */
+function sse(chunks: string[]): Response {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const encoder = new TextEncoder();
+      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+      controller.close();
+    },
+  });
+  return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
+}
+
+/** One OpenAI-compatible `data:` frame. */
+function openAiFrame(value: unknown): string {
+  return `data: ${JSON.stringify(value)}\n\n`;
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   if (originalCredentialHome === undefined) delete process.env.RB_CREDENTIAL_HOME;
@@ -195,13 +215,19 @@ describe("local API agent policy", () => {
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
       const request = JSON.parse(String(init.body)) as Record<string, unknown>;
       requests.push(request);
-      const payload = requests.length === 1
-        ? {
-          choices: [{ message: { role: "assistant", content: null, reasoning_content: "kept", tool_calls: [{ id: "call-1", type: "function", function: { name: "list_files", arguments: "{}" } }] }, finish_reason: "tool_calls" }],
-          usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
-        }
-        : { choices: [{ message: { role: "assistant", content: "done" }, finish_reason: "stop" }], usage: { prompt_tokens: 12, completion_tokens: 1, total_tokens: 13 } };
-      return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
+      return requests.length === 1
+        ? sse([
+          openAiFrame({ choices: [{ delta: { role: "assistant", reasoning_content: "kept" } }] }),
+          openAiFrame({ choices: [{ delta: { tool_calls: [{ index: 0, id: "call-1", function: { name: "list_files", arguments: "" } }] } }] }),
+          openAiFrame({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: "{}" } }] } }] }),
+          openAiFrame({ choices: [{ delta: {}, finish_reason: "tool_calls" }], usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 } }),
+          "data: [DONE]\n\n",
+        ])
+        : sse([
+          openAiFrame({ choices: [{ delta: { content: "done" } }] }),
+          openAiFrame({ choices: [{ delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 12, completion_tokens: 1, total_tokens: 13 } }),
+          "data: [DONE]\n\n",
+        ]);
     }));
 
     await expect(runDirectApiAgent({
@@ -227,10 +253,14 @@ describe("local API agent policy", () => {
     process.env.RB_CREDENTIAL_HOME = auth;
     process.env.RB_HARNESS_USAGE_FILE = usageFile;
     await saveCredential({ provider: "deepseek", protocol: "api-key", label: "default", secret: "secret-for-test" });
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
-      choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
-      usage: { prompt_tokens: 900, completion_tokens: 40, total_tokens: 940, prompt_tokens_details: { cached_tokens: 850 } },
-    }), { status: 200, headers: { "content-type": "application/json" } })));
+    vi.stubGlobal("fetch", vi.fn(async () => sse([
+      openAiFrame({ choices: [{ delta: { content: "ok" } }] }),
+      openAiFrame({
+        choices: [{ delta: {}, finish_reason: "stop" }],
+        usage: { prompt_tokens: 900, completion_tokens: 40, total_tokens: 940, prompt_tokens_details: { cached_tokens: 850 } },
+      }),
+      "data: [DONE]\n\n",
+    ])));
     try {
       await runDirectApiAgent({
         provider: "deepseek", model: "deepseek-v4-pro", effort: "high", projectRoot: project,
@@ -297,13 +327,25 @@ describe("local API agent policy", () => {
     const requests: Array<{ headers: Headers; body: Record<string, unknown> }> = [];
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
       requests.push({ headers: new Headers(init.headers), body: JSON.parse(String(init.body)) as Record<string, unknown> });
-      const payload = requests.length === 1
-        ? {
-          content: [{ type: "tool_use", id: "tool-1", name: "read_file", input: { path: "SPEC.md" } }],
-          stop_reason: "tool_use", usage: { input_tokens: 8, output_tokens: 3 },
-        }
-        : { content: [{ type: "text", text: "approved" }], stop_reason: "end_turn", usage: { input_tokens: 10, output_tokens: 1 } };
-      return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
+      const frame = (value: unknown) => `data: ${JSON.stringify(value)}\n\n`;
+      return requests.length === 1
+        ? sse([
+          frame({ type: "message_start", message: { usage: { input_tokens: 8 } } }),
+          frame({ type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "tool-1", name: "read_file" } }),
+          frame({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"path":' } }),
+          frame({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '"SPEC.md"}' } }),
+          frame({ type: "content_block_stop", index: 0 }),
+          frame({ type: "message_delta", delta: { stop_reason: "tool_use" }, usage: { output_tokens: 3 } }),
+          frame({ type: "message_stop" }),
+        ])
+        : sse([
+          frame({ type: "message_start", message: { usage: { input_tokens: 10 } } }),
+          frame({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }),
+          frame({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "approved" } }),
+          frame({ type: "content_block_stop", index: 0 }),
+          frame({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 1 } }),
+          frame({ type: "message_stop" }),
+        ]);
     }));
 
     await expect(runDirectApiAgent({

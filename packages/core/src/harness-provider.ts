@@ -11,9 +11,11 @@ import { describeContainment, detectContainmentSupport, type TreeContainment } f
 import {
   describeAdapterControl,
   describeReadConfinement,
+  emitsActivityEvents,
   providerCapabilities,
   usesStructuredStdout,
 } from "./provider-capabilities.js";
+import { parseActivityLine } from "./api-stream.js";
 import { ProviderStreamObserver, type StreamAccounting, type StreamDialect } from "./provider-events.js";
 import type { StdoutTransport } from "./provider-capabilities.js";
 import {
@@ -68,6 +70,8 @@ export interface ProviderRunResult {
   stream: StreamAccounting;
   /** The format this adapter actually wrote to stdout. */
   stdoutTransport: StdoutTransport;
+  /** Real remote activity observed through the adapter's side channel. */
+  remoteEvents: number;
   /** What the teardown could actually prove about the process tree. */
   settlement: SettleOutcome;
 }
@@ -202,6 +206,7 @@ async function writeProviderLog(
   stream?: StreamAccounting,
   settlementRecord?: SettleOutcome,
   stdoutTransport?: StdoutTransport,
+  activity?: { events: number; firstEventMilliseconds?: number },
 ): Promise<void> {
   await writeFile(options.logPath, [
     `provider=${options.configuration.provider}`,
@@ -212,6 +217,12 @@ async function writeProviderLog(
     `exit_code=${result.exitCode}`,
     `first_output_ms=${result.firstOutputMilliseconds ?? "none"}`,
     ...(stdoutTransport ? [`stdout_transport=${stdoutTransport}`] : []),
+    ...(activity
+      ? [
+        `remote_events=${activity.events}`,
+        `first_remote_event_ms=${activity.firstEventMilliseconds ?? "none"}`,
+      ]
+      : []),
     ...(stream
       ? [
         `stream_mode=${stream.mode}${stream.degraded ? " (degraded to unmeasured)" : ""}`,
@@ -285,6 +296,12 @@ export async function runProvider(options: ProviderRunOptions): Promise<Provider
   let exitCode = 0;
   let failure: string | undefined;
   let toolCalls = 0;
+  let remoteEvents = 0;
+  let firstRemoteEventAt: number | undefined;
+  // A direct-API adapter announces real remote activity out of band, so first
+  // output means the provider actually started answering — not that the
+  // subprocess printed something of its own.
+  const activityChannel = emitsActivityEvents(options.configuration.provider);
   let settlement: SettleOutcome | undefined;
   // An adapter's internal control (tool budget, measured usage, read
   // confinement — see `isControlledAdapter`) says nothing about the format it
@@ -342,6 +359,7 @@ export async function runProvider(options: ProviderRunOptions): Promise<Provider
       const heartbeat = showProgress ? setInterval(() => {
         const elapsed = Math.floor((Date.now() - started) / 1000);
         if (firstOutputAt === undefined) process.stderr.write(`[rb-harness] provider ativo há ${elapsed}s; aguardando a primeira saída...\n`);
+        else if (remoteEvents) process.stderr.write(`[rb-harness] provider ativo há ${elapsed}s; ${remoteEvents} eventos remotos recebidos.\n`);
         else process.stderr.write(`[rb-harness] provider ativo há ${elapsed}s; ${observedBytes} bytes observados.\n`);
       }, 15_000) : undefined;
       const clearTimers = () => {
@@ -350,24 +368,45 @@ export async function runProvider(options: ProviderRunOptions): Promise<Provider
         if (heartbeat) clearInterval(heartbeat);
         clearInterval(progressTimer);
       };
-      const observe = (chunk: Buffer, channel: "stdout" | "stderr") => {
-        if (firstOutputAt === undefined) {
-          firstOutputAt = Date.now();
-          if (firstTimer) clearTimeout(firstTimer);
-          // First sign of life: capture the tree membership now, so a leader
-          // that answers and exits quickly cannot hide a detached survivor
-          // between two periodic samples.
-          handle.sample();
-          if (!options.streamOutput && process.stderr.isTTY && !harnessDashboardActive()) {
-            process.stderr.write(`[rb-harness] primeira saída do provider recebida após ${Math.max(1, Math.floor((firstOutputAt - started) / 1000))}s; analisando resposta...\n`);
-          }
+      const noteFirstOutput = (remote: boolean) => {
+        if (firstOutputAt !== undefined) return;
+        firstOutputAt = Date.now();
+        if (firstTimer) clearTimeout(firstTimer);
+        // First sign of life: capture the tree membership now, so a leader
+        // that answers and exits quickly cannot hide a detached survivor
+        // between two periodic samples.
+        handle.sample();
+        if (!harnessDashboardActive() && (options.streamOutput === false || process.stderr.isTTY)) {
+          const seconds = Math.max(1, Math.floor((firstOutputAt - started) / 1000));
+          process.stderr.write(remote
+            ? `[rb-harness] provider respondeu após ${seconds}s; recebendo stream...\n`
+            : `[rb-harness] primeira saída do provider recebida após ${seconds}s; analisando resposta...\n`);
         }
+      };
+      const observe = (chunk: Buffer, channel: "stdout" | "stderr") => {
         const text = chunk.toString("utf8");
         observedBytes += Buffer.byteLength(chunk);
         if (channel === "stdout") stdout += text; else stderr += text;
         if (channel === "stdout") {
           const breach = observer.push(text);
           if (breach) stop(breach.message);
+          noteFirstOutput(false);
+        }
+        if (channel === "stderr") {
+          // Content-free markers only: a kind, never a token, an argument, or
+          // a fragment of the document.
+          for (const line of text.split("\n")) {
+            if (!parseActivityLine(line)) continue;
+            remoteEvents += 1;
+            firstRemoteEventAt ??= Date.now();
+            // Only a real remote event renews the progress window; an SSE
+            // keep-alive comment produces no marker and therefore no renewal.
+            observer.noteActivity();
+            noteFirstOutput(true);
+          }
+          // An adapter without the activity channel keeps the previous rule,
+          // where any output at all counted as the first sign of life.
+          if (!activityChannel) noteFirstOutput(false);
         }
         // Evidence discovery is a distinct documentation stage. The bundled
         // direct-API runtime announces each confined tool call; a CLI adapter
@@ -485,6 +524,7 @@ export async function runProvider(options: ProviderRunOptions): Promise<Provider
     usage,
     stream,
     stdoutTransport: transport,
+    remoteEvents,
     settlement: settlement ?? {
       observed: true,
       quiescent: true,
@@ -505,7 +545,19 @@ export async function runProvider(options: ProviderRunOptions): Promise<Provider
     ...(firstOutputAt ? { firstOutputMilliseconds: firstOutputAt - started } : {}),
     usage,
   });
-  await writeProviderLog(options, invocation.environment, { ...result, stdout }, failure, stream, result.settlement, transport);
+  await writeProviderLog(
+    options,
+    invocation.environment,
+    { ...result, stdout },
+    failure,
+    stream,
+    result.settlement,
+    transport,
+    {
+      events: remoteEvents,
+      ...(firstRemoteEventAt ? { firstEventMilliseconds: firstRemoteEventAt - started } : {}),
+    },
+  );
   emitHarnessDashboard({
     type: "provider-end",
     exitCode,
