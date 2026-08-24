@@ -97,6 +97,12 @@ RB Harness keeps generation responsibilities separated:
 8. Only a structurally valid, independently audited tree is published
    atomically; a failed generation never replaces the current artifact tree.
 
+Provider supervision applies role-specific UTF-8 byte limits (128 MiB for the
+agentic writer, 32 MiB for interview and audit) and remembers descendant PIDs
+before termination. It signals both the provider process group and descendants
+that created nested sessions, then escalates to `SIGKILL`; output overflow and
+timeouts therefore cannot leave sandboxed tools orphaned.
+
 The provider-specific Codex, Claude, OpenCode, or custom adapter is an
 invocation detail. It is not recorded as an execution dependency in generated
 project documentation.

@@ -1,6 +1,6 @@
 {
   "name": "@rb-harness/core",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "description": "Standalone provider-neutral documentation harness and deterministic artifact contracts",
   "type": "module",
   "bin": {

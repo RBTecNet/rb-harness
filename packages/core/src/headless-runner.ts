@@ -10,7 +10,7 @@ import { loadManifest, syncManifest, validateManifestTree, validateManifestValue
 import { validateOperationalJson } from "./operational-contract.js";
 import { buildHeadlessInitPrompt } from "./headless-prompt.js";
 
-export const HEADLESS_HARNESS_VERSION = "0.3.7";
+export const HEADLESS_HARNESS_VERSION = "0.3.8";
 export const HEADLESS_HARNESS_SHA256 = sha256Text(`rb-harness@${HEADLESS_HARNESS_VERSION}`);
 const VALIDATIONS = ["request", "paths", "contract", "operations", "manifest", "tree", "secrets"] as const;
 const SAFE_BASE_ENV = ["PATH", "LANG", "LC_ALL", "TZ"] as const;

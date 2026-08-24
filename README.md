@@ -26,7 +26,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.3.7 is an executable rather than a workflow that must run inside
+RB Harness 0.3.8 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -47,7 +47,7 @@ the current shell. Verify the exact installed build with:
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.3.7
+# Both print 0.3.8
 ```
 
 Run without arguments to start the wizard:
@@ -213,6 +213,12 @@ Every generation uses an isolated source copy and a staging `.rb` tree. The
 writer and auditor cannot publish directly. RB Harness synchronizes and
 validates the manifest and contracts, requires the independent audit to pass,
 then atomically swaps the selected `--output` tree.
+Provider output is bounded by role: generation allows up to 128 MiB because
+agentic CLIs may emit repository inspection and tool evidence, while interview
+and audit remain capped at 32 MiB. Limits are measured as UTF-8 bytes. Timeout
+or output overflow terminates the complete descendant tree, including nested
+sandbox sessions, before the resumable failure is recorded.
+
 The previous artifact tree remains under `.rb-harness/runs/<run-id>/` and a
 power-loss interruption is resumed with:
 

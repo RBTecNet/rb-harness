@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { ProviderConfiguration } from "./standalone-types.js";
@@ -16,6 +16,8 @@ export interface ProviderRunOptions {
   timeoutSeconds: number;
   firstOutputTimeoutSeconds: number;
   streamOutput?: boolean;
+  /** Test/embedding override. Standalone workflows use the bounded mode default. */
+  maxOutputBytes?: number;
 }
 
 export interface ProviderRunResult {
@@ -93,14 +95,73 @@ export function providerInvocation(
   return { command: process.env.RB_HARNESS_OPENCODE_BIN ?? "opencode", args, environment };
 }
 
-function terminate(child: ReturnType<typeof spawn>, signal: NodeJS.Signals = "SIGTERM"): void {
-  if (child.exitCode !== null) return;
-  try {
-    if (process.platform !== "win32" && child.pid) process.kill(-child.pid, signal);
-    else child.kill(signal);
-  } catch {
-    child.kill(signal);
+export function providerOutputLimit(mode: ProviderMode): number {
+  return mode === "generation" ? 128 * 1024 * 1024 : 32 * 1024 * 1024;
+}
+
+function descendantPids(rootPid: number): number[] {
+  if (process.platform === "win32") return [];
+  const listed = spawnSync("ps", ["-axo", "pid=,ppid="], {
+    encoding: "utf8",
+    timeout: 2_000,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  if (listed.status !== 0 || !listed.stdout) return [];
+  const children = new Map<number, number[]>();
+  for (const line of listed.stdout.split("\n")) {
+    const match = line.trim().match(/^(\d+)\s+(\d+)$/);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    const parent = Number(match[2]);
+    const siblings = children.get(parent) ?? [];
+    siblings.push(pid);
+    children.set(parent, siblings);
   }
+  const ordered: number[] = [];
+  const seen = new Set<number>([rootPid]);
+  const visit = (pid: number): void => {
+    for (const childPid of children.get(pid) ?? []) {
+      if (seen.has(childPid)) continue;
+      seen.add(childPid);
+      visit(childPid);
+      ordered.push(childPid);
+    }
+  };
+  visit(rootPid);
+  return ordered;
+}
+
+function terminate(
+  child: ReturnType<typeof spawn>,
+  signal: NodeJS.Signals = "SIGTERM",
+  rememberedDescendants: Set<number> = new Set(),
+): void {
+  const rootPid = child.pid;
+  if (!rootPid) return;
+  for (const pid of descendantPids(rootPid)) rememberedDescendants.add(pid);
+  if (process.platform === "win32") {
+    if (signal === "SIGKILL") {
+      spawnSync("taskkill", ["/PID", String(rootPid), "/T", "/F"], { timeout: 5_000 });
+      return;
+    }
+    try { child.kill(signal); } catch { /* already exited */ }
+    return;
+  }
+  // Codex and similar CLIs may create nested sessions for sandboxed tools.
+  // Killing only the provider process group leaves those descendants orphaned.
+  for (const pid of rememberedDescendants) {
+    try { process.kill(pid, signal); } catch { /* already exited */ }
+  }
+  try {
+    process.kill(-rootPid, signal);
+  } catch {
+    try { child.kill(signal); } catch { /* already exited */ }
+  }
+}
+
+function outputLimitDiagnostic(bytes: number): string {
+  if (bytes % (1024 * 1024) === 0) return `provider output exceeded ${bytes / (1024 * 1024)} MiB`;
+  return `provider output exceeded ${bytes} bytes`;
 }
 
 function redactLog(value: string, environment: NodeJS.ProcessEnv): string {
@@ -148,7 +209,8 @@ export async function runProvider(options: ProviderRunOptions): Promise<Provider
   let firstOutputAt: number | undefined;
   let stdout = "";
   let stderr = "";
-  const maxBytes = 32 * 1024 * 1024;
+  const maxBytes = options.maxOutputBytes ?? providerOutputLimit(options.mode);
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error("provider output limit must be a positive safe integer");
 
   let result: ProviderRunResult;
   try {
@@ -160,12 +222,14 @@ export async function runProvider(options: ProviderRunOptions): Promise<Provider
       stdio: ["pipe", "pipe", "pipe"],
     });
     let timedOut = "";
+    let observedBytes = 0;
+    const rememberedDescendants = new Set<number>();
     let forceTimer: ReturnType<typeof setTimeout> | undefined;
     const stop = (reason: string) => {
       if (timedOut) return;
       timedOut = reason;
-      terminate(child);
-      forceTimer = setTimeout(() => terminate(child, "SIGKILL"), 5_000);
+      terminate(child, "SIGTERM", rememberedDescendants);
+      forceTimer = setTimeout(() => terminate(child, "SIGKILL", rememberedDescendants), 5_000);
       forceTimer.unref();
     };
     const wallTimer = options.timeoutSeconds > 0
@@ -189,14 +253,15 @@ export async function runProvider(options: ProviderRunOptions): Promise<Provider
         }
       }
       const text = chunk.toString("utf8");
+      observedBytes += Buffer.byteLength(chunk);
       if (channel === "stdout") stdout += text; else stderr += text;
       emitHarnessDashboard({
         type: "provider-output",
-        bytes: Buffer.byteLength(stdout) + Buffer.byteLength(stderr),
+        bytes: observedBytes,
         ...(firstOutputAt ? { firstOutputMilliseconds: firstOutputAt - started } : {}),
       });
-      if (stdout.length + stderr.length > maxBytes) {
-        stop("provider output exceeded 32 MiB");
+      if (observedBytes > maxBytes) {
+        stop(outputLimitDiagnostic(maxBytes));
       }
       if (options.streamOutput && !harnessDashboardActive()) (channel === "stdout" ? process.stdout : process.stderr).write(text);
     };
@@ -214,7 +279,10 @@ export async function runProvider(options: ProviderRunOptions): Promise<Provider
       if (firstTimer) clearTimeout(firstTimer);
       if (forceTimer) clearTimeout(forceTimer);
       if (heartbeat) clearInterval(heartbeat);
-      if (timedOut) return reject(new Error(timedOut));
+      if (timedOut) {
+        terminate(child, "SIGKILL", rememberedDescendants);
+        return reject(new Error(timedOut));
+      }
       resolveRun({
         exitCode: code ?? (signal ? 70 : 1),
         stdout,

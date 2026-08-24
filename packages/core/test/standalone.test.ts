@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseInterviewAnalysis, recoverInterviewAnalysis } from "../src/harness-interview.js";
 import { artifactAuditFingerprint, parseArtifactAudit } from "../src/harness-audit.js";
-import { providerInvocation, runProvider } from "../src/harness-provider.js";
+import { providerInvocation, providerOutputLimit, runProvider } from "../src/harness-provider.js";
 import { inspectProjectInventory } from "../src/harness-inventory.js";
 import { composeHarnessSplash, harnessBrand, renderHarnessSplashFrame } from "../src/harness-splash.js";
 import { loadWorkflowResources, requestNeedsHeadlessContracts, resolveWorkflowResourceRoot } from "../src/standalone-resources.js";
@@ -14,6 +14,7 @@ import { validateManifestTree } from "../src/manifest.js";
 
 const fakeProvider = resolve(process.cwd(), "test/fixtures/standalone/fake-provider.mjs");
 const failingProvider = resolve(process.cwd(), "test/fixtures/standalone/failing-provider.mjs");
+const noisyProvider = resolve(process.cwd(), "test/fixtures/standalone/noisy-provider.mjs");
 const repairingProvider = resolve(process.cwd(), "test/fixtures/standalone/repairing-provider.mjs");
 
 describe("standalone RB Harness", () => {
@@ -223,6 +224,38 @@ describe("standalone RB Harness", () => {
       expect(evidence).not.toContain(secret);
     } finally {
       delete process.env.RB_HARNESS_TEST_API_KEY;
+    }
+  });
+  it("allows larger bounded generation transcripts and kills nested provider sessions on overflow", async () => {
+    expect(providerOutputLimit("generation")).toBe(128 * 1024 * 1024);
+    expect(providerOutputLimit("interview")).toBe(32 * 1024 * 1024);
+    expect(providerOutputLimit("audit")).toBe(32 * 1024 * 1024);
+    const directory = await mkdtemp(resolve(tmpdir(), "rb-harness-provider-overflow-"));
+    const log = resolve(directory, "provider.log");
+    const pidFile = resolve(directory, "detached.pid");
+    await chmod(noisyProvider, 0o755);
+    process.env.RB_HARNESS_TEST_CHILD_PID_FILE = pidFile;
+    try {
+      await expect(runProvider({
+        configuration: { provider: "custom", model: "fixture", effort: "high", command: noisyProvider },
+        mode: "generation",
+        projectRoot: directory,
+        prompt: "fixture prompt",
+        logPath: log,
+        timeoutSeconds: 10,
+        firstOutputTimeoutSeconds: 5,
+        maxOutputBytes: 4 * 1024,
+      })).rejects.toThrow("provider output exceeded 4096 bytes");
+      const detachedPid = Number(await readFile(pidFile, "utf8"));
+      let alive = true;
+      for (let attempt = 0; attempt < 40 && alive; attempt += 1) {
+        try { process.kill(detachedPid, 0); }
+        catch { alive = false; }
+        if (alive) await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+      }
+      expect(alive).toBe(false);
+    } finally {
+      delete process.env.RB_HARNESS_TEST_CHILD_PID_FILE;
     }
   });
 

@@ -177,6 +177,12 @@ publication. A repeated canonical finding batch stops instead of consuming
 more model calls, and the generation is also blocked after three unsuccessful
 passes. Current artifacts remain untouched in every blocked or failed case.
 
+Agentic generation transcripts are byte-counted and bounded at 128 MiB;
+interview and independent-audit responses remain bounded at 32 MiB. Exceeding
+a role limit or timeout stops the provider and every discovered descendant,
+including tools that opened a separate process session. The run remains
+resumable and the failed provider log records the precise limit diagnostic.
+
 ## Start a new project
 
 Use a description directly:
