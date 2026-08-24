@@ -1,6 +1,6 @@
 # Review Artifact Shapes
 
-Write the smallest sufficient set under `.rb/reviews/<review-id>/`. Keep finding
+Return the smallest sufficient set under `.rb/reviews/<review-id>/`. Keep finding
 IDs stable across reruns and preserve supersession history.
 
 - `REVIEW.md` always: target revision, depth/focus, coverage map, methodology,

@@ -77,30 +77,81 @@ administrator creates tenants and revocable credentials through `/admin`.
 
 ## Harness generation layers
 
-RB Harness keeps generation responsibilities separated:
+RB Harness is a documentation state machine, not a general agent loop. Its
+stages are separated and finite:
 
-1. The executable inventories existing compatible artifacts and Ralph evidence.
-2. A read-only provider invocation returns a strict interview contract.
-3. The executable accepts, rejects, or follows up on answers one question at a
-   time and persists the normalized checkpoint.
-4. A fresh provider invocation receives that checkpoint and writes only in an
-   isolated project copy.
+1. The executable builds a deterministic, bounded input package: request and
+   hash, workflow, a summarized inventory of the target project, existing RB
+   artifacts, accepted decisions, and a compact code-owned output contract.
+   Version control, dependencies, build and coverage output, live Harness
+   state, credentials, and temporary files are excluded, and no path into the
+   Harness source, `dist`, tests, or installation is ever shipped.
+2. A read-only provider invocation returns a strict interview contract: one
+   batch of at most five material questions.
+3. The executable presents them locally one at a time, persists the answers,
+   and runs at most one focused follow-up round of at most three questions. A
+   RIGID ambiguity that survives it produces `BLOCKED`, never another round.
+4. One authoring invocation receives the closed checkpoint and returns a typed
+   `path`/`content` document bundle on stdout. The provider is read-only and
+   runs in a bounded evidence projection — the admitted project files at their
+   real relative paths, with no `.rb-harness`, `.git`, `.rb/runs`, dependency
+   tree, build output, or credential in it. The orchestrator materializes the
+   returned files into a staging tree holding only `.rb`.
 5. Manifest synchronization and workflow-specific deterministic gates validate
-   the staged tree.
-6. Only a tree accepted by every deterministic workflow, manifest, execution,
+   the staged tree. Manifest, hashes, IDs, statuses, and the TSV projection are
+   derived by code, never asked of the model.
+6. Repairable structural errors allow exactly one localized repair, which
+   receives the ordered error list and only the affected documents and must
+   preserve everything else byte for byte. A second failure is reported.
+7. Only a tree accepted by every deterministic workflow, manifest, execution,
    operational, and tree validator is published atomically. A failed or
    explicitly blocked generation never replaces the current artifact tree.
 
-There is deliberately no second LLM manager in this pipeline. Material product
-ambiguity belongs to the adaptive interview; artifact correctness belongs to
-one fresh writer plus deterministic contracts. Semantic implementation review
+Apart from the single interview follow-up and the single structural repair —
+both counted and bounded — the state graph is acyclic and no stage can restart
+itself. There is deliberately no LLM manager and no semantic auditor: material
+product ambiguity belongs to the interview, artifact correctness belongs to one
+authoring pass plus deterministic contracts, and semantic implementation review
 remains the responsibility of RB Ralph after code exists.
 
-Provider supervision applies role-specific UTF-8 byte limits (128 MiB for the
-agentic writer and 32 MiB for interview) and remembers descendant PIDs
-before termination. It signals both the provider process group and descendants
-that created nested sessions, then escalates to `SIGKILL`; output overflow and
-timeouts therefore cannot leave sandboxed tools orphaned.
+Provider supervision applies role-specific UTF-8 byte limits (32 MiB for
+generation, 16 MiB for the repair, 8 MiB for the interview) and owns the whole
+process tree. *Every* run settles, including the successful ones, because a
+leader exiting with code zero proves nothing about what it detached.
+
+Containment is structural where the platform allows it. On Linux with a writable
+cgroup v2 subtree the child joins a per-run cgroup before it can fork;
+membership survives `fork` and `setsid`, remains enumerable after the leader
+dies, and `cgroup.kill` removes every member atomically. That is what makes
+quiescence provable rather than assumed — a descendant placed in a new session
+milliseconds before the leader exits is invisible to any sampler and unreachable
+by any process-group signal.
+
+Where structural containment is unavailable, the ladder still runs — stop
+admitting work, `SIGTERM` the process group, wait one bounded grace window,
+`SIGKILL` the survivors — but the outcome is reported as *unverified* rather
+than quiescent, and the provider log records the containment kind and both
+flags. Windows uses `taskkill /T`, which walks the parent chain and is declared
+as best-effort; it is not a Job Object and is never described as one. A
+remembered descendant is re-signalled only while it still belongs to the process
+group it was observed in, which keeps a recycled PID out of the ladder.
+Cancellation, `SIGTERM`, timeout, output overflow, a Harness failure, and host
+exit enter the same path.
+
+Adapter control is declared, not assumed. The bundled direct-API runtime owns its
+loop and enforces the tool budget locally. An external CLI is held to its own
+declared capability: OpenCode's `run --format json` stream is consumed and
+counted, while Codex's `exec --json` and Claude's `--output-format stream-json`
+are advertised by the installed versions but not consumed, so no turn, tool, or
+cost control is claimed for them. Any adapter the Harness cannot account for is
+governed by conservative limits — wall timeout, first-output timeout, output
+volume, and a progress window that only genuinely new output renews — and is
+reported as unmeasured on that axis.
+
+Declared byte budgets are preflight gates: the request, the input package, the
+accepted decisions, and each prompt are checked before a provider process can be
+created. The request is authority and is never truncated; only non-authority
+detail is reduced, and every reduction is declared to the model.
 
 Manifest synchronization derives collision-safe IDs from logical artifact
 paths. It preserves short readable IDs, adds a deterministic path-hash suffix
@@ -108,11 +159,14 @@ before truncating long IDs, and hashes a later candidate when two normalized
 short paths still collide. Explicit execution-plan IDs remain authoritative
 and are never silently rewritten.
 
-After a writer exits successfully, the run records a durable generation
-checkpoint before deterministic validation. Validation infrastructure failures
-can therefore resume from the staged `.rb` tree without invoking the writer
-again. Historical audit-stage runs reuse their staged tree and retain old audit
-records as non-gating metadata.
+Durable checkpoints separate the completed interview, the received document
+bundle, materialization, validation, and publication. A complete provider
+response that is already persisted is never requested again, so a validation or
+publication failure resumes without paying for the writer twice. Historical
+audit-stage run states remain readable; their audit records are non-gating
+metadata. Every run also writes `telemetry.json` with per-stage durations,
+provider call counts, and the token and cache usage the provider reported —
+unmeasured when the provider reports none, and never an estimated cost.
 
 The provider-specific Codex, Claude, OpenCode, or custom adapter is an
 invocation detail. It is not recorded as an execution dependency in generated
@@ -159,8 +213,21 @@ turn into an unbounded wait loop.
 - Existing plugin-generated artifact trees remain readable without the plugin
   host, and relocated physical artifact roots preserve logical `.rb/...` paths.
 - A provider cannot publish an unvalidated artifact tree directly.
-- Artifact readiness requires an independent fresh-context audit; the writer's
-  completion statement is never sufficient.
+- Artifact readiness is decided by deterministic contracts, not by a second
+  model; the writer's completion statement is never sufficient, and neither is a
+  run's own `status` field.
+- A provider never reads Harness control state: one shared path policy governs
+  listing, reading, searching, and link resolution, and CLI providers see only a
+  bounded read-only evidence projection built in its own temporary root.
+- Read confinement is claimed only where it is enforced. The bundled runtime
+  enforces it in process; an external CLI is declared as not read-confined
+  rather than described as isolated by the projection.
+- Quiescence is claimed only where containment is structural; otherwise the
+  teardown is reported as unverified.
+- Ambiguity never becomes an accepted decision: a missing or unsupported
+  interview disposition is a semantic defect, not a shortcut to `ACCEPTED`.
+- Every stage budget is finite, documented as a constant, and covered by tests;
+  raising a ceiling to make a fixture pass is not a fix.
 - A deterministic implementation requirement must name a finite
   machine-checkable authority instead of delegating open-ended language
   interpretation to examples or keyword growth.
@@ -180,6 +247,8 @@ turn into an unbounded wait loop.
   may not modify the same path even when Git could merge both edits cleanly.
 - A manager decision is necessary but insufficient when deterministic
   validation fails.
+- A documentation provider is read-only and reaches only the target project.
+- Cancellation, timeout, and failure leave no live provider descendant.
 
 See [the context and continuity policy](context-and-continuity.md) for prompt
 bounds, resume identity, and the RB Memory authority boundary.

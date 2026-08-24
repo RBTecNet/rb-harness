@@ -28,7 +28,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.3.14 is an executable rather than a workflow that must run inside
+RB Harness 0.4.0 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -49,7 +49,7 @@ the current shell. Verify the exact installed build with:
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.3.14
+# Both print 0.4.0
 ```
 
 Run without arguments to start the wizard:
@@ -166,23 +166,27 @@ rb-harness plan --file change.md --provider openrouter \
 ```
 
 Direct APIs are models, not filesystem agents. The bundled runtime supplies a
-bounded local tool loop. Interview calls are read-only. Generation runs inside
-the existing isolated snapshot and can write only `.rb/`; manifest sync,
-deterministic validation, and atomic publication remain owned by the Harness.
-Direct providers require an explicit provider
-model ID, and unsupported effort values fail at the provider instead of being
-silently discarded.
+bounded local tool loop with exactly three documentation capabilities: list
+relevant files, search text, and read a limited line range inside the target
+project. There is no shell, no test execution, no Git write, no subagent, and no
+application-code write. The call count, the accumulated tool output, and
+repeated identical calls are all bounded, and the tool catalog never changes
+between steps so the provider's prefix cache keeps hitting. Direct providers
+require an explicit provider model ID, and unsupported effort values fail at the
+provider instead of being silently discarded.
 
 ### Live Harness dashboard
 
 Add `--dashboard` to a workflow or resume command. The dashboard uses the same
-terminal design language as Ralph while keeping Harness-specific stages:
-interview, one artifact generation, contract validation, and atomic
-publication. It shows the active role, model, elapsed time, first-output
-latency, observed bytes, recent events, and terminal diagnostic. It never
-includes the request, interview answers, provider output, or credentials.
-During an interactive question the panel yields the terminal and resumes after
-the answer.
+terminal design language as Ralph while showing the documentation state machine:
+inventory, gap analysis, waiting for a human answer, evidence discovery, package
+generation, materialization, validation, structural repair, and publication. It
+also reports real telemetry — provider calls, confined tool reads, requests, and
+input/cached/cache-creation/output tokens when the provider reports them. A
+provider that reports no usage is shown as unmeasured; no cost is ever invented,
+and repeated bytes are never presented as progress. It never includes the
+request, interview answers, provider output, or credentials. During an
+interactive question the panel yields the terminal and resumes after the answer.
 
 ```bash
 rb-harness evolve --project . --file change.md \
@@ -195,37 +199,148 @@ The Harness has no execution profiles. Its command remains short; reusable
 profiles belong only to RB Ralph, whose operational command has many more
 controls.
 
-The selected model returns a structured gap analysis. The executable queues
-any question batch and presents one question at a time, classifies every answer
-as `ACCEPTED`, `PARTIAL`, `AMBIGUOUS`, `DEFERRED`, or `CONTRADICTED`, and
-requires focused follow-up for material ambiguity before generation. Use
-`--questions batch` only to announce the whole round before answering it.
+### The documentation state machine
 
-Generation is not trusted on self-declaration, but the Harness does not use a
-second LLM as a documentation manager. The interview must resolve material
-product ambiguity before generation; then one fresh writer produces the whole
-tree. Manifest, workflow, execution, operational, and tree validators are the
-publication gates. A RIGID rule still cannot ask deterministic code to infer
-unlimited natural-language meaning unless the documentation names an exact
-grammar, typed authority, finite matrix, or explicit classifier and failure
-contract. If the writer emits `BLOCKED.md`, a blocked plan, stale hashes, an
-invalid contract, or no ready output for the selected workflow, publication
-fails with the exact deterministic diagnostic instead of starting a repair
-loop.
+Before the first provider call the Harness builds a deterministic, bounded input
+package: the request and its hash, the workflow, a summarized inventory of the
+target project, the existing RB artifacts, the decisions already accepted, and a
+compact code-owned contract digest. Version control, dependencies, build and
+coverage output, live Harness state, credentials, and temporary files are
+excluded, and no path into the RB Harness source, `dist`, tests, or installation
+ever reaches the model. Everything else must be fetched through the confined
+documentation tools, inside the target project.
 
-Historical runs that stopped in the removed audit stage remain resumable. A
-complete staged workspace is revalidated and published without another
-provider call; old audit records remain historical metadata and no longer gate
-the result.
+The interview is finite. One batch of at most five material questions, at most
+one focused follow-up with at most three, and then a decision. `--questions
+one-by-one` controls only local presentation and never costs an extra provider
+call; `--questions batch` announces the whole round before answering it. Every
+answer is classified `ACCEPTED`, `PARTIAL`, `AMBIGUOUS`, `DEFERRED`, or
+`CONTRADICTED`. Facts discovered in the project never become questions, a
+FLEXIBLE choice becomes an explicit assumption instead of a blocker, and a RIGID
+ambiguity that survives the follow-up produces `BLOCKED` naming the missing
+decision — never another round.
 
-Every generation uses an isolated source copy and a staging `.rb` tree. The
-writer cannot publish directly. RB Harness synchronizes and validates the
-manifest and contracts, then atomically swaps the selected `--output` tree.
-Provider output is bounded by role: generation allows up to 128 MiB because
-agentic CLIs may emit repository inspection and tool evidence, while interview
-remains capped at 32 MiB. Limits are measured as UTF-8 bytes. Timeout
-or output overflow terminates the complete descendant tree, including nested
-sandbox sessions, before the resumable failure is recorded.
+Only *form* is repaired automatically: a malformed question ID, an inferable
+question type, an empty option list. A disposition that is missing, unknown, or
+misspelled is a semantic defect, never an acceptance — the answer is carried as
+unresolved, the provider gets the one protocol correction the bounded flow
+already allows, and if it persists the answer earns a focused follow-up or
+blocks the run. `ACCEPTED` requires an explicit disposition and a single
+normalized decision; the raw answer stands in for that decision only under an
+explicit `ACCEPTED`. Questions above the round budget are never dropped either:
+they become declared deferred decisions in `unresolved`, and their existence
+prevents a `ready` result.
+
+Then exactly one authoring session receives the closed decision checkpoint and
+returns the complete document set as a typed `path`/`content` bundle. The
+Harness materializes the files, derives every mechanical field — manifest,
+hashes, IDs, statuses, the TSV projection — and validates. There is no
+documentation manager, no semantic auditor, and no second opinion.
+
+If deterministic validation finds repairable structural errors, exactly one
+localized repair runs. It receives the ordered, machine-generated error list and
+only the affected documents, and must preserve everything else byte for byte. It
+cannot reopen the interview, re-explore the repository, or re-emit the tree. A
+second failure is reported with its diagnostic; there is no loop. Apart from
+that single repair and the single interview follow-up — both counted and
+bounded — the state graph is acyclic, and no stage can restart itself.
+
+Providers are read-only in every documentation role. Codex runs with
+`--sandbox read-only`, Claude with `--permission-mode plan`, OpenCode with edit,
+shell, task, and external-directory permissions denied. Provider transcripts are
+bounded as UTF-8 bytes — 32 MiB for generation, 16 MiB for the repair, 8 MiB for
+the interview.
+
+A provider never runs in the project itself. It runs in a bounded, read-only
+*evidence projection*: the target project's files that the inventory policy
+admits, mirrored at their real relative paths and nothing else. There is no
+`.rb-harness`, no `.git`, no dependency or build tree, no credential file, and
+no run directory in it. It is built in its own private temporary root — never
+under `.rb-harness/runs/<id>/`, which would place the run's `state.json` one
+directory above the provider — its files and directories are sealed read-only
+after population, and it is removed when the run ends. The real project's
+absolute path is never handed to the provider: the input package names the
+project by basename and `RB_HARNESS_PROJECT_ROOT` points at the projection.
+The bundled direct-API tools apply the same policy by path, so naming a
+forbidden directory explicitly is refused rather than merely hidden.
+
+**This is not an OS sandbox, and the Harness does not describe it as one.** Only
+the bundled direct-API runtime confines *reads*, because its tools enforce the
+path policy in process. Codex's `--sandbox read-only` and Claude's
+`--permission-mode plan` block writes while leaving the filesystem readable, so
+those adapters are declared as not read-confined and the log says so on every
+run. The projection removes the control plane from every relative path and
+withholds the project's location; it does not stop a CLI that goes looking with
+an absolute path.
+
+### What each adapter can actually be held to
+
+The bundled direct-API runtime is the only adapter the Harness controls end to
+end: it owns the tool catalog, counts every call, and reports the usage the
+provider returned. An external CLI runs its own agent loop, so the Harness
+states plainly what it can and cannot account for:
+
+| Adapter | Structured events | Turn/tool budget | Usage metrics | Read confinement |
+|---|---|---|---|---|
+| direct APIs | enforced locally | enforced | reported when the provider returns `usage` | enforced in process |
+| `opencode` | consumed via `run --format json` | enforced | not reported by the CLI — unmeasured | none |
+| `codex` | `exec --json` advertised, not consumed | not claimed | unmeasured | none |
+| `claude` | `--output-format stream-json` advertised, not consumed | not claimed | unmeasured | none |
+| `custom` | none declared | not claimed | unmeasured | none |
+
+Every declaration was read from the `--help` of a locally installed version, not
+guessed. An adapter whose event stream the Harness does not consume is governed
+by conservative limits only — wall timeout, first-output timeout, output volume,
+and a progress window in which output must carry something *new*, since a
+stalled agent can repeat itself indefinitely. Such a run is labelled unmeasured
+on that axis; it is never described as respecting the direct runtime's budget. A
+line that opens as a structured event and fails to parse is a protocol failure,
+reported explicitly rather than ignored — including a stream truncated at EOF,
+whose trailing partial event is surfaced when the stream closes rather than
+being dropped.
+
+For OpenCode the Harness follows the real schema of the installed 1.18.21 build:
+events are `{ type, properties }`, and a tool part is re-emitted as its state
+moves `pending → running → completed`. Counting those events would report one
+invocation three times, so invocations are counted by the provider's own
+`callID`, and a `step-start` part counts as a model turn.
+
+Every provider run ends by settling its process tree — including the runs that
+succeed, since a leader exiting with code zero says nothing about what it
+detached. Polling alone cannot do this: a leader can `setsid()` a descendant
+into a fresh session and exit within milliseconds, after which nothing links the
+descendant back to the run and no process-group signal can reach it.
+
+Where the platform offers **structural containment**, the Harness uses it and
+can prove the tree is gone. On Linux with a writable cgroup v2 subtree, the
+child joins a per-run cgroup before it can fork; membership is inherited across
+`fork` and `setsid`, stays enumerable after the leader dies, and
+`cgroup.kill` removes every member atomically.
+
+Where it does not, the Harness says so instead of claiming a guarantee. It still
+runs the idempotent ladder — stop admitting work, `SIGTERM` the process group,
+wait one short grace window, `SIGKILL` the survivors — but reports the teardown
+as unverified, and the provider log records
+`tree_containment_structural=false` and `tree_quiescence_verified=false`. On
+Windows the mechanism is `taskkill /T`, which walks the parent chain: it is
+**not** a Job Object and is declared as best-effort for exactly that reason. A
+remembered descendant is only re-signalled while it still belongs to the process
+group it was seen in, so a recycled PID is never signalled.
+
+Declared byte budgets are enforced before any provider process is created. The
+request is authority and is never truncated: a request above its budget fails
+the preflight with the observed size, the limit, and a safe way forward, and the
+same holds for the input package, the accepted decisions, and each prompt. Only
+non-authority detail — inventory samples, existing-artifact summaries — is
+reduced, and the reduction is declared to the model.
+
+Every run writes `telemetry.json` next to its state, and the final report prints
+the duration of each stage and the number of provider calls. Cache figures come
+only from what a provider measured: an adapter that reports no usage is recorded
+as unmeasured, never as a zero-token or zero-cost run. The Harness guarantees a
+byte-identical prompt prefix across the rounds of one run — contract, resources,
+and input package before any round-specific state — but it makes no claim about
+cache reuse across processes or sessions unless the provider reports it.
 
 Automatic manifest IDs remain readable for ordinary paths. Long paths receive
 a deterministic SHA-256 suffix before the 64-character boundary, and any
@@ -266,14 +381,12 @@ Harness normalizes the field to an empty list. Only `single-choice` questions
 may carry two to six choices, preventing protocol repair from inventing a
 choice for an intentionally free-form follow-up.
 
-Adaptive interviews have a 128-round run-wide safety ceiling (up to 1,024
-distinct questions at the per-round contract limit). The completed and active
-round numbers are durable, so resume continues at the correct round without
-overwriting prior logs. A prior validated checkpoint is supplied as navigation
-to each fresh interview call, reducing repeated repository discovery while
-keeping code and tests as source authority. If input is interrupted partway
-through a question batch, resume presents the unanswered questions before
-starting another provider call.
+The completed and active round numbers are durable, so resume continues at the
+correct round without overwriting prior logs. A prior validated checkpoint is
+supplied as navigation to each fresh interview call, reducing repeated
+repository discovery while keeping code and tests as source authority. If input
+is interrupted partway through a question batch, resume presents the unanswered
+questions before starting another provider call.
 
 Services such as RB Memory can use the same adaptive acceptance gate without
 scraping the interactive terminal or copying Harness prompts. The separate
@@ -310,13 +423,14 @@ non-interactive run. Missing material answers fail instead of hanging or being
 invented.
 
 Codex, Claude, and OpenCode are built in. A custom adapter is an executable
-that receives the complete prompt on stdin, runs with the isolated project as
-its working directory, and reads `RB_HARNESS_MODE`, `RB_HARNESS_PROJECT_ROOT`,
+that receives the complete prompt on stdin, runs with the target project as its
+working directory, and reads `RB_HARNESS_MODE`, `RB_HARNESS_PROJECT_ROOT`,
 `RB_HARNESS_PROVIDER`, `RB_HARNESS_MODEL`, and `RB_HARNESS_EFFORT` from the
-environment. New standalone runs use `RB_HARNESS_MODE=interview` and
-`RB_HARNESS_MODE=generation`; only generation may write the isolated workspace.
-The legacy `audit` mode remains parser-compatible for historical run state but
-is never invoked by the current workflow:
+environment. `RB_HARNESS_MODE` is `interview`, `generation`, or `repair`; all
+three are read-only and answer with their declared JSON envelope on stdout.
+Orchestrator-private variables — the resource root, dashboard, telemetry, and
+Ralph run variables — are removed from the adapter environment, so an adapter is
+never told where the Harness installation lives:
 
 ```bash
 rb-harness plan --file change.md --provider custom \
@@ -379,82 +493,107 @@ path is embedded into the documentation.
 ## Review and generated-plan quality gates
 
 Generation uses one writer and no manager loop. A separate operator-invoked
-verification command is available when a fresh second opinion is useful before
-RB Ralph:
+verification command re-proves a published tree before RB Ralph consumes it:
 
 ```bash
 rb-harness artifacts verify \
   --project . \
   --artifacts-dir .rb \
   --against docs/original-request.md \
-  --provider codex --model gpt-5.6-sol --effort high \
   --dashboard
 ```
 
-The verifier never edits or republishes artifacts. It first checks manifest
-schema, hashes, execution/operational contracts, ready-plan discovery, cold
-phase context paths, and task-reference integrity. Mechanical blockers stop
-before the provider starts, so a broken tree does not spend verification
-tokens. A mechanically usable tree receives one fresh, read-only, exhaustive
-semantic audit against the original request, matching Harness interview
-decisions, project source, and public workflow/headless authorities. If the
-provider violates the audit JSON protocol, it receives at most one format-only
-correction attempt; findings never trigger a writer/manager repair loop.
+Verification is deterministic by contract. It starts no provider, spends no
+tokens, and never edits or republishes artifacts. It proves the manifest schema,
+artifact hashes, the execution and operational contracts, responsive-inventory
+contracts, ready-plan discovery, cold phase context paths, task-reference
+integrity, requirement coverage, and path portability. An incompatible tree can
+never be announced as Ralph-ready.
 
 `--against` is optional when the matching completed Harness run remains in
 `.rb-harness/runs`, and recommended for imported or regenerated packages.
-`--deterministic-only` performs a token-free preflight. Reports use the
-`rb-harness-artifact-verification/v1` contract and are stored with mode `0600`
-under `.rb-harness/verifications/` unless `--report` selects another path.
-Every report contains SHA-256 fingerprints of the complete physical artifact
-tree (excluding live `.rb/runs` state) and its original request/interview
-authority. This binds later remediation to the exact bytes and accepted
-decisions that were audited.
-Exit `0` means Ralph-ready (possibly with minor warnings), `2` means material
-repairable findings, `3` means a real unresolved developer decision, and `1`
-means the verifier/provider itself failed.
+Reports use the `rb-harness-artifact-verification/v1` contract and are stored
+with mode `0600` under `.rb-harness/verifications/` unless `--report` selects
+another path. Every report contains SHA-256 fingerprints of the complete
+physical artifact tree (excluding live `.rb/runs` state) and its original
+request/interview authority. Exit `0` means Ralph-ready (possibly with minor
+warnings), `2` means material repairable findings, `3` means a real unresolved
+developer decision, and `1` means the verifier itself failed.
 
-### Bounded verification remediation
+### Removed with the semantic manager
 
-A failed verification report can drive one explicit remediation cycle without
-repeating its initial semantic audit:
+The LLM documentation manager, the independent semantic auditor, and the
+audit-driven remediation cycle were removed in 0.4.0. They repeated reading and
+writing without guaranteeing monotonic progress: a full re-emission could
+produce a fresh set of findings, which is non-convergence, not quality.
 
-```bash
-# First call: read-only audit and durable report.
-rb-harness artifacts verify \
-  --project . --artifacts-dir .rb \
-  --against docs/original-request.md \
-  --provider codex --model gpt-5.6-sol --effort high
+The options that existed only to drive them fail with explicit guidance rather
+than being silently reinterpreted:
 
-# Second call: reuse the newest compatible failed report.
-rb-harness artifacts verify \
-  --project . --artifacts-dir .rb \
-  --provider codex --model gpt-5.6-sol --effort high \
-  --remediate --questions one-by-one --dashboard
-```
+- `--remediate` and `--from-report` — re-run the workflow instead; a single
+  bounded structural repair now happens inside generation.
+- `--answers` and `--non-interactive` on `artifacts verify` — deterministic
+  verification asks nothing.
 
-Use `--from-report <path>` to select a specific report and `--answers <json>
---non-interactive` for an automated interview. The selected report must carry
-the exact current artifact and source-authority fingerprints. If an artifact,
-original request, or accepted decision changed after the audit, remediation
-fails as stale and asks for a fresh read-only verification; it never applies
-old findings to new documentation. When the original audit used `--against`,
-remediation inherits that authority path from the report; repeating the option
-is allowed but not required.
+`--deterministic-only` remains accepted and now describes the only behavior.
+`--provider`, `--model`, `--effort`, `--credential`, `--adapter`, `--timeout`,
+and `--first-output-timeout` are still accepted on `artifacts verify` so existing
+scripts keep parsing; they are recorded for provenance and start no provider.
 
-Remediation classifies technical gaps as writer work and asks only for missing
-product-observable decisions. After the adaptive interview reaches a valid
-checkpoint, Harness creates one isolated full-tree re-emission, validates it,
-atomically publishes it, and preserves the prior tree below that Harness run.
-It then executes one final deterministic and semantic verification. Remaining
-findings are reported with no second generation or manager loop. If the saved
-report already says Ralph-ready, no provider is started and no artifacts are
-changed.
+Version 0.4.0 replaces the general agent orchestration with a documentation
+core. The measured problem was cost and time, not model quality: on the `cron2`
+trial the same prompt and model that produced useful documentation in about ten
+minutes and US$ 0.20 elsewhere ran for more than thirty-one minutes and past
+US$ 1.84 here without publishing anything.
 
-`--remediate` cannot be combined with `--deterministic-only` or `--json`.
-Machine consumers should read the persisted initial and final
-`rb-harness-artifact-verification/v1` reports instead of parsing interactive
-progress output.
+- the input package is deterministic and bounded, and never names the Harness
+  source, `dist`, tests, or installation;
+- the mechanical output formats are a compact, versioned, code-owned digest
+  instead of four reference documents copied into every prompt;
+- the interview is one batch of at most five questions plus at most one
+  follow-up of at most three, then ready or BLOCKED;
+- one authoring call returns a typed document bundle that the Harness
+  materializes, and at most one localized structural repair may follow;
+- the LLM manager, the semantic auditor, and audit-driven remediation are gone;
+- providers are read-only in every documentation role and their whole process
+  tree is torn down and confirmed quiescent on cancellation, timeout, overflow,
+  failure, or host exit;
+- the dashboard, the log, and `telemetry.json` report documentation stages,
+  provider calls, and real token/cache usage — never invented cost;
+- checkpoints separate interview, received bundle, materialization, validation,
+  and publication, so a resume never pays twice for completed work.
+
+The public CLI, the wizard, the dashboard, the splash, and the capybara are
+unchanged.
+
+The readiness pass that followed added, without changing that public surface:
+
+- structural process-tree containment through cgroup v2 where the platform
+  offers it, and an explicit "not verified" report where it does not — including
+  Windows, where `taskkill /T` is never presented as a Job Object;
+- a benchmark that only reports a run this invocation created, proves
+  Ralph-readiness through the deterministic artifact contract, exits non-zero on
+  any failure, writes a report even when it fails, and stays `incomplete`
+  — never `passed` — until the observed cost is recorded by a finalization step
+  that starts no provider;
+- per-adapter capability declarations read from the installed CLIs, with real
+  event accounting where a CLI's stream is consumed and conservative
+  time/volume/progress limits everywhere else;
+- an unclassified or unknown interview disposition that can never become an
+  acceptance, and surplus questions that become declared deferred decisions;
+- one shared path policy that keeps `.rb-harness`, `.git`, `.rb/runs`,
+  credentials, traversal, and symlink escapes out of every tool, plus a bounded
+  read-only evidence projection in its own temporary root, with read confinement
+  declared honestly per adapter rather than implied;
+- declared byte budgets enforced before a provider is created, with the request
+  treated as authority and never truncated;
+- an invariant prompt prefix that is actually invariant, and cache claims
+  limited to what a provider measures.
+
+`docs/benchmarks/` holds the baseline, the reproducible harness, and the exact
+command for the authorized `cron2` run. **That run has not been executed**: the
+0.4.0 numbers are pending, and no claim of beating the baseline is made until an
+operator runs it.
 
 Version 0.1.1 strengthens generation and deterministic validation around the
 failure modes found in cross-model execution trials:
@@ -526,6 +665,20 @@ npm run build
 npm run check
 ```
 
+`npm run check` builds, typechecks, packs and runs the real npm archive through
+an installed `bin/rb-harness` symlink, executes the test suite, and validates the
+Bash resolver and the legacy plugin adapters.
+
+To measure a real workflow against a real provider and record a versioned,
+credential-free report, use the benchmark harness:
+
+```sh
+node scripts/benchmark.mjs --project /path/to/project \
+  --workflow init --file prompt.md \
+  --provider opencode --model opencode-go/deepseek-v4-pro \
+  --label cron2-rb-harness --observed-cost-usd 0.23
+```
+
 After the build, the standalone executable is
 `packages/core/dist/cli.js`. The build also refreshes the legacy compatibility
 bundle at `plugins/rb-harness/scripts/rb-harness.cjs`.
@@ -545,11 +698,8 @@ rb-harness tree resolve . --format tsv
 rb-harness tree validate . --artifacts-dir .spec
 rb-harness tree resolve . --artifacts-dir .spec --format tsv
 rb-harness inspect .
-rb-harness artifacts verify --project . --artifacts-dir .rb --against request.md \
-  --provider codex --model gpt-5.6-sol --effort high
-rb-harness artifacts verify --project . --artifacts-dir .rb --against request.md \
-  --provider codex --model gpt-5.6-sol --effort high --remediate
-rb-harness artifacts verify --project . --artifacts-dir .rb --deterministic-only --json
+rb-harness artifacts verify --project . --artifacts-dir .rb --against request.md
+rb-harness artifacts verify --project . --artifacts-dir .rb --json
 ```
 
 `tree resolve --format tsv` reads `.rb/rb-manifest.json` by default and emits a

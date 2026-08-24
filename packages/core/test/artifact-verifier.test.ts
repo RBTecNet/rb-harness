@@ -1,18 +1,18 @@
-import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   artifactVerificationExitCode,
-  verifyAndRemediateArtifacts,
+  declaredRequirementIds,
+  formatArtifactVerification,
   verifyArtifacts,
 } from "../src/artifact-verifier.js";
 import { initializeProject, syncManifest } from "../src/manifest.js";
 
 const fakeProvider = resolve(process.cwd(), "test/fixtures/standalone/fake-provider.mjs");
-const repairingProvider = resolve(process.cwd(), "test/fixtures/standalone/repairing-provider.mjs");
 
-function phases(): string {
+function phases(context = "`.rb/features/verification/REQUEST.md`"): string {
   return `# RB Execution Plan: verification fixture
 
 <!-- rb-execution-contract: rb-execution/v1 -->
@@ -24,7 +24,7 @@ function phases(): string {
 **Goal:** Implement the documented fixture safely.
 **Depends on:** none
 **Context:**
-- \`.rb/features/verification/REQUEST.md\`
+- ${context}
 
 - [ ] T001 — Implement the fixture
   - **Scope:** \`src/fixture.ts\`, \`test/fixture.test.ts\`
@@ -40,29 +40,31 @@ function phases(): string {
 `;
 }
 
-async function project(request: string): Promise<{ root: string; authority: string }> {
+async function project(
+  request: string,
+  extra: { specification?: string; phases?: string } = {},
+): Promise<{ root: string; authority: string }> {
   const root = await mkdtemp(resolve(tmpdir(), "rb-artifact-verify-"));
   await initializeProject(root, "Verification fixture", "verification-fixture");
   await mkdir(resolve(root, ".rb/features/verification"), { recursive: true });
   await writeFile(resolve(root, ".rb/features/verification/REQUEST.md"), request, "utf8");
-  await writeFile(resolve(root, ".rb/features/verification/PHASES.md"), phases(), "utf8");
+  await writeFile(resolve(root, ".rb/features/verification/PHASES.md"), extra.phases ?? phases(), "utf8");
+  if (extra.specification) {
+    await writeFile(resolve(root, ".rb/features/verification/SPEC.md"), extra.specification, "utf8");
+  }
   const authority = resolve(root, "original-request.md");
   await writeFile(authority, "Implement RF-001 through one bounded task.\n", "utf8");
   await syncManifest(root);
   return { root, authority };
 }
 
-describe("artifact verifier", () => {
+describe("deterministic artifact verifier", () => {
   it("finds orphan task references after the normal tree validator passes", async () => {
     const fixture = await project("# Request\n\nRF-001 is implemented by T001. Synchronization is verified by T020.\n");
     const report = await verifyArtifacts({
       projectRoot: fixture.root,
       artifactDirectory: ".rb",
       againstFile: fixture.authority,
-      provider: { provider: "custom", model: "fixture", effort: "high", command: fakeProvider },
-      deterministicOnly: true,
-      timeoutSeconds: 30,
-      firstOutputTimeoutSeconds: 5,
     });
     expect(report.deterministic.passed).toBe(false);
     expect(report.readyForRalph).toBe(false);
@@ -70,31 +72,8 @@ describe("artifact verifier", () => {
     expect(artifactVerificationExitCode(report)).toBe(2);
   });
 
-  it("runs one read-only semantic audit after deterministic gates pass", async () => {
+  it("passes a clean tree without starting any provider", async () => {
     const fixture = await project("# Request\n\nRF-001 is implemented and verified by T001.\n");
-    await chmod(fakeProvider, 0o755);
-    const report = await verifyArtifacts({
-      projectRoot: fixture.root,
-      artifactDirectory: ".rb",
-      againstFile: fixture.authority,
-      provider: { provider: "custom", model: "fixture", effort: "high", command: fakeProvider },
-      deterministicOnly: false,
-      timeoutSeconds: 30,
-      firstOutputTimeoutSeconds: 5,
-    });
-    expect(report.status).toBe("pass");
-    expect(report.readyForRalph).toBe(true);
-    expect(report.semantic).toMatchObject({ executed: true, status: "pass", provider: "custom", model: "fixture" });
-    expect(JSON.parse(await readFile(report.reportPath, "utf8"))).toMatchObject({
-      contract: "rb-harness-artifact-verification/v1",
-      readyForRalph: true,
-    });
-    expect(artifactVerificationExitCode(report)).toBe(0);
-  });
-
-  it("does not spend a provider call when artifact integrity is already broken", async () => {
-    const fixture = await project("# Request\n\nRF-001 is implemented and verified by T001.\n");
-    await writeFile(resolve(fixture.root, ".rb/features/verification/REQUEST.md"), "stale after manifest sync\n", "utf8");
     const providerModes = resolve(fixture.root, "provider-modes.log");
     process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE = providerModes;
     try {
@@ -103,77 +82,66 @@ describe("artifact verifier", () => {
         artifactDirectory: ".rb",
         againstFile: fixture.authority,
         provider: { provider: "custom", model: "fixture", effort: "high", command: fakeProvider },
-        deterministicOnly: false,
-        timeoutSeconds: 30,
-        firstOutputTimeoutSeconds: 5,
       });
-      expect(report.status).toBe("fail");
+      expect(report.status).toBe("pass");
+      expect(report.readyForRalph).toBe(true);
       expect(report.semantic.executed).toBe(false);
-      expect(report.findings.some((finding) => finding.criterion === "artifact.stale")).toBe(true);
+      expect(report.semantic.reason).toContain("deterministic");
+      expect(report.deterministic.checks).toContain("requirement-coverage");
+      expect(JSON.parse(await readFile(report.reportPath, "utf8"))).toMatchObject({
+        contract: "rb-harness-artifact-verification/v1",
+        readyForRalph: true,
+      });
+      expect(formatArtifactVerification(report)).toContain("Ralph READY");
+      expect(artifactVerificationExitCode(report)).toBe(0);
+      // No provider mode was ever recorded because no provider was started.
       await expect(readFile(providerModes, "utf8")).rejects.toThrow();
     } finally {
       delete process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE;
     }
   });
 
-  it("remediates from the saved compatible report once, preserves the old tree, and verifies the result", async () => {
+  it("reports stale artifact hashes without spending a provider call", async () => {
     const fixture = await project("# Request\n\nRF-001 is implemented and verified by T001.\n");
-    const repairDirectory = resolve(fixture.root, ".rb/features/audit-repair");
-    await mkdir(repairDirectory, { recursive: true });
-    await writeFile(
-      resolve(repairDirectory, "SPEC.md"),
-      "# Specification\n\n## RF-001\n\nDeterministically reject every phrase that implies work on an existing system.\n",
-      "utf8",
-    );
-    await syncManifest(fixture.root);
-    await chmod(repairingProvider, 0o755);
-    const providerModes = resolve(fixture.root, "provider-modes.log");
-    process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE = providerModes;
-    const options = {
+    await writeFile(resolve(fixture.root, ".rb/features/verification/REQUEST.md"), "stale after manifest sync\n", "utf8");
+    const report = await verifyArtifacts({
       projectRoot: fixture.root,
       artifactDirectory: ".rb",
       againstFile: fixture.authority,
-      provider: { provider: "custom" as const, model: "fixture", effort: "high", command: repairingProvider },
-      deterministicOnly: false,
-      timeoutSeconds: 30,
-      firstOutputTimeoutSeconds: 5,
-    };
-    try {
-      const initial = await verifyArtifacts(options);
-      expect(initial.readyForRalph).toBe(false);
-      expect(initial.artifactFingerprint).toMatch(/^[a-f0-9]{64}$/);
-      expect(initial.authorityFingerprint).toMatch(/^[a-f0-9]{64}$/);
-      expect(initial.findings.some((finding) => finding.id === "proofability.scope-authority")).toBe(true);
+    });
+    expect(report.status).toBe("fail");
+    expect(report.semantic.executed).toBe(false);
+    expect(report.findings.some((finding) => finding.criterion === "artifact.stale")).toBe(true);
+  });
 
-      const remediationOptions: Omit<typeof options, "againstFile"> & { againstFile?: string } = { ...options };
-      delete remediationOptions.againstFile;
-      const result = await verifyAndRemediateArtifacts({
-        ...remediationOptions,
-        questionMode: "one-by-one",
-        nonInteractive: true,
-      });
-      expect(result).toMatchObject({
-        contract: "rb-harness-artifact-remediation/v1",
-        remediated: true,
-        readyForRalph: true,
-        finalReport: { status: "pass", readyForRalph: true },
-      });
-      expect(result.remediationRun?.previousArtifacts).toBeTruthy();
-      expect(await readFile(resolve(fixture.root, ".rb/features/audit-repair/SPEC.md"), "utf8"))
-        .toContain("request.targetMode");
-      expect(await readFile(resolve(result.remediationRun!.previousArtifacts!, "features/audit-repair/SPEC.md"), "utf8"))
-        .toContain("every phrase");
-      expect((await readFile(providerModes, "utf8")).trim().split("\n"))
-        .toEqual(["audit", "interview", "generation", "audit"]);
+  it("requires every declared requirement to be covered by a task", async () => {
+    const fixture = await project("# Request\n\nRF-001 and RF-002 are requested.\n", {
+      specification: "# Specification\n\n## RF-001\n\nOne.\n\n## RF-002\n\nTwo.\n",
+    });
+    const report = await verifyArtifacts({
+      projectRoot: fixture.root,
+      artifactDirectory: ".rb",
+      againstFile: fixture.authority,
+    });
+    const finding = report.findings.find((entry) => entry.criterion === "requirement-coverage");
+    expect(finding?.evidence).toContain("RF-002");
+    expect(report.readyForRalph).toBe(false);
+  });
 
-      await expect(verifyAndRemediateArtifacts({
-        ...remediationOptions,
-        fromReportPath: initial.reportPath,
-        questionMode: "one-by-one",
-        nonInteractive: true,
-      })).rejects.toThrow("selected report is missing, invalid, or stale");
-    } finally {
-      delete process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE;
-    }
-  }, 30_000);
+  it("rejects a non-portable phase context path", async () => {
+    const fixture = await project("# Request\n\nRF-001 is implemented and verified by T001.\n", {
+      phases: phases("`/etc/hosts`"),
+    });
+    const report = await verifyArtifacts({
+      projectRoot: fixture.root,
+      artifactDirectory: ".rb",
+      againstFile: fixture.authority,
+    });
+    expect(report.findings.some((finding) => finding.criterion === "portable-paths")).toBe(true);
+  });
+
+  it("extracts requirement IDs from headings and anchored list entries", () => {
+    expect(declaredRequirementIds("## RF-001\n\n- **RNF-002** latency\n- unrelated RF-999 in prose\n"))
+      .toEqual(["RF-001", "RNF-002"]);
+  });
 });

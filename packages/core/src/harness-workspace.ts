@@ -1,18 +1,23 @@
 import { copyFile, lstat, mkdir, readdir, readFile, rename, rm, chmod } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { initializeProject, loadManifest, slugify, syncManifest, validateManifestTree } from "./manifest.js";
+import type { StructuralError } from "./harness-generator.js";
 import type { HarnessRunState, HarnessWorkflow } from "./standalone-types.js";
+import type { ValidationIssue } from "./types.js";
 
-const IGNORED_DIRECTORIES = new Set([
-  ".git", ".rb", ".rb-harness", ".idea", ".vscode", "node_modules", "vendor", "dist", "build", "coverage",
-  ".next", ".nuxt", "target", "tmp", "cache", ".cache",
+/**
+ * Errors a localized repair cannot fix. They indicate a compromised staging
+ * tree rather than a document the writer can correct, so they fail the run.
+ */
+const UNREPAIRABLE_CODES = new Set([
+  "artifact.path.unsafe",
+  "artifact.path.root",
+  "manifest.missing",
+  "manifest.version",
+  "manifest.root",
 ]);
-const SECRET_NAMES = /^(?:\.env(?:\..+)?|id_(?:rsa|dsa|ecdsa|ed25519)|credentials(?:\.json)?|secrets?\.json)$/i;
-const SECRET_EXTENSIONS = /\.(?:pem|key|p12|pfx|jks|keystore)$/i;
-const MAX_SOURCE_FILES = 30_000;
-const MAX_SOURCE_BYTES = 768 * 1024 * 1024;
 
-function safeArtifactTarget(projectRoot: string, artifactDirectory: string): string {
+export function safeArtifactTarget(projectRoot: string, artifactDirectory: string): string {
   if (!artifactDirectory || isAbsolute(artifactDirectory) || artifactDirectory.includes("\0")) {
     throw new Error("--output must be a project-relative artifact directory");
   }
@@ -30,63 +35,58 @@ async function exists(path: string): Promise<boolean> {
   try { await lstat(path); return true; } catch { return false; }
 }
 
-async function copyTree(
-  source: string,
-  destination: string,
-  options: { excludedAbsolute?: string; artifactsOnly?: boolean } = {},
-): Promise<void> {
-  let fileCount = 0;
-  let byteCount = 0;
-  const sourceRoot = resolve(source);
-  const excluded = options.excludedAbsolute ? resolve(options.excludedAbsolute) : undefined;
-
-  async function visit(currentSource: string, currentDestination: string, atRoot = false): Promise<void> {
-    const sourceInfo = await lstat(currentSource);
-    if (!sourceInfo.isDirectory() || sourceInfo.isSymbolicLink()) throw new Error(`copy source is not a regular directory: ${currentSource}`);
+/**
+ * Copy an existing artifact tree into staging. Only the documentation tree is
+ * copied — never the project source. The previous architecture snapshotted the
+ * whole repository into the run directory before every generation, which was
+ * slow, unbounded, and handed an agentic provider a writable playground.
+ */
+async function copyArtifactTree(source: string, destination: string): Promise<void> {
+  async function visit(currentSource: string, currentDestination: string, atRoot: boolean): Promise<void> {
+    const info = await lstat(currentSource);
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error(`artifact source is not a regular directory: ${currentSource}`);
     await mkdir(currentDestination, { recursive: true, mode: 0o700 });
     for (const entry of (await readdir(currentSource, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
-      const absolute = resolve(currentSource, entry.name);
-      if (excluded && (absolute === excluded || absolute.startsWith(`${excluded}${sep}`))) continue;
       if (entry.isSymbolicLink()) continue;
+      const absolute = resolve(currentSource, entry.name);
       if (entry.isDirectory()) {
-        if (options.artifactsOnly && atRoot && entry.name === "runs") continue;
-        if (!options.artifactsOnly && IGNORED_DIRECTORIES.has(entry.name)) continue;
-        await visit(absolute, resolve(currentDestination, entry.name));
+        // `.rb/runs` is live Ralph control-plane state, never regenerated here.
+        if (atRoot && entry.name === "runs") continue;
+        await visit(absolute, resolve(currentDestination, entry.name), false);
         continue;
       }
       if (!entry.isFile()) continue;
-      if (!options.artifactsOnly && (SECRET_NAMES.test(entry.name) || SECRET_EXTENSIONS.test(entry.name)) && !/\.example$/i.test(entry.name)) continue;
-      const info = await lstat(absolute);
-      fileCount += 1;
-      byteCount += info.size;
-      if (fileCount > MAX_SOURCE_FILES || byteCount > MAX_SOURCE_BYTES) {
-        throw new Error(`isolated source snapshot exceeds ${MAX_SOURCE_FILES} files or ${MAX_SOURCE_BYTES} bytes`);
-      }
       const target = resolve(currentDestination, entry.name);
       await copyFile(absolute, target);
-      await chmod(target, info.mode & 0o777).catch(() => undefined);
+      const fileInfo = await lstat(absolute);
+      await chmod(target, fileInfo.mode & 0o777).catch(() => undefined);
     }
   }
-  await visit(sourceRoot, destination, true);
+  await visit(resolve(source), destination, true);
 }
 
-export async function prepareGenerationWorkspace(state: HarnessRunState, runRoot: string): Promise<string> {
-  const workspace = resolve(runRoot, "workspace");
+/**
+ * Build the staging tree the bundle is materialized into: only `.rb`, seeded
+ * with the compatible existing artifacts so preserved documents survive.
+ */
+export async function prepareStagingTree(state: HarnessRunState, runRoot: string): Promise<string> {
+  const staging = resolve(runRoot, "staging");
   const outputTarget = safeArtifactTarget(state.projectRoot, state.artifactDirectory);
-  await rm(workspace, { recursive: true, force: true });
-  await mkdir(workspace, { recursive: true, mode: 0o700 });
-  await copyTree(state.projectRoot, workspace, { excludedAbsolute: outputTarget });
-  const workspaceArtifacts = resolve(workspace, ".rb");
+  await rm(staging, { recursive: true, force: true });
+  await mkdir(staging, { recursive: true, mode: 0o700 });
+  const stagedArtifacts = resolve(staging, ".rb");
   if (await exists(outputTarget)) {
     const outputInfo = await lstat(outputTarget);
     if (!outputInfo.isDirectory() || outputInfo.isSymbolicLink()) throw new Error("artifact output must be a regular directory");
-    await copyTree(outputTarget, workspaceArtifacts, { artifactsOnly: true });
+    await copyArtifactTree(outputTarget, stagedArtifacts);
+  } else {
+    await mkdir(stagedArtifacts, { recursive: true, mode: 0o700 });
   }
-  if (!(await exists(resolve(workspaceArtifacts, "rb-manifest.json")))) {
+  if (!(await exists(resolve(stagedArtifacts, "rb-manifest.json")))) {
     const name = state.inventory.projectName || basename(state.projectRoot) || "RB Project";
-    await initializeProject(workspace, name, state.inventory.projectId || slugify(name));
+    await initializeProject(staging, name, state.inventory.projectId || slugify(name));
   }
-  return workspace;
+  return staging;
 }
 
 function workflowArtifactReady(workflow: HarnessWorkflow, artifacts: Awaited<ReturnType<typeof loadManifest>>["artifacts"]): boolean {
@@ -97,35 +97,56 @@ function workflowArtifactReady(workflow: HarnessWorkflow, artifacts: Awaited<Ret
   return artifacts.some((artifact) => artifact.kind === "review-findings" && artifact.status === "ready");
 }
 
-export async function validateGeneratedWorkspace(workspace: string, workflow: HarnessWorkflow): Promise<{ artifacts: number; readyPlans: number }> {
-  await assertNoEnvironmentSecrets(workspace);
-  const manifest = await syncManifest(workspace);
-  const validation = await validateManifestTree(workspace);
-  if (!validation.valid) {
-    const details = validation.issues.slice(0, 12).map((issue) => `${issue.code}: ${issue.message}`).join("; ");
-    throw new Error(`generated artifact tree is invalid: ${details}`);
-  }
-  if (!workflowArtifactReady(workflow, manifest.artifacts)) {
+function structuralError(issue: ValidationIssue): StructuralError {
+  return {
+    code: issue.code,
+    message: issue.line ? `${issue.message} (line ${issue.line})` : issue.message,
+    ...(issue.path ? { path: issue.path } : {}),
+  };
+}
+
+export interface StagedValidation {
+  valid: boolean;
+  repairable: boolean;
+  errors: StructuralError[];
+  artifacts: number;
+  readyPlans: number;
+}
+
+/**
+ * Deterministic validation of the staged tree. Manifest, hashes, IDs, and the
+ * TSV projection are derived here by code; what remains is the document
+ * content the writer owns, reported as an ordered, machine-generated error
+ * list the single repair can consume.
+ */
+export async function validateStagedTree(staging: string, workflow: HarnessWorkflow): Promise<StagedValidation> {
+  await assertNoEnvironmentSecrets(staging);
+  const manifest = await syncManifest(staging);
+  const validation = await validateManifestTree(staging);
+  const errors = validation.issues.map(structuralError);
+  if (validation.valid && !workflowArtifactReady(workflow, manifest.artifacts)) {
     const declaredBlockers = manifest.artifacts
       .filter((artifact) => artifact.status === "blocked" || basename(artifact.path).toUpperCase() === "BLOCKED.MD")
-      .map((artifact) => artifact.path)
-      .slice(0, 3);
-    if (declaredBlockers.length) {
-      throw new Error(
-        `generated workflow explicitly declared BLOCKED in ${declaredBlockers.join(", ")}; `
-        + `the required ready output for workflow ${workflow} was not emitted`,
-      );
-    }
-    throw new Error(`generated artifacts do not contain the required ready output for workflow ${workflow}`);
+      .map((artifact) => artifact.path);
+    errors.push({
+      code: "workflow.ready-output.missing",
+      ...(declaredBlockers[0] ? { path: declaredBlockers[0] } : {}),
+      message: declaredBlockers.length
+        ? `The workflow declared BLOCKED in ${declaredBlockers.join(", ")} and did not emit the required ready output for workflow ${workflow}.`
+        : `The generated artifacts do not contain the required ready output for workflow ${workflow}.`,
+    });
   }
   return {
+    valid: errors.length === 0,
+    repairable: errors.length > 0 && errors.every((error) => !UNREPAIRABLE_CODES.has(error.code)),
+    errors,
     artifacts: manifest.artifacts.length,
     readyPlans: manifest.artifacts.filter((artifact) => artifact.kind === "execution-plan" && artifact.status === "ready").length,
   };
 }
 
-export async function assertNoEnvironmentSecrets(workspace: string): Promise<void> {
-  const artifactRoot = resolve(workspace, ".rb");
+export async function assertNoEnvironmentSecrets(staging: string): Promise<void> {
+  const artifactRoot = resolve(staging, ".rb");
   const secrets = Object.entries(process.env)
     .filter(([name, value]) => /(?:API_?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)/i.test(name) && typeof value === "string" && value.length >= 12)
     .map(([name, value]) => ({ name, bytes: Buffer.from(value!, "utf8") }));
@@ -157,9 +178,9 @@ async function uniquePreviousPath(runRoot: string): Promise<string> {
   throw new Error("too many preserved artifact revisions in one Harness run");
 }
 
-export async function publishGeneratedArtifacts(state: HarnessRunState, runRoot: string, workspace: string): Promise<string | undefined> {
+export async function publishStagedArtifacts(state: HarnessRunState, runRoot: string, staging: string): Promise<string | undefined> {
   const target = safeArtifactTarget(state.projectRoot, state.artifactDirectory);
-  const staged = resolve(workspace, ".rb");
+  const staged = resolve(staging, ".rb");
   const stagedInfo = await lstat(staged);
   if (!stagedInfo.isDirectory() || stagedInfo.isSymbolicLink()) throw new Error("validated staging artifact root disappeared");
   await mkdir(dirname(target), { recursive: true });
@@ -198,7 +219,7 @@ export async function recoverInterruptedPublication(state: HarnessRunState, runR
     .at(-1)?.path;
   if (!previous) return false;
   if (state.artifactDirectory === ".rb") {
-    const stagedRuns = resolve(runRoot, "workspace/.rb/runs");
+    const stagedRuns = resolve(runRoot, "staging/.rb/runs");
     const previousRuns = resolve(previous, "runs");
     if (await exists(stagedRuns) && !(await exists(previousRuns))) await rename(stagedRuns, previousRuns);
   }
@@ -206,12 +227,4 @@ export async function recoverInterruptedPublication(state: HarnessRunState, runR
   await rename(previous, target);
   state.previousArtifacts = undefined;
   return true;
-}
-
-export async function generationSourceSummary(workspace: string): Promise<string> {
-  const manifest = await loadManifest(workspace);
-  return JSON.stringify({
-    project: manifest.project,
-    existingArtifacts: manifest.artifacts.map((artifact) => ({ id: artifact.id, kind: artifact.kind, status: artifact.status, path: artifact.path })),
-  });
 }

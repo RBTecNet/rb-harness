@@ -1,6 +1,6 @@
 # Evolution Artifact Shapes
 
-Write under `.rb/evolutions/<slug>/` with stable IDs and source hashes.
+Return these documents under `.rb/evolutions/<slug>/` with stable IDs and source hashes.
 
 - `CHANGE_REQUEST.md` always: source request, objective, trigger, actors, scope,
   non-goals, accepted answers, assumptions, and readiness.

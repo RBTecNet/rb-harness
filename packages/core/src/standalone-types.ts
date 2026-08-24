@@ -2,12 +2,16 @@ export const STANDALONE_STATE_CONTRACT = "rb-harness-run/v1" as const;
 
 export type HarnessWorkflow = "init" | "ai-context" | "plan" | "evolve" | "review";
 export type RunStatus =
+  | "inventory"
   | "interview"
   | "interview-failed"
   | "blocked"
   | "generating"
   | "generation-failed"
+  | "materializing"
   | "validating"
+  | "repairing"
+  /** Historical only: the removed semantic manager stage, kept resumable. */
   | "auditing"
   | "publishing"
   | "complete";
@@ -59,6 +63,16 @@ export interface InterviewAnalysis {
   unresolved: string[];
   answerReviews: AnswerReview[];
   questions: InterviewQuestion[];
+  /** Superficial protocol deviations the program repaired instead of failing. */
+  normalizations?: string[];
+  /**
+   * Semantic protocol violations — an answer left unclassified or given an
+   * unsupported disposition. These are never repaired into an acceptance; they
+   * earn one focused follow-up or block the run.
+   */
+  semanticDefects?: string[];
+  /** Questions that exceeded the round budget and became deferred decisions. */
+  overflowQuestions?: number;
 }
 
 export interface ArtifactAuditFinding {
@@ -102,6 +116,31 @@ export interface GenerationCheckpoint {
   providerCompletedAt: string;
 }
 
+/**
+ * Durable boundaries between paid and unpaid work (RF-012). A complete
+ * provider response that is already preserved is never requested again.
+ */
+export interface RunCheckpoints {
+  /** The interview reached a ready checkpoint with no pending answer. */
+  interviewCompletedAt?: string;
+  /** A complete document bundle was received and persisted to bundle.json. */
+  bundleReceivedAt?: string;
+  /** Documents were materialized into the staging tree. */
+  materializedAt?: string;
+  /** Deterministic validation of the staged tree passed. */
+  validatedAt?: string;
+  /** The staged tree was atomically published. */
+  publishedAt?: string;
+}
+
+export interface BundleCheckpoint {
+  contract: "rb-harness-documents/v1";
+  documents: number;
+  sha256: string;
+  receivedAt: string;
+  repaired: boolean;
+}
+
 export interface ProjectInventory {
   projectRoot: string;
   artifactDirectory: string;
@@ -141,8 +180,14 @@ export interface HarnessRunState {
   interviewRound?: number;
   activeInterviewRound?: number;
   analysis?: InterviewAnalysis;
+  /** Historical only: records written by the removed semantic manager. */
   artifactAudits?: ArtifactAuditRecord[];
   generationCheckpoint?: GenerationCheckpoint;
+  checkpoints?: RunCheckpoints;
+  bundle?: BundleCheckpoint;
+  /** Structural repairs already spent; the budget is exactly one. */
+  repairsUsed?: number;
+  telemetry?: unknown;
   inventory: ProjectInventory;
   createdAt: string;
   updatedAt: string;

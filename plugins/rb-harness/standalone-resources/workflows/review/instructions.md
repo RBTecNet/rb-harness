@@ -11,13 +11,19 @@ it without guessing.
 
 ## Required references
 
-Read these files completely before writing artifacts:
+Read this file completely before producing artifacts:
 
-- [Interview policy](../../references/interview-policy.md)
-- [Artifact conventions](../../references/artifact-conventions.md)
-- [Execution template](../../references/execution-template.md)
-- [Operational acceptance template](../../references/operational-template.md)
 - [Review artifact shapes](artifact-shapes.md)
+
+## How your output is delivered
+
+You do not write files and you do not run commands. Return every document as a
+`path`/`content` pair in the document bundle envelope described in your prompt.
+The orchestrator materializes the files, derives the manifest, IDs, hashes, and
+statuses, runs every deterministic validator, and publishes atomically. The
+exact output contract for this workflow — required documents, the
+`rb-execution/v1` grammar, the `rb-operational/v1` shape, and the conventions —
+is supplied in the prompt as `rb-harness-contract-digest/v1`.
 - For every UI-bearing target, [Responsive evidence](responsive-evidence.md)
 
 ## Modes
@@ -84,14 +90,13 @@ depth, not cross-boundary evidence needed to understand a critical journey.
 9. Apply the shared ambiguity audit. Deduplicate by root cause, preserve
    independent impact paths, and compare with the baseline as new, changed,
    regressed, unchanged, or resolved.
-10. Write the conditional artifacts from `artifact-shapes.md`, then run
-    `review validate-responsive`, `manifest sync`, and `tree validate`. For UI
-    targets, do not hand work to the writer until every high-risk responsive
-    candidate has an individual structured disposition and file/candidate totals
+10. Return the conditional artifacts from `artifact-shapes.md`. The orchestrator runs every deterministic validator after your call; produce documents that already satisfy them, and never claim to have run a command. They
+    cover `rb-responsive-inventory/v1`, the manifest, and the whole tree. For UI
+    targets, do not return findings until every high-risk responsive candidate
+    has an individual structured disposition and file/candidate totals
     reconcile. A path list or prose claim of zero unresolved candidates is not
-    evidence. Report
-    coverage, skipped areas, limitations, counts by severity/confidence, and
-    artifact paths.
+    evidence. State coverage, skipped areas, limitations, and counts by
+    severity/confidence in the bundle summary.
 
 11. When an explicit planning selector was supplied, freeze the completed audit
     before resolving it. Persist its raw form, normalized predicate, resolved

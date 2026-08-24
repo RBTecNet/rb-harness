@@ -10,13 +10,19 @@ Do not implement the change.
 
 ## Required references
 
-Read these files completely before writing artifacts:
+Read this file completely before producing artifacts:
 
-- [Interview policy](../../references/interview-policy.md)
-- [Artifact conventions](../../references/artifact-conventions.md)
-- [Execution template](../../references/execution-template.md)
-- [Operational acceptance template](../../references/operational-template.md)
 - [Plan artifact shapes](artifact-shapes.md)
+
+## How your output is delivered
+
+You do not write files and you do not run commands. Return every document as a
+`path`/`content` pair in the document bundle envelope described in your prompt.
+The orchestrator materializes the files, derives the manifest, IDs, hashes, and
+statuses, runs every deterministic validator, and publishes atomically. The
+exact output contract for this workflow — required documents, the
+`rb-execution/v1` grammar, the `rb-operational/v1` shape, and the conventions —
+is supplied in the prompt as `rb-harness-contract-digest/v1`.
 
 ## Workflow
 
@@ -42,8 +48,8 @@ Read these files completely before writing artifacts:
 7. Run the pre-write ambiguity audit, then confirm 1 concise normalized request
    checkpoint that separates accepted decisions, assumptions, deferrals, and
    unresolved conflicts.
-8. Write `.rb/features/<slug>/REQUEST.md`, `SPEC.md`, `PLAN.md`, conditional
-   formal contracts, source manifest, and `PHASES.md`. Also write
+8. Return `.rb/features/<slug>/REQUEST.md`, `SPEC.md`, `PLAN.md`, conditional
+   formal contracts, source manifest, and `PHASES.md`. Also return
    `OPERATIONS.json` using `rb-operational/v1` when an honest executable
    consumer scenario can be grounded. The scenario must validate the actual
    product form and claimed platforms (desktop, CLI, library, service, web, or
@@ -61,14 +67,10 @@ Read these files completely before writing artifacts:
    schema/secret cases when relevant.
 10. Derive phases from a dependency DAG. `Parallel safe` is descriptive; no
     executor or provider is required to parallelize.
-11. Run, fix, and repeat until green:
-    - `contract validate .rb/features/<slug>/PHASES.md`
-    - `operations validate .rb/features/<slug>/OPERATIONS.json` when emitted
-    - `manifest sync .`
-    - `tree validate .`
-12. Report readiness, artifact paths, requirements/tasks/phases, answer
-    dispositions, assumptions, risks, contracts, and validation. Never edit
-    application code or commit.
+11. The orchestrator runs every deterministic validator after your call; produce documents that already satisfy them, and never claim to have run a command. They cover `rb-execution/v1`, `rb-operational/v1`, the
+    manifest, and the whole tree.
+12. State readiness, requirements, tasks, and phases in the bundle summary.
+    Never edit application code, run a command, or commit.
 
 These resources are loaded by the standalone executable. Generated documents
 must not depend on the location of this resource tree or any plugin host.

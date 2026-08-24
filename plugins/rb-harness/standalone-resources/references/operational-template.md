@@ -1,5 +1,8 @@
 # Operational Acceptance Template
 
+> Reference material for maintainers.
+> The exact `rb-operational/v1` shape the provider receives is code-owned by `rb-harness-contract-digest/v1` (see `packages/core/src/harness-contract-digest.ts`) and enforced by `packages/core/src/operational-contract.ts`. This document explains the discovery and scenario reasoning and is no longer injected into a prompt.
+
 Use `OPERATIONS.json` to describe executable consumer-level proof using the
 `rb-operational/v1` contract. The canonical source checkout also publishes
 `contracts/rb-operational-v1.md` and its JSON Schema; the bundled

@@ -8,8 +8,12 @@ interface ResourceRootOptions {
   configuredRoot?: string;
 }
 
+/** Which prompt consumes the resources; each stage loads only what it needs. */
+export type WorkflowResourceSection = "interview" | "generation" | "repair";
+
 interface WorkflowResourceOptions {
   includeHeadlessContracts?: boolean;
+  section?: WorkflowResourceSection;
 }
 
 export function requestNeedsHeadlessContracts(request: string): boolean {
@@ -56,18 +60,20 @@ export async function loadWorkflowResources(
   workflow: HarnessWorkflow,
   options: WorkflowResourceOptions = {},
 ): Promise<string> {
+  const section = options.section ?? "generation";
+  // The mechanical formats (execution grammar, operational shape, artifact
+  // conventions, interview policy) are code-owned by the contract digest.
+  // Only workflow-specific semantic guidance is still read from disk.
+  if (section === "repair") return "";
   const root = await resolveWorkflowResourceRoot();
   const resources = [
-    { label: "references/interview-policy.md", path: resolve(root, "references/interview-policy.md") },
-    { label: "references/artifact-conventions.md", path: resolve(root, "references/artifact-conventions.md") },
-    { label: "references/execution-template.md", path: resolve(root, "references/execution-template.md") },
-    { label: "references/operational-template.md", path: resolve(root, "references/operational-template.md") },
     { label: `workflows/${workflow}/instructions.md`, path: resolve(root, `workflows/${workflow}/instructions.md`) },
-    { label: `workflows/${workflow}/artifact-shapes.md`, path: resolve(root, `workflows/${workflow}/artifact-shapes.md`) },
-    ...(workflow === "review" ? [{
-      label: "workflows/review/responsive-evidence.md",
-      path: resolve(root, "workflows/review/responsive-evidence.md"),
-    }] : []),
+    ...(section === "generation"
+      ? [{ label: `workflows/${workflow}/artifact-shapes.md`, path: resolve(root, `workflows/${workflow}/artifact-shapes.md`) }]
+      : []),
+    ...(section === "generation" && workflow === "review"
+      ? [{ label: "workflows/review/responsive-evidence.md", path: resolve(root, "workflows/review/responsive-evidence.md") }]
+      : []),
   ];
   if (options.includeHeadlessContracts) {
     const contractRoot = resolve(root, "../contracts");

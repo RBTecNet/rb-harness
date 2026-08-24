@@ -1,5 +1,8 @@
 # Adaptive Interview Policy
 
+> Reference material for maintainers.
+> The executable now owns the machine-enforced interview contract through `rb-harness-contract-digest/v1` (see `packages/core/src/harness-contract-digest.ts`), which is what the provider actually receives. This document is the human-readable rationale behind those rules and is no longer injected into a prompt.
+
 ## Ask decision rule
 
 Ask only when all are true:

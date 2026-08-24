@@ -31,12 +31,18 @@ artifacts, project evidence, or the current run logs.
 
 Harness generation state lives separately at `.rb-harness/runs/<run-id>/`.
 It records the request hash, selected provider/model/effort, raw answers,
-accepted normalized decisions, validation state, private provider logs, and any
-prior artifact revision replaced by successful publication. Historical state
-may also contain retired artifact-audit batches, which are preserved but no
-longer gate publication. `rb-harness resume`
-can restart an interrupted interview or generation without relying on a hidden
-provider session. This state is not part of the portable artifact contract.
+accepted normalized decisions, the durable checkpoints (interview completed,
+document bundle received, materialized, validated, published), the received
+bundle at `bundle.json`, stage telemetry at `telemetry.json`, private provider
+logs, and any prior artifact revision replaced by successful publication.
+The bounded evidence projection the provider runs in lives outside this
+directory, in its own private temporary root: placing it beside the run state
+would put `state.json` one directory above the provider. It is derived,
+rebuildable, sealed read-only, and removed when the run ends. Historical state may also contain retired artifact-audit batches, which are
+preserved but no longer gate publication. `rb-harness resume` can restart an
+interrupted interview or generation without relying on a hidden provider
+session, and never re-requests a provider response that is already preserved.
+This state is not part of the portable artifact contract.
 The `ready` interview checkpoint is itself a resumable boundary: with no
 pending answer, a resumed run starts at generation rather than paying for a
 redundant analysis round.

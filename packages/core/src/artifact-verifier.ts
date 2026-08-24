@@ -1,14 +1,22 @@
+/**
+ * Deterministic artifact verification (RF-006).
+ *
+ * Verification is code, not a second opinion. It proves hashes, the manifest,
+ * the execution and operational contracts, cross-artifact references,
+ * requirement coverage, task scopes, and the readiness invariants RB Ralph
+ * consumes. It never starts a provider, so it cannot recreate the cost of the
+ * removed semantic manager, and there is no hidden option that would.
+ */
+
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, relative, resolve, sep } from "node:path";
+import { dirname, extname, relative, resolve, sep } from "node:path";
 import { walkFiles } from "./fs-utils.js";
 import { sha256File } from "./hash.js";
-import { requestArtifactAudit } from "./harness-audit.js";
 import { inspectProjectInventory } from "./harness-inventory.js";
 import { listRunStates } from "./harness-state.js";
 import { loadManifest, validateManifestTree } from "./manifest.js";
-import { runStandaloneWorkflow } from "./standalone-runner.js";
-import type { ArtifactAuditFinding, HarnessRunState, HarnessWorkflow, ProviderConfiguration } from "./standalone-types.js";
+import type { HarnessRunState, HarnessWorkflow, ProviderConfiguration } from "./standalone-types.js";
 import type { ArtifactManifest, ArtifactRecord, ExecutionDocument, ValidationIssue } from "./types.js";
 import { validateExecutionMarkdown } from "./execution-contract.js";
 
@@ -18,7 +26,7 @@ export type ArtifactVerificationStatus = "pass" | "warning" | "fail" | "blocked"
 export interface ArtifactVerificationFinding {
   id: string;
   severity: ArtifactVerificationSeverity;
-  source: "deterministic" | "semantic";
+  source: "deterministic";
   category: string;
   artifact: string;
   criterion: string;
@@ -45,16 +53,9 @@ export interface ArtifactVerificationReport {
     readyPlanCount: number;
   };
   semantic: {
-    executed: boolean;
-    provider?: string;
-    model?: string;
-    status?: "pass" | "revise" | "blocked";
-    summary?: string;
-    decision?: {
-      question: string;
-      reason: string;
-      options: string[];
-    };
+    executed: false;
+    /** Why no provider ran; the semantic manager was removed from the product. */
+    reason: string;
   };
   findings: ArtifactVerificationFinding[];
   reportPath: string;
@@ -66,31 +67,23 @@ export interface VerifyArtifactsOptions {
   artifactDirectory: string;
   againstFile?: string;
   authorityRunId?: string;
-  provider: ProviderConfiguration;
-  deterministicOnly: boolean;
-  timeoutSeconds: number;
-  firstOutputTimeoutSeconds: number;
+  /** Recorded for provenance only; verification never starts a provider. */
+  provider?: ProviderConfiguration;
   reportPath?: string;
 }
 
-export interface RemediateArtifactsOptions extends VerifyArtifactsOptions {
-  fromReportPath?: string;
-  answersFile?: string;
-  questionMode: "one-by-one" | "batch";
-  nonInteractive: boolean;
-}
-
-export interface ArtifactRemediationResult {
-  contract: "rb-harness-artifact-remediation/v1";
-  remediated: boolean;
-  readyForRalph: boolean;
-  initialReport: ArtifactVerificationReport;
-  finalReport: ArtifactVerificationReport;
-  remediationRun?: {
-    id: string;
-    previousArtifacts?: string;
-  };
-}
+const DETERMINISTIC_CHECKS = [
+  "manifest-schema",
+  "artifact-hashes",
+  "execution-contracts",
+  "operational-contracts",
+  "responsive-contracts",
+  "ready-plan-discovery",
+  "cold-context-paths",
+  "task-reference-integrity",
+  "requirement-coverage",
+  "portable-paths",
+];
 
 function logicalPhysicalPath(projectRoot: string, artifactDirectory: string, logicalPath: string): string {
   if (!logicalPath.startsWith(".rb/") || logicalPath.includes("\0") || logicalPath.split("/").includes("..")) {
@@ -112,7 +105,7 @@ function deterministicFinding(issue: ValidationIssue): ArtifactVerificationFindi
     artifact: issue.path?.startsWith(".rb/") ? issue.path : ".rb/rb-manifest.json",
     criterion: issue.code,
     evidence: issue.message,
-    requiredChange: "Repair the deterministic artifact contract and rerun verification before invoking a provider or RB Ralph.",
+    requiredChange: "Repair the deterministic artifact contract and rerun verification before invoking RB Ralph.",
   };
 }
 
@@ -134,7 +127,16 @@ async function readArtifact(
   return source.toString("utf8");
 }
 
-async function undefinedTaskFindings(
+/** Requirement IDs declared as headings or list anchors in a specification. */
+export function declaredRequirementIds(source: string): string[] {
+  const ids = new Set<string>();
+  for (const match of source.matchAll(/^(?:#{1,6}\s+|[-*]\s+(?:\*\*)?)((?:RF|RNF|UI|CT)-\d+)\b/gm)) {
+    if (match[1]) ids.add(match[1]);
+  }
+  return [...ids].sort();
+}
+
+async function coverageAndReferenceFindings(
   projectRoot: string,
   artifactDirectory: string,
   manifest: ArtifactManifest,
@@ -164,6 +166,34 @@ async function undefinedTaskFindings(
         requiredChange: "Point every task reference to a task defined by the execution plan, or add the missing bounded task and its traceability.",
       });
     }
+
+    // Requirement coverage: every requirement a sibling specification declares
+    // must be carried by at least one task's `Covers` field.
+    const specifications = siblings.filter((artifact) => artifact.kind === "specification");
+    const declared = new Set<string>();
+    for (const specification of specifications) {
+      for (const id of declaredRequirementIds(await readArtifact(projectRoot, artifactDirectory, specification))) declared.add(id);
+    }
+    if (declared.size) {
+      const covered = new Set(
+        validation.document.phases
+          .flatMap((phase) => phase.tasks)
+          .flatMap((task) => task.covers.match(/\b(?:RF|RNF|UI|CT)-\d+\b/g) ?? []),
+      );
+      const uncovered = [...declared].filter((id) => !covered.has(id)).sort();
+      if (uncovered.length) {
+        findings.push({
+          id: `traceability.uncovered-requirement.${plan.id}`,
+          severity: "major",
+          source: "deterministic",
+          category: "traceability",
+          artifact: plan.path,
+          criterion: "requirement-coverage",
+          evidence: `The specification declares requirements no task covers: ${uncovered.join(", ")}.`,
+          requiredChange: "Cover every declared requirement with a bounded task, or remove the requirement from the specification.",
+        });
+      }
+    }
   }
   return findings;
 }
@@ -173,10 +203,13 @@ function missingContextFindings(manifest: ArtifactManifest, plans: Array<{ artif
   const findings: ArtifactVerificationFinding[] = [];
   for (const { artifact, document } of plans) {
     const missing = new Set<string>();
+    const unsafe = new Set<string>();
     for (const phase of document.phases) {
       for (const entry of phase.context) {
         const path = entry.match(/`([^`]+)`/)?.[1];
-        if (path?.startsWith(".rb/") && !indexed.has(path)) missing.add(path);
+        if (!path) continue;
+        if (path.startsWith("/") || path.split("/").includes("..") || /^[A-Za-z]:[\\/]/.test(path)) unsafe.add(path);
+        if (path.startsWith(".rb/") && !indexed.has(path)) missing.add(path);
       }
     }
     if (missing.size) {
@@ -189,6 +222,18 @@ function missingContextFindings(manifest: ArtifactManifest, plans: Array<{ artif
         criterion: "cold-phase-context",
         evidence: `Phase context references artifacts absent from the manifest: ${[...missing].sort().join(", ")}.`,
         requiredChange: "Index every load-bearing phase context artifact or remove the invalid reference before Ralph starts cold.",
+      });
+    }
+    if (unsafe.size) {
+      findings.push({
+        id: `portability.unsafe-context.${artifact.id}`,
+        severity: "blocker",
+        source: "deterministic",
+        category: "portability",
+        artifact: artifact.path,
+        criterion: "portable-paths",
+        evidence: `Phase context references non-portable paths: ${[...unsafe].sort().join(", ")}.`,
+        requiredChange: "Use project-relative paths only; an execution plan must not depend on an absolute or escaping location.",
       });
     }
   }
@@ -242,7 +287,7 @@ async function deterministicVerification(
     }
   }
   findings.push(...missingContextFindings(manifest, parsedPlans));
-  findings.push(...await undefinedTaskFindings(projectRoot, artifactDirectory, manifest));
+  findings.push(...await coverageAndReferenceFindings(projectRoot, artifactDirectory, manifest));
   return {
     manifest,
     findings,
@@ -295,7 +340,6 @@ async function authorityState(
         ...existing,
         request: request ?? existing.request,
         ...(path ? { requestSource: path } : {}),
-        provider: options.provider,
       },
       authority: {
         source: options.againstFile ? "against-file" : "harness-run",
@@ -318,7 +362,7 @@ async function authorityState(
       request: request ?? "Verify the generated artifact tree against its own declared canonical request, specification, and source authorities.",
       ...(path ? { requestSource: path } : {}),
       requestHash: createHash("sha256").update(request ?? "artifact-tree-only").digest("hex"),
-      provider: options.provider,
+      provider: options.provider ?? { provider: "custom", model: "", effort: "" },
       answers: [],
       inventory,
       createdAt: now,
@@ -329,21 +373,7 @@ async function authorityState(
   };
 }
 
-function semanticFinding(finding: ArtifactAuditFinding, blocked: boolean): ArtifactVerificationFinding {
-  return {
-    id: finding.id,
-    severity: blocked ? "blocker" : finding.severity ?? "major",
-    source: "semantic",
-    category: finding.category,
-    artifact: finding.artifact,
-    criterion: finding.criterion,
-    evidence: finding.evidence,
-    requiredChange: finding.requiredChange,
-  };
-}
-
-function reportStatus(findings: ArtifactVerificationFinding[], semanticBlocked: boolean): ArtifactVerificationStatus {
-  if (semanticBlocked) return "blocked";
+function reportStatus(findings: ArtifactVerificationFinding[]): ArtifactVerificationStatus {
   if (findings.some((finding) => finding.severity === "blocker" || finding.severity === "major")) return "fail";
   if (findings.length) return "warning";
   return "pass";
@@ -373,56 +403,6 @@ async function artifactTreeFingerprint(projectRoot: string, artifactDirectory: s
   return digest.digest("hex");
 }
 
-function storedVerificationReport(value: unknown, path: string): ArtifactVerificationReport | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const report = value as Partial<ArtifactVerificationReport>;
-  if (report.contract !== "rb-harness-artifact-verification/v1"
-      || typeof report.artifactDirectory !== "string"
-      || !/^[a-f0-9]{64}$/.test(report.artifactFingerprint ?? "")
-      || !/^[a-f0-9]{64}$/.test(report.authorityFingerprint ?? "")
-      || typeof report.readyForRalph !== "boolean"
-      || !Array.isArray(report.findings)
-      || typeof report.verifiedAt !== "string") return undefined;
-  return { ...report, reportPath: path } as ArtifactVerificationReport;
-}
-
-async function loadRemediationReport(
-  options: RemediateArtifactsOptions,
-  artifactFingerprint: string,
-  authorityFingerprint: string,
-): Promise<ArtifactVerificationReport> {
-  const reports = await remediationReports(options);
-  const matching = reports
-    .filter((report) => report.artifactDirectory === options.artifactDirectory
-      && report.artifactFingerprint === artifactFingerprint
-      && report.authorityFingerprint === authorityFingerprint)
-    .sort((left, right) => left.verifiedAt.localeCompare(right.verifiedAt));
-  const selected = matching.at(-1);
-  if (selected) return selected;
-  const explicit = options.fromReportPath ? resolve(options.projectRoot, options.fromReportPath) : undefined;
-  const qualifier = explicit ? `The selected report is missing, invalid, or stale: ${explicit}.` : "No compatible verification report was found.";
-  throw new Error(`${qualifier} Run rb-harness artifacts verify without --remediate against the current artifact tree first.`);
-}
-
-async function remediationReports(
-  options: RemediateArtifactsOptions,
-): Promise<ArtifactVerificationReport[]> {
-  const projectRoot = resolve(options.projectRoot);
-  const explicit = options.fromReportPath ? resolve(projectRoot, options.fromReportPath) : undefined;
-  const candidates = explicit
-    ? [explicit]
-    : (await walkFiles(resolve(projectRoot, ".rb-harness/verifications"), 10_000).catch(() => []))
-      .filter((path) => basename(path) === "report.json");
-  const reports: ArtifactVerificationReport[] = [];
-  for (const path of candidates) {
-    try {
-      const parsed = storedVerificationReport(JSON.parse(await readFile(path, "utf8")), path);
-      if (parsed) reports.push(parsed);
-    } catch { /* malformed or concurrently incomplete reports are ignored */ }
-  }
-  return reports;
-}
-
 function sourceAuthorityFingerprint(state: HarnessRunState): string {
   return createHash("sha256").update(JSON.stringify({
     workflow: state.workflow,
@@ -439,39 +419,6 @@ function sourceAuthorityFingerprint(state: HarnessRunState): string {
   })).digest("hex");
 }
 
-function remediationRequest(state: HarnessRunState, report: ArtifactVerificationReport): string {
-  const acceptedDecisions = state.answers
-    .filter((answer) => answer.disposition === "ACCEPTED")
-    .map((answer) => ({
-      questionId: answer.questionId,
-      decision: answer.normalizedDecision,
-      sourceAnswer: answer.rawAnswer,
-    }));
-  const findings = report.findings.map((finding) => ({
-    id: finding.id,
-    severity: finding.severity,
-    category: finding.category,
-    artifact: finding.artifact,
-    criterion: finding.criterion,
-    evidence: finding.evidence,
-    requiredChange: finding.requiredChange,
-  }));
-  return [
-    "RB Harness bounded artifact remediation request.",
-    "This request authorizes exactly one complete documentation re-emission after the adaptive interview reaches a valid checkpoint.",
-    "Repair every reported invariant at its root while preserving unaffected behavior, compatible artifacts, and confirmed manual edits.",
-    "Do not implement application code. Do not add a documentation manager, repeat generation, or weaken an acceptance criterion merely to obtain a passing verdict.",
-    "Ask the developer only when the accepted authorities leave two or more incompatible product-observable outcomes. Technical design, contract closure, task decomposition, traceability, and proof ownership are writer responsibilities.",
-    "The post-remediation verifier runs once. Any remaining finding is reported without another automatic repair cycle.",
-    `\nOriginal developer request:\n${state.request}`,
-    `\nPrior normalized interview checkpoint:\n${state.analysis?.summary ?? "none"}`,
-    `\nPrior accepted decisions:\n${JSON.stringify(acceptedDecisions)}`,
-    `\nPrior explicit assumptions:\n${JSON.stringify(state.analysis?.assumptions ?? [])}`,
-    `\nExhaustive verification summary:\n${report.semantic.summary ?? "Deterministic verification did not reach the semantic audit."}`,
-    `\nFindings to remediate:\n${JSON.stringify(findings)}`,
-  ].join("\n");
-}
-
 export function artifactVerificationExitCode(report: ArtifactVerificationReport): number {
   if (report.status === "blocked") return 3;
   if (report.status === "fail") return 2;
@@ -483,49 +430,22 @@ export async function verifyArtifacts(options: VerifyArtifactsOptions): Promise<
   const artifactFingerprint = await artifactTreeFingerprint(projectRoot, options.artifactDirectory);
   const deterministic = await deterministicVerification(projectRoot, options.artifactDirectory);
   const findings = [...deterministic.findings];
-  const checks = ["manifest-schema", "artifact-hashes", "execution-contracts", "operational-contracts", "ready-plan-discovery", "cold-context-paths", "task-reference-integrity"];
-  let semantic: ArtifactVerificationReport["semantic"] = { executed: false };
-  let semanticBlocked = false;
   const authority = await authorityState({ ...options, projectRoot }, deterministic.manifest);
   const authorityFingerprint = sourceAuthorityFingerprint(authority.state);
   if (authority.missing) {
     findings.push({
       id: "source-authority.original-request-unavailable",
-      severity: "major",
+      severity: "minor",
       source: "deterministic",
       category: "source-authority",
       artifact: ".rb/rb-manifest.json",
       criterion: "request-fidelity",
-      evidence: "No matching completed Harness run or explicit --against request file was available; source fidelity cannot be proven.",
-      requiredChange: "Provide --against <request-file> or preserve the originating Harness run state.",
+      evidence: "No matching completed Harness run or explicit --against request file was available; the report is not bound to an original request.",
+      requiredChange: "Provide --against <request-file> or preserve the originating Harness run state to bind this report to its authority.",
     });
   }
-  const mechanicalBlocker = findings.some((finding) => finding.source === "deterministic" && finding.severity === "blocker");
+  const status = reportStatus(findings);
   const reportPath = options.reportPath ? resolve(projectRoot, options.reportPath) : defaultReportPath(projectRoot, options.artifactDirectory);
-  const runRoot = dirname(reportPath);
-  if (!options.deterministicOnly && !mechanicalBlocker) {
-    await mkdir(runRoot, { recursive: true, mode: 0o700 });
-    const audit = await requestArtifactAudit(
-      authority.state,
-      projectRoot,
-      runRoot,
-      1,
-      options.timeoutSeconds,
-      options.firstOutputTimeoutSeconds,
-      options.artifactDirectory,
-    );
-    semanticBlocked = audit.status === "blocked";
-    findings.push(...audit.findings.map((finding) => semanticFinding(finding, semanticBlocked)));
-    semantic = {
-      executed: true,
-      provider: options.provider.provider,
-      model: options.provider.model || "provider-default",
-      status: audit.status,
-      summary: audit.summary,
-      ...(audit.decision ? { decision: audit.decision } : {}),
-    };
-  }
-  const status = reportStatus(findings, semanticBlocked);
   const report: ArtifactVerificationReport = {
     contract: "rb-harness-artifact-verification/v1",
     status,
@@ -536,105 +456,22 @@ export async function verifyArtifacts(options: VerifyArtifactsOptions): Promise<
     authority: authority.authority,
     deterministic: {
       passed: !findings.some((finding) =>
-        finding.source === "deterministic" && (finding.severity === "blocker" || finding.severity === "major")),
-      checks,
+        finding.severity === "blocker" || finding.severity === "major"),
+      checks: DETERMINISTIC_CHECKS,
       artifactCount: deterministic.artifactCount,
       readyPlanCount: deterministic.readyPlanCount,
     },
-    semantic,
+    semantic: {
+      executed: false,
+      reason: "Verification is deterministic by contract; the semantic documentation manager was removed from the product path.",
+    },
     findings,
     reportPath,
     verifiedAt: new Date().toISOString(),
   };
-  await mkdir(runRoot, { recursive: true, mode: 0o700 });
+  await mkdir(dirname(reportPath), { recursive: true, mode: 0o700 });
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
   return report;
-}
-
-export async function verifyAndRemediateArtifacts(
-  options: RemediateArtifactsOptions,
-): Promise<ArtifactRemediationResult> {
-  if (options.deterministicOnly) {
-    throw new Error("--remediate requires the semantic verifier; remove --deterministic-only");
-  }
-  const projectRoot = resolve(options.projectRoot);
-  const artifactFingerprint = await artifactTreeFingerprint(projectRoot, options.artifactDirectory);
-  const tree = await validateManifestTree(projectRoot, { artifactDirectory: options.artifactDirectory });
-  const storedReports = await remediationReports({ ...options, projectRoot });
-  if (options.fromReportPath && !storedReports.length) {
-    throw new Error(
-      `The selected report is missing, invalid, or stale: ${resolve(projectRoot, options.fromReportPath)}. Run rb-harness artifacts verify without --remediate against the current artifact tree first.`,
-    );
-  }
-  const artifactReport = storedReports
-    .filter((report) => report.artifactDirectory === options.artifactDirectory
-      && report.artifactFingerprint === artifactFingerprint)
-    .sort((left, right) => left.verifiedAt.localeCompare(right.verifiedAt))
-    .at(-1);
-  const authorityReport = artifactReport ?? (options.fromReportPath ? storedReports.at(-1) : undefined);
-  const inheritedAgainstFile = !options.againstFile && authorityReport?.authority.source === "against-file"
-    ? authorityReport.authority.path
-    : undefined;
-  const inheritedAuthorityRunId = !options.againstFile && !inheritedAgainstFile
-    ? authorityReport?.authority.harnessRunId
-    : undefined;
-  const effectiveOptions: RemediateArtifactsOptions = {
-    ...options,
-    projectRoot,
-    againstFile: options.againstFile ?? inheritedAgainstFile,
-    authorityRunId: options.authorityRunId ?? inheritedAuthorityRunId,
-  };
-  const authority = await authorityState(effectiveOptions, tree.manifest);
-  if (authority.missing) {
-    throw new Error("artifact remediation requires the original request authority; provide --against <request-file>");
-  }
-  const authorityFingerprint = sourceAuthorityFingerprint(authority.state);
-  const initialReport = await loadRemediationReport(
-    effectiveOptions,
-    artifactFingerprint,
-    authorityFingerprint,
-  );
-  if (initialReport.readyForRalph) {
-    return {
-      contract: "rb-harness-artifact-remediation/v1",
-      remediated: false,
-      readyForRalph: true,
-      initialReport,
-      finalReport: initialReport,
-    };
-  }
-  process.stdout.write(
-    `[rb-harness] verificação inicial reprovou ${initialReport.findings.length} causa(s); iniciando uma remediação limitada e preservando a revisão atual.\n`,
-  );
-  const remediationRun = await runStandaloneWorkflow({
-    workflow: authority.state.workflow,
-    projectRoot,
-    artifactDirectory: options.artifactDirectory,
-    request: remediationRequest(authority.state, initialReport),
-    requestSource: authority.state.requestSource,
-    provider: options.provider,
-    answersFile: options.answersFile,
-    questionMode: options.questionMode,
-    nonInteractive: options.nonInteractive,
-    timeoutSeconds: options.timeoutSeconds,
-    firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
-  });
-  process.stdout.write("[rb-harness] reemissão concluída; executando a única verificação pós-remediação.\n");
-  const finalReport = await verifyArtifacts({
-    ...effectiveOptions,
-    reportPath: options.reportPath,
-  });
-  return {
-    contract: "rb-harness-artifact-remediation/v1",
-    remediated: true,
-    readyForRalph: finalReport.readyForRalph,
-    initialReport,
-    finalReport,
-    remediationRun: {
-      id: remediationRun.id,
-      ...(remediationRun.previousArtifacts ? { previousArtifacts: remediationRun.previousArtifacts } : {}),
-    },
-  };
 }
 
 export function formatArtifactVerification(report: ArtifactVerificationReport): string {
@@ -643,30 +480,9 @@ export function formatArtifactVerification(report: ArtifactVerificationReport): 
   return [
     `Artifact verification: ${report.status.toUpperCase()} · Ralph ${report.readyForRalph ? "READY" : "NOT READY"}`,
     `Deterministic: ${report.deterministic.passed ? "PASS" : "FAIL"} · ${report.deterministic.artifactCount} artifacts · ${report.deterministic.readyPlanCount} ready plan(s)`,
-    `Semantic: ${report.semantic.executed ? `${report.semantic.status?.toUpperCase()} via ${report.semantic.provider}/${report.semantic.model}` : "not executed"}`,
+    `Checks: ${report.deterministic.checks.join(", ")}`,
     `Findings: blocker=${counts.blocker}, major=${counts.major}, minor=${counts.minor}`,
     ...report.findings.map((finding) => `  ${finding.severity.toUpperCase()} ${finding.id} [${finding.artifact}] — ${finding.evidence}`),
-    ...(report.semantic.decision
-      ? [
-        `Decision required: ${report.semantic.decision.question}`,
-        `Reason: ${report.semantic.decision.reason}`,
-        ...report.semantic.decision.options.map((option, index) => `  ${index + 1}) ${option}`),
-      ]
-      : []),
     `Report: ${report.reportPath}`,
-  ].join("\n");
-}
-
-export function formatArtifactRemediation(result: ArtifactRemediationResult): string {
-  const initialCounts = { blocker: 0, major: 0, minor: 0 };
-  for (const finding of result.initialReport.findings) initialCounts[finding.severity] += 1;
-  return [
-    `Bounded remediation: ${result.remediated ? "EXECUTED" : "NOT NEEDED"}`,
-    `Initial: ${result.initialReport.status.toUpperCase()} · blocker=${initialCounts.blocker}, major=${initialCounts.major}, minor=${initialCounts.minor}`,
-    `Initial report: ${result.initialReport.reportPath}`,
-    ...(result.remediationRun ? [`Remediation run: ${result.remediationRun.id}`] : []),
-    ...(result.remediationRun?.previousArtifacts ? [`Previous artifacts: ${result.remediationRun.previousArtifacts}`] : []),
-    "",
-    formatArtifactVerification(result.finalReport),
   ].join("\n");
 }

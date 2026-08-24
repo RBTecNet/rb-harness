@@ -1,5 +1,8 @@
 # Execution Document Template
 
+> Reference material for maintainers.
+> The exact `rb-execution/v1` grammar the provider receives is code-owned by `rb-harness-contract-digest/v1` (see `packages/core/src/harness-contract-digest.ts`) and enforced by `packages/core/src/execution-contract.ts`. This document explains the reasoning behind the grammar and is no longer injected into a prompt.
+
 Emit only when readiness is `READY` or `READY_WITH_ASSUMPTIONS`. Copy this
 grammar exactly and expand it; do not add other level-2 headings.
 

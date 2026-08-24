@@ -11,13 +11,19 @@ proposal as implemented fact.
 
 ## Required references
 
-Read these files completely before writing artifacts:
+Read this file completely before producing artifacts:
 
-- [Interview policy](../../references/interview-policy.md)
-- [Artifact conventions](../../references/artifact-conventions.md)
-- [Execution template](../../references/execution-template.md)
-- [Operational acceptance template](../../references/operational-template.md)
 - [Init artifact shapes](artifact-shapes.md)
+
+## How your output is delivered
+
+You do not write files and you do not run commands. Return every document as a
+`path`/`content` pair in the document bundle envelope described in your prompt.
+The orchestrator materializes the files, derives the manifest, IDs, hashes, and
+statuses, runs every deterministic validator, and publishes atomically. The
+exact output contract for this workflow — required documents, the
+`rb-execution/v1` grammar, the `rb-operational/v1` shape, and the conventions —
+is supplied in the prompt as `rb-harness-contract-digest/v1`.
 
 ## Workflow
 
@@ -42,7 +48,7 @@ Read these files completely before writing artifacts:
 6. Use the `.rb` staging tree initialized by the standalone orchestrator. The
    orchestrator owns initialization, manifest synchronization, and deterministic
    validation; do not depend on a plugin path.
-7. Write the conditional artifacts defined in `artifact-shapes.md`. Preserve
+7. Return the conditional artifacts defined in `artifact-shapes.md`. Preserve
    stable IDs and confirmed manual edits on re-runs; update only impacted
    sections and source hashes. Only `ACCEPTED` responses become confirmed
    intent; unresolved material meaning stays out of RIGID requirements.
@@ -56,18 +62,14 @@ Read these files completely before writing artifacts:
    Normal phases own creation and structural validation of the operational
    contract; its clean-room pass is owned only by Ralph's post-phase RBF audit.
    Never make a preceding task depend on that future result.
-9. Run, fix, and repeat until green:
-   - `contract validate .rb/init/PHASES.md`
-   - `operations validate .rb/init/OPERATIONS.json` when emitted
-   - `manifest sync .`
-   - `tree validate .`
-   Also audit lossless requirement/cross-cutting traceability, explicit quality
+9. The orchestrator runs every deterministic validator after your call; produce documents that already satisfy them, and never claim to have run a command. They cover `rb-execution/v1`, `rb-operational/v1`, the manifest, and
+   the whole tree. Before returning, audit lossless requirement/cross-cutting traceability, explicit quality
    commands, validation capability (`command`, manager `manual`, or external
    `human`), exact standard/dialect matrices, hostile public-schema/secret cases
    when relevant, and every materially distinct documented configuration mode.
-10. Report paths, readiness, answer dispositions, assumptions, unresolved
-    questions, phase/task counts, and validation results. Never write
-    application code or commit.
+10. State readiness, assumptions, unresolved questions, and phase/task counts in
+    the bundle summary. Never produce application code, run a command, or
+    commit.
 
 These resources are loaded by the standalone executable. Generated documents
 must not depend on the location of this resource tree or any plugin host.

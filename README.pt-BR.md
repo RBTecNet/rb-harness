@@ -8,14 +8,14 @@ somente sobre decisões materiais ausentes, inspeciona o projeto quando o fluxo
 exige conhecimento do estado atual e publica artefatos versionados sem
 implementar o código da aplicação.
 
-A geração normal usa um único escritor de documentação. Não existe um gerente
-LLM em loop depois do escritor. Qualidade estrutural é responsabilidade de
-validadores determinísticos; uma segunda opinião semântica pode ser solicitada
-separadamente com `rb-harness artifacts verify`.
+A geração normal usa um único escritor de documentação. Não existe gerente LLM,
+auditor semântico nem remediação iterativa. A qualidade estrutural pertence a
+validadores determinísticos, as decisões de produto pertencem à entrevista, e a
+autoria semântica acontece exatamente uma vez.
 
 ## Instalação do executável
 
-O RB Harness 0.3.14 exige Node.js 20 ou superior. No clone do repositório:
+O RB Harness 0.4.0 exige Node.js 20 ou superior. No clone do repositório:
 
 ```bash
 npm install
@@ -34,7 +34,7 @@ Confira a versão instalada:
 ```bash
 rb-harness --version
 rb-harness --ver
-# 0.3.14
+# 0.4.0
 ```
 
 Executar apenas `rb-harness` abre o assistente interativo. O splash com a
@@ -81,13 +81,108 @@ rb-harness plan \
   --effort high
 ```
 
-## Entrevista adaptativa
+## Máquina de estados documental
 
-Antes de gerar, o controlador de entrevista lê a solicitação, os artefatos
-existentes e, quando permitido pelo workflow, o código-fonte relevante. Ele
-aceita respostas apenas quando consegue normalizá-las como decisão concreta.
-Respostas parciais, contraditórias ou ambíguas produzem uma pergunta focada com
-novo ID.
+Antes da primeira chamada ao modelo, o Harness monta um pacote de entrada
+determinístico e limitado: a solicitação e seu hash, o workflow, um inventário
+resumido do projeto-alvo, os artefatos RB existentes, as decisões já aceitas e
+um contrato compacto de saída pertencente ao código. Ficam de fora controle de
+versão, dependências, builds, cobertura, estado vivo do Harness, credenciais e
+arquivos temporários. Nenhum caminho para o source, o `dist`, os testes ou a
+instalação do próprio RB Harness chega ao modelo; qualquer conteúdo adicional
+só vem das ferramentas documentais confinadas ao projeto-alvo.
+
+O fluxo é: inventário → análise de lacunas (1 lote e no máximo 1 follow-up) →
+checkpoint fechado de decisões → uma geração autoritativa → materialização →
+validação determinística → no máximo uma correção estrutural localizada →
+publicação atômica. Fora dessas duas permissões contadas, o grafo é acíclico e
+nenhuma etapa pode se reiniciar sozinha.
+
+A correção estrutural recebe apenas a lista ordenada de erros mecânicos e os
+trechos afetados, e precisa preservar byte a byte todo conteúdo não relacionado.
+Ela não reabre a entrevista, não reexplora o repositório e não reemite a árvore.
+Uma segunda falha é reportada ao operador com o diagnóstico exato; não há loop.
+
+Em todos os papéis documentais o provider é somente leitura: o Codex roda com
+`--sandbox read-only`, o Claude com `--permission-mode plan` e o OpenCode com
+edição, shell, task e diretório externo negados.
+
+O provider nunca roda dentro do projeto. Ele roda em uma **projeção de
+evidências** somente leitura e limitada: os arquivos do projeto-alvo admitidos
+pela política de inventário, espelhados nos mesmos caminhos relativos e nada
+mais. Não existe ali `.rb-harness`, `.git`, árvore de dependências ou build,
+arquivo de credencial nem diretório do run. Ela é construída em uma raiz
+temporária própria — nunca sob `.rb-harness/runs/<id>/`, o que deixaria o
+`state.json` da execução um diretório acima do provider —, seus arquivos e
+diretórios são selados como somente leitura depois de populados e ela é removida
+ao fim da execução. O caminho absoluto do projeto real nunca é entregue ao
+provider: o pacote de entrada nomeia o projeto pelo basename e
+`RB_HARNESS_PROJECT_ROOT` aponta para a projeção. As ferramentas do runtime
+direto aplicam a mesma política por caminho: nomear diretamente um diretório
+proibido é recusado, não apenas ocultado da listagem.
+
+**Isto não é sandbox de SO, e o Harness não o descreve como tal.** Apenas o
+runtime de API direta confina *leituras*, porque suas ferramentas aplicam a
+política de caminhos em processo. O `--sandbox read-only` do Codex e o
+`--permission-mode plan` do Claude bloqueiam escrita e deixam o sistema de
+arquivos legível; esses adapters são declarados como sem confinamento de leitura
+e o log diz isso a cada execução. A projeção remove o plano de controle de todo
+caminho relativo e esconde a localização do projeto; ela não impede uma CLI que
+vá procurar por caminho absoluto.
+
+## O que cada adapter realmente controla
+
+O runtime de API direta é o único adapter que o Harness controla de ponta a
+ponta: ele é dono do catálogo de ferramentas, conta cada chamada e reporta o
+usage devolvido pelo provider. Uma CLI externa roda o próprio loop de agente, e o
+Harness declara explicitamente o que consegue ou não medir:
+
+| Adapter | Eventos estruturados | Orçamento de turns/tools | Métricas de uso | Confinamento de leitura |
+|---|---|---|---|---|
+| APIs diretas | aplicado localmente | aplicado | reportado quando o provider devolve `usage` | aplicado em processo |
+| `opencode` | consumido via `run --format json` | aplicado | não reportado pela CLI — não medido | nenhum |
+| `codex` | `exec --json` anunciado, não consumido | não alegado | não medido | nenhum |
+| `claude` | `--output-format stream-json` anunciado, não consumido | não alegado | não medido | nenhum |
+| `custom` | nada declarado | não alegado | não medido | nenhum |
+
+Cada declaração foi lida do `--help` de uma versão instalada localmente, não
+inventada. Um adapter cujo stream o Harness não consome é governado apenas por
+limites conservadores — timeout total, timeout de primeira saída, volume de saída
+e uma janela de progresso em que a saída precisa trazer algo **novo**, já que um
+agente travado repete a si mesmo indefinidamente. Essa execução é rotulada como
+não medida naquele eixo; jamais é descrita como respeitando o orçamento do
+runtime direto. Uma linha que começa como evento estruturado e não faz parse é
+falha de protocolo, reportada explicitamente em vez de ignorada — inclusive um
+stream truncado no EOF, cujo evento parcial final é sinalizado no fechamento em
+vez de descartado.
+
+Para o OpenCode o Harness segue o schema real da build 1.18.21 instalada: os
+eventos são `{ type, properties }` e uma part de tool é reemitida conforme o
+estado avança `pending → running → completed`. Contar esses eventos reportaria
+uma invocação três vezes, então as invocações são contadas pelo `callID` do
+próprio provider, e uma part `step-start` conta como turn do modelo.
+
+## Entrevista finita
+
+A entrevista tem um lote inicial de no máximo 5 perguntas materiais, no máximo
+1 follow-up com até 3 perguntas e então uma decisão. Fatos descobertos no
+projeto não viram perguntas. Uma escolha FLEXIBLE vira suposição explícita e não
+bloqueia. Uma ambiguidade RIGID que sobrevive ao follow-up produz `BLOCKED` com
+a decisão faltante — nunca uma nova rodada.
+
+Cada resposta é classificada como `ACCEPTED`, `PARTIAL`, `AMBIGUOUS`, `DEFERRED`
+ou `CONTRADICTED`. Respostas parciais, contraditórias ou ambíguas produzem uma
+pergunta focada com novo ID enquanto houver rodada disponível.
+
+Apenas a **forma** é reparada automaticamente: ID de pergunta malformado, tipo
+inferível, lista de opções vazia. Disposição ausente, desconhecida ou escrita
+incorretamente é falha semântica, nunca um aceite — a resposta segue como não
+resolvida, o provider recebe a única correção de protocolo já prevista pelo fluxo
+limitado e, se persistir, a resposta gera follow-up focado ou bloqueia a execução.
+`ACCEPTED` exige disposição explícita e uma decisão única normalizada; o texto
+bruto só substitui essa decisão sob um `ACCEPTED` explícito. Perguntas acima do
+orçamento da rodada também não somem: viram decisões adiadas declaradas em
+`unresolved`, e a existência delas impede um resultado `ready`.
 
 Por padrão as perguntas aparecem uma por vez:
 
@@ -107,9 +202,9 @@ rb-harness plan --project . --file docs/feature.md \
   --provider codex --non-interactive --answers answers.json
 ```
 
-O teto de segurança da entrevista é finito. Checkpoints e respostas validadas
-são persistidos sob `.rb-harness/runs/`, permitindo retomar sem repetir etapas
-já concluídas.
+`--questions one-by-one` controla apenas a apresentação local e nunca custa uma
+chamada extra ao provider. Checkpoints e respostas validadas são persistidos sob
+`.rb-harness/runs/`, permitindo retomar sem repetir etapas já concluídas.
 
 ## Workflows
 
@@ -160,10 +255,11 @@ rb-harness review --project . --provider codex --output .rb
 Os artefatos físicos são gravados em `.rb` por padrão. `--output .spec` permite
 usar outra pasta sem alterar os paths lógicos `.rb/...` presentes nos contratos.
 
-## Dashboard
+## Dashboard e telemetria
 
-Use `--dashboard` para acompanhar entrevista, geração, bytes observados,
-provider, modelo e estado da execução:
+Use `--dashboard` para acompanhar a máquina de estados documental — inventário,
+análise de lacunas, espera por resposta humana, descoberta de evidências,
+geração do pacote, materialização, validação, correção estrutural e publicação:
 
 ```bash
 rb-harness evolve --project . --file docs/change.md \
@@ -171,36 +267,75 @@ rb-harness evolve --project . --file docs/change.md \
   --dashboard
 ```
 
+O painel também mostra telemetria real: chamadas ao provider, leituras
+confinadas de ferramentas, requisições e tokens de entrada, cache, criação de
+cache e saída quando o provider informa usage. Um provider que não informa usage
+aparece como não medido; nenhum custo é inventado e bytes repetidos nunca são
+apresentados como progresso. O relatório final imprime a duração de cada etapa e
+a quantidade de chamadas, e cada execução grava `telemetry.json` ao lado do seu
+estado.
+
+Os números de cache vêm só do que o provider mediu: um adapter que não informa
+usage é registrado como não medido, nunca como execução de zero tokens ou custo
+zero. O Harness garante um prefixo de prompt byte a byte idêntico entre as
+rodadas de uma execução — contrato, recursos e pacote de entrada antes de
+qualquer estado de rodada — mas não afirma reaproveitamento de cache entre
+processos ou sessões sem métrica do provider.
+
+Os limites de bytes declarados são verificados antes de qualquer processo de
+provider nascer. A solicitação é autoridade e nunca é truncada: uma solicitação
+acima do orçamento falha no preflight informando tamanho observado, limite e
+caminho seguro, e o mesmo vale para o pacote de entrada, as decisões aceitas e
+cada prompt.
+
 `--timeout` limita o tempo total de cada chamada. `--first-output-timeout`
-limita o tempo até o primeiro byte. O Harness encerra a árvore inteira de
-processos do provider em timeout ou estouro do limite de saída, evitando
-processos órfãos de ferramentas e testes.
+limita o tempo até o primeiro byte. Toda execução de provider termina liquidando
+a árvore de processos — inclusive as que dão certo, já que um líder que sai com
+código zero não diz nada sobre o que ele destacou. Polling sozinho não resolve:
+um líder pode colocar um descendente em nova sessão com `setsid()` e sair em
+poucos milissegundos; depois disso nada liga o descendente à execução e nenhum
+sinal de grupo o alcança.
+
+Onde a plataforma oferece **contenção estrutural**, o Harness a usa e consegue
+provar que a árvore acabou. No Linux com um subtree cgroup v2 gravável, o filho
+entra em um cgroup por execução antes de conseguir forkar; a associação é
+herdada por `fork` e `setsid`, continua enumerável depois que o líder morre, e
+`cgroup.kill` remove todos os membros atomicamente.
+
+Onde não oferece, o Harness declara isso em vez de alegar garantia. A escada
+idempotente continua rodando — parar a admissão, `SIGTERM` ao grupo, janela curta
+de graça, `SIGKILL` nos sobreviventes —, mas o encerramento é reportado como não
+verificado, e o log da execução registra `tree_containment_structural=false` e
+`tree_quiescence_verified=false`. No Windows o mecanismo é `taskkill /T`, que
+percorre a cadeia de pais: ele **não** é um Job Object e é declarado como melhor
+esforço exatamente por isso. Um descendente lembrado só é sinalizado de novo
+enquanto continuar no grupo de processos em que foi visto, evitando atingir um
+PID reutilizado.
 
 ## Verificação de artefatos antes do Ralph
 
-O comando abaixo não edita artefatos:
+O comando abaixo é determinístico por contrato: não inicia provider, não gasta
+tokens e não edita nem republica artefatos.
 
 ```bash
 rb-harness artifacts verify \
   --project . \
   --artifacts-dir .rb \
   --against docs/solicitacao-original.md \
-  --provider codex --model gpt-5.6-sol --effort high \
   --dashboard
 ```
 
-Primeiro são executados gates determinísticos:
+Ele prova:
 
 - schema e hashes do manifesto;
-- contratos `rb-execution/v1` e `rb-operational/v1`;
+- contratos `rb-execution/v1`, `rb-operational/v1` e `rb-responsive-inventory/v1`;
 - descoberta de planos prontos;
 - paths de contexto para fases frias;
-- integridade das referências de tasks.
+- integridade das referências de tasks;
+- cobertura de requisitos declarados pela especificação;
+- portabilidade dos caminhos declarados.
 
-Um blocker mecânico encerra antes do provider, economizando tokens. Se a árvore
-for mecanicamente utilizável, ocorre uma auditoria semântica exaustiva e
-somente leitura. Ela retorna todas as causas materiais em um lote e pode fazer
-no máximo uma correção de formato JSON; achados não iniciam um loop de gerente.
+Uma árvore incompatível nunca pode ser anunciada como pronta para o Ralph.
 
 Todo relatório segue `rb-harness-artifact-verification/v1`, usa modo `0600` e é
 gravado em `.rb-harness/verifications/`. Ele inclui impressões SHA-256 da
@@ -212,69 +347,29 @@ Os códigos de saída são:
 - `0`: pronto para Ralph, possivelmente com avisos menores;
 - `2`: falhas materiais reparáveis;
 - `3`: decisão real do desenvolvedor ainda ausente;
-- `1`: falha do próprio verificador ou provider.
+- `1`: falha do próprio verificador.
 
-Para um preflight sem tokens:
+## O que foi removido com o gerente semântico
 
-```bash
-rb-harness artifacts verify --project . --artifacts-dir .rb \
-  --deterministic-only --json
-```
+O gerente LLM de documentação, o auditor semântico independente e o ciclo de
+remediação guiado por auditoria foram removidos na versão 0.4.0. Eles repetiam
+leitura e escrita sem garantir progresso monotônico: uma reemissão completa
+podia produzir um novo conjunto de achados, o que é não convergência, não
+qualidade.
 
-## Remediação limitada
+As opções que existiam apenas para acioná-los falham com erro orientativo, em
+vez de serem silenciosamente reinterpretadas:
 
-Uma verificação reprovada pode alimentar uma única reemissão. A auditoria
-inicial não é repetida:
+- `--remediate` e `--from-report` — execute o workflow novamente; hoje existe uma
+  única correção estrutural limitada dentro da própria geração;
+- `--answers` e `--non-interactive` no `artifacts verify` — a verificação
+  determinística não faz perguntas.
 
-```bash
-# 1. Auditoria somente leitura; o relatório fica salvo.
-rb-harness artifacts verify \
-  --project . --artifacts-dir .rb \
-  --against docs/solicitacao-original.md \
-  --provider codex --model gpt-5.6-sol --effort high
-
-# 2. Consome automaticamente o relatório compatível mais recente.
-rb-harness artifacts verify \
-  --project . --artifacts-dir .rb \
-  --provider codex --model gpt-5.6-sol --effort high \
-  --remediate --questions one-by-one --dashboard
-```
-
-Para escolher um relatório específico:
-
-```bash
-rb-harness artifacts verify \
-  --project . --artifacts-dir .rb \
-  --provider codex --remediate \
-  --from-report .rb-harness/verifications/<id>/report.json
-```
-
-As impressões digitais do relatório devem ser idênticas à árvore e à autoridade
-atuais. Se qualquer byte dos artefatos, a solicitação original ou uma decisão
-aceita mudou após a auditoria, o relatório é rejeitado como stale e uma nova
-execução sem `--remediate` é exigida. Quando a auditoria original usou
-`--against`, a remediação herda o caminho da autoridade registrado no
-relatório; repetir a opção é permitido, mas não é necessário.
-
-O fluxo de remediação é deliberadamente limitado:
-
-1. carrega o relatório já produzido;
-2. transforma gaps técnicos em responsabilidade do escritor;
-3. pergunta somente decisões de produto realmente ausentes;
-4. cria uma cópia isolada do projeto e da documentação;
-5. faz exatamente uma reemissão integral;
-6. valida e publica atomicamente;
-7. preserva a árvore anterior dentro do run da remediação;
-8. executa exatamente uma verificação final;
-9. encerra mesmo que ainda existam achados.
-
-Não existe uma segunda geração automática. Isso impede ciclos eternos de
-writer/manager e mantém custo e duração previsíveis. Se o relatório já estiver
-verde, nenhum provider é iniciado e nenhum arquivo é alterado.
-
-`--remediate` não pode ser combinado com `--deterministic-only` nem `--json`.
-Em automação, use `--answers respostas.json --non-interactive` e consuma os
-relatórios persistidos.
+`--deterministic-only` continua aceito e agora descreve o único comportamento.
+`--provider`, `--model`, `--effort`, `--credential`, `--adapter`, `--timeout` e
+`--first-output-timeout` continuam aceitos no `artifacts verify` para que
+scripts existentes sigam funcionando; eles são registrados como procedência e
+não iniciam provider algum.
 
 ## Status, retomada e artefatos antigos
 
@@ -284,23 +379,28 @@ rb-harness resume --project .
 rb-harness resume <run-id> --project .
 ```
 
-O estado durável diferencia entrevista, geração, validação e publicação. Uma
-geração completa que falhou apenas em validação pode ser retomada sem chamar o
-escritor novamente. Publicações interrompidas restauram a revisão anterior.
+Os checkpoints duráveis separam entrevista concluída, pacote documental
+recebido, materialização, validação e publicação. Uma resposta completa do
+provider que já está preservada nunca é solicitada de novo: uma execução que
+falhou apenas na validação retoma a partir do pacote persistido. Publicações
+interrompidas restauram a revisão anterior, e um lock residual sem processo vivo
+é recuperado automaticamente com mensagem explícita.
 
 Quando uma nova árvore é publicada, a anterior é movida para
 `.rb-harness/runs/<run-id>/previous-artifacts`. O Harness nunca apaga
-silenciosamente a documentação anterior durante geração ou remediação.
+silenciosamente a documentação anterior.
 
 ## CLI determinística
 
 ```bash
+rb-harness contract validate .rb/features/<slug>/PHASES.md
+rb-harness operations validate .rb/features/<slug>/OPERATIONS.json
 rb-harness manifest sync .
 rb-harness tree validate .
 rb-harness tree resolve . --format tsv
 rb-harness inspect .
 rb-harness artifacts inspect --project . --output .rb --json
-rb-harness operations validate .rb/OPERATIONS.json
+rb-harness artifacts verify --project . --artifacts-dir .rb --deterministic-only --json
 ```
 
 Árvores físicas alternativas são suportadas:
@@ -338,15 +438,47 @@ npm test
 npm run check
 ```
 
-`npm run check` também empacota o standalone, executa pelo symlink instalado,
-verifica compatibilidade Bash e valida os bundles de plugin.
+`npm run check` também empacota o standalone, executa um workflow completo pelo
+symlink instalado, roda os contratos publicados contra o resultado, verifica
+compatibilidade Bash e valida os bundles de plugin.
+
+Para medir um workflow real contra um provider real e gravar um relatório
+versionado e sem credenciais:
+
+```bash
+node scripts/benchmark.mjs --project /caminho/do/projeto \
+  --workflow init --file prompt.md \
+  --provider opencode --model opencode-go/deepseek-v4-pro \
+  --label cron2-rb-harness --observed-cost-usd 0.23
+```
+
+O script recusa reaproveitar execuções antigas, prova a prontidão para o Ralph
+pelo contrato determinístico de artefatos, grava relatório mesmo quando falha e
+sai com código diferente de zero em qualquer falha ou estouro de limite.
+
+Custo é um dos critérios de aceitação, então uma execução cujo custo nunca foi
+observado fica `incomplete` — nunca `passed`. Ela é finalizada depois, sobre o
+mesmo relatório e sem reinvocar o provider:
+
+```bash
+node scripts/benchmark.mjs finalize \
+  --report docs/benchmarks/<arquivo>.json --observed-cost-usd 0.23
+```
+
+Os códigos de saída são `0` aprovado, `1` reprovado e `2` incompleto.
+
+A linha de base medida antes desta refatoração está em
+`docs/benchmarks/baseline-2026-08-24.md`. **O benchmark real da 0.4.0 ainda não
+foi executado**: ele consome recursos pagos e depende de autorização explícita do
+operador. Até lá, nenhuma afirmação de superação da linha de base é feita.
 
 ## Limites de produto
 
 - O Harness gera documentação; não implementa a aplicação.
-- O `verify` padrão é somente leitura.
-- Remediação exige autorização explícita por `--remediate`.
-- Não existe correção automática ilimitada.
+- O `verify` é determinístico e somente leitura; nunca inicia um provider.
+- Existe no máximo uma correção estrutural localizada por execução.
+- Não existe gerente, auditor semântico nem correção automática ilimitada.
+- O RB Ralph não é alterado por este produto; ele apenas consome o contrato.
 - Credenciais não pertencem aos artefatos.
 - Contratos e documentação são agnósticos a modelo, provider, stack e projeto.
 - Exemplos usados em testes nunca viram regras especiais para um produto.

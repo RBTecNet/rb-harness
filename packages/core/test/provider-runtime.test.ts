@@ -2,7 +2,9 @@ import { mkdtemp, mkdir, readFile, stat, symlink, writeFile } from "node:fs/prom
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { apiAgentToolDefinitions, executeApiAgentTool } from "../src/api-agent-tools.js";
+import { apiAgentToolDefinitions, createToolGovernor, executeApiAgentTool } from "../src/api-agent-tools.js";
+import { HARNESS_BUDGET } from "../src/harness-budget.js";
+import { emptyUsage } from "../src/harness-telemetry.js";
 import { probeDirectProvider, runDirectApiAgent } from "../src/api-agent.js";
 import { credentialStorePaths, listCredentials, resolveCredential, saveCredential } from "../src/credential-store.js";
 import { renderHarnessDashboard } from "../src/harness-dashboard.js";
@@ -97,17 +99,69 @@ describe("shared direct-provider credentials", () => {
 });
 
 describe("local API agent policy", () => {
-  test("keeps managers read-only and Harness writers inside .rb", async () => {
+  test("gives documentation roles three read tools and nothing else", async () => {
     const project = await mkdtemp(resolve(tmpdir(), "rb-provider-tools-"));
     await mkdir(resolve(project, ".rb"));
     await writeFile(resolve(project, "source.txt"), "hello\n", "utf8");
     const manager = { projectRoot: project, role: "ralph-manager" as const, permissionMode: "yolo" as const };
-    const writer = { projectRoot: project, role: "harness-generation" as const, permissionMode: "protected" as const };
 
+    for (const role of ["harness-interview", "harness-generation", "harness-repair"] as const) {
+      const context = { projectRoot: project, role, permissionMode: "protected" as const, governor: createToolGovernor() };
+      expect(apiAgentToolDefinitions(context).map((entry) => entry.name)).toEqual(["list_files", "read_file", "search_text"]);
+      await expect(executeApiAgentTool(context, "write_file", { path: ".rb/SPEC.md", content: "x" })).rejects.toThrow("read-only");
+      await expect(executeApiAgentTool(context, "run_command", { argv: ["ls"] })).rejects.toThrow("only to the Ralph executor");
+      await expect(executeApiAgentTool(context, "git_diff", {})).resolves.toBeDefined();
+    }
     expect(apiAgentToolDefinitions(manager).map((entry) => entry.name)).not.toContain("write_file");
     await expect(executeApiAgentTool(manager, "write_file", { path: "source.txt", content: "changed" })).rejects.toThrow("read-only");
-    await expect(executeApiAgentTool(writer, "write_file", { path: "source.txt", content: "changed" })).rejects.toThrow("only under .rb");
-    await expect(executeApiAgentTool(writer, "write_file", { path: ".rb/SPEC.md", content: "ready\n" })).resolves.toContain("wrote .rb/SPEC.md");
+  });
+
+  test("refuses a repeated identical documentation tool call and an exhausted budget", async () => {
+    const project = await mkdtemp(resolve(tmpdir(), "rb-provider-governor-"));
+    await writeFile(resolve(project, "README.md"), "one\ntwo\n", "utf8");
+    const context = {
+      projectRoot: project,
+      role: "harness-generation" as const,
+      permissionMode: "protected" as const,
+      governor: createToolGovernor(),
+    };
+    await executeApiAgentTool(context, "read_file", { path: "README.md" });
+    await executeApiAgentTool(context, "read_file", { path: "README.md" });
+    await expect(executeApiAgentTool(context, "read_file", { path: "README.md" }))
+      .rejects.toThrow("without progress");
+
+    const exhausted = {
+      ...context,
+      governor: { calls: HARNESS_BUDGET.tools.maxCalls, outputBytes: 0, repeats: 0 },
+    };
+    await expect(executeApiAgentTool(exhausted, "list_files", {})).rejects.toThrow("tool budget");
+  });
+
+  test("leaves the Ralph executor and manager roles exactly as they were", async () => {
+    const project = await mkdtemp(resolve(tmpdir(), "rb-provider-ralph-roles-"));
+    await mkdir(resolve(project, ".rb"));
+    await writeFile(resolve(project, "source.txt"), "hello\n", "utf8");
+    const executor = {
+      projectRoot: project,
+      role: "ralph-agent" as const,
+      permissionMode: "yolo" as const,
+      artifactDirectory: ".rb",
+    };
+    const manager = { projectRoot: project, role: "ralph-manager" as const, permissionMode: "yolo" as const };
+
+    expect(apiAgentToolDefinitions(executor).map((entry) => entry.name)).toEqual([
+      "list_files", "read_file", "search_text", "git_diff", "write_file", "replace_text", "run_command",
+    ]);
+    expect(apiAgentToolDefinitions(manager).map((entry) => entry.name)).toEqual([
+      "list_files", "read_file", "search_text", "git_diff",
+    ]);
+    await expect(executeApiAgentTool(executor, "write_file", { path: "source.txt", content: "changed\n" }))
+      .resolves.toContain("wrote source.txt");
+    // Ralph planning artifacts and the control plane stay read-only for it.
+    await expect(executeApiAgentTool(executor, "write_file", { path: ".rb/PLAN.md", content: "x" }))
+      .rejects.toThrow("Ralph planning artifacts are read-only");
+    await expect(executeApiAgentTool(executor, "write_file", { path: ".git/config", content: "x" }))
+      .rejects.toThrow("control-plane paths are read-only");
   });
 
   test("confines optional Ralph evidence to its submission directory", async () => {
@@ -152,11 +206,64 @@ describe("local API agent policy", () => {
 
     await expect(runDirectApiAgent({
       provider: "deepseek", model: "deepseek-v4-pro", effort: "high", projectRoot: project,
-      role: "harness-audit", permissionMode: "protected", prompt: "inspect",
+      role: "harness-generation", permissionMode: "protected", prompt: "inspect",
     })).resolves.toBe("done");
     expect(requests).toHaveLength(2);
     expect(JSON.stringify(requests[1])).toContain("README.md");
     expect(JSON.stringify(requests[1])).toContain("reasoning_content");
+    // Stable prefix: the system instruction, prompt, and tool catalog are
+    // byte-identical across steps; only tool results are appended.
+    const first = requests[0] as { messages: unknown[]; tools: unknown };
+    const second = requests[1] as { messages: unknown[]; tools: unknown };
+    expect(JSON.stringify(second.tools)).toBe(JSON.stringify(first.tools));
+    expect(JSON.stringify(second.messages.slice(0, 2))).toBe(JSON.stringify(first.messages));
+    expect(second.messages.length).toBeGreaterThan(first.messages.length);
+  });
+
+  test("records provider-reported usage including cache into the harness usage file", async () => {
+    const project = await mkdtemp(resolve(tmpdir(), "rb-provider-usage-"));
+    const auth = await mkdtemp(resolve(tmpdir(), "rb-provider-usage-auth-"));
+    const usageFile = resolve(project, "usage.json");
+    process.env.RB_CREDENTIAL_HOME = auth;
+    process.env.RB_HARNESS_USAGE_FILE = usageFile;
+    await saveCredential({ provider: "deepseek", protocol: "api-key", label: "default", secret: "secret-for-test" });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 900, completion_tokens: 40, total_tokens: 940, prompt_tokens_details: { cached_tokens: 850 } },
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    try {
+      await runDirectApiAgent({
+        provider: "deepseek", model: "deepseek-v4-pro", effort: "high", projectRoot: project,
+        role: "harness-interview", permissionMode: "protected", prompt: "analyze",
+      });
+      expect(JSON.parse(await readFile(usageFile, "utf8"))).toMatchObject({
+        schema: "rb-harness-usage/v1",
+        requests: 1,
+        inputTokens: 900,
+        cachedInputTokens: 850,
+        outputTokens: 40,
+        totalTokens: 940,
+        toolCalls: 0,
+      });
+    } finally {
+      delete process.env.RB_HARNESS_USAGE_FILE;
+    }
+  });
+
+  test("reports an HTTP failure with its provider message and retry hint", async () => {
+    const project = await mkdtemp(resolve(tmpdir(), "rb-provider-http-error-"));
+    const auth = await mkdtemp(resolve(tmpdir(), "rb-provider-http-error-auth-"));
+    process.env.RB_CREDENTIAL_HOME = auth;
+    await saveCredential({ provider: "deepseek", protocol: "api-key", label: "default", secret: "secret-for-test" });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ error: { message: "rate limit reached" } }),
+      { status: 429, headers: { "content-type": "application/json", "retry-after": "30" } },
+    )));
+
+    await expect(runDirectApiAgent({
+      provider: "deepseek", model: "deepseek-v4-pro", effort: "", projectRoot: project,
+      role: "harness-generation", permissionMode: "protected", prompt: "write",
+    })).rejects.toThrow("provider HTTP 429: rate limit reached; retry after 30s");
   });
 
   test("probes a direct provider with one bounded PING/PONG request", async () => {
@@ -208,24 +315,46 @@ describe("local API agent policy", () => {
     expect(requests[0]!.headers.get("anthropic-version")).toBe("2023-06-01");
     expect(JSON.stringify(requests[1]!.body)).toContain("tool_result");
     expect(JSON.stringify(requests[0]!.body)).not.toContain("write_file");
+    // The stable system + tool prefix is marked cacheable and never mutated.
+    expect(JSON.stringify(requests[0]!.body.system)).toContain("cache_control");
+    expect(JSON.stringify(requests[1]!.body.tools)).toBe(JSON.stringify(requests[0]!.body.tools));
+    expect(JSON.stringify(requests[1]!.body.system)).toBe(JSON.stringify(requests[0]!.body.system));
   });
 });
 
 test("direct providers invoke the installed runtime without placing secrets in argv", () => {
-  const invocation = providerInvocation({ provider: "openrouter", model: "model/id", effort: "high", credential: "testes" }, "audit", "/tmp/project");
+  const invocation = providerInvocation({ provider: "openrouter", model: "model/id", effort: "high", credential: "testes" }, "generation", "/tmp/project");
   expect(invocation.command).toBe(process.execPath);
   expect(invocation.args).toContain("_provider-run");
   expect(invocation.args).toContain("testes");
   expect(invocation.args.join(" ")).not.toMatch(/api.?key|secret-for-test/i);
 });
 
-test("Harness dashboard exposes pipeline and provider state without request content", () => {
+test("Harness dashboard exposes documentation stages and telemetry without request content", () => {
   const output = renderHarnessDashboard({
-    version: "0.2.4", startedAt: Date.now(), recent: ["estado · auditing"], paused: false, final: false,
-    provider: { name: "openrouter", model: "vendor/model", mode: "audit", startedAt: Date.now(), bytes: 42, firstOutputMilliseconds: 900 },
+    version: "0.2.4",
+    startedAt: Date.now(),
+    stage: "generation",
+    providerCalls: 2,
+    usage: { ...emptyUsage(), measured: true, requests: 3, inputTokens: 1200, cachedInputTokens: 900, outputTokens: 200, totalTokens: 1400, toolCalls: 4 },
+    recent: ["etapa · Geração do pacote"],
+    paused: false,
+    final: false,
+    provider: { name: "openrouter", model: "vendor/model", mode: "generation", startedAt: Date.now(), bytes: 42, firstOutputMilliseconds: 900 },
   }, 118);
   expect(output).toContain("RB HARNESS");
-  expect(output).toContain("PIPELINE");
+  expect(output).toContain("PIPELINE DOCUMENTAL");
+  expect(output).toContain("Materialização");
+  expect(output).toContain("TELEMETRIA");
+  expect(output).toContain("cache 900");
   expect(output).toContain("openrouter/vendor/model");
   expect(output).toContain("capivara documentadora");
+});
+
+test("dashboard telemetry states plainly when a provider reports no usage", () => {
+  const output = renderHarnessDashboard({
+    version: "0.2.4", startedAt: Date.now(), stage: "generation", providerCalls: 1,
+    usage: emptyUsage(), recent: [], paused: false, final: false,
+  }, 118);
+  expect(output).toContain("não medidos");
 });

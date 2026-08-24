@@ -80,25 +80,37 @@ try {
     (await readFile(resolve(project, ".rb/features/standalone-test/PHASES.md"), "utf8")).includes("rb-execution/v1"),
     "Packed standalone command did not complete a workflow through a bin symlink",
   );
-  const verification = execFileSync(process.execPath, [
-    launcher,
-    "--no-splash",
-    "artifacts", "verify",
-    "--project", project,
-    "--artifacts-dir", ".rb",
-    "--provider", "custom",
-    "--adapter", fixtureProvider,
-    "--model", "fixture-model",
-    "--effort", "high",
-    "--timeout", "30",
-    "--first-output-timeout", "5",
-    "--json",
-  ], {
+  // CA-002: every published fixture must pass the contract commands of the
+  // same installed build that produced it.
+  const cli = (args) => execFileSync(process.execPath, [launcher, "--no-splash", ...args], {
     cwd: project,
     env: { ...process.env, RB_HARNESS_SPLASH: "0" },
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
+
+  const plan = resolve(project, ".rb/features/standalone-test/PHASES.md");
+  assert(cli(["contract", "validate", plan]).includes("OK"), "Published PHASES.md failed contract validate");
+  const operations = resolve(project, ".rb/features/standalone-test/OPERATIONS.json");
+  let operationsPresent = true;
+  try {
+    await readFile(operations);
+  } catch {
+    operationsPresent = false;
+  }
+  if (operationsPresent) {
+    assert(cli(["operations", "validate", operations]).includes("OK"), "Published OPERATIONS.json failed operations validate");
+  }
+  cli(["manifest", "sync", project]);
+  assert(cli(["tree", "validate", project]).includes("OK"), "Published tree failed tree validate");
+
+  const verification = cli([
+    "artifacts", "verify",
+    "--project", project,
+    "--artifacts-dir", ".rb",
+    "--deterministic-only",
+    "--json",
+  ]);
   const verificationReport = JSON.parse(verification);
   assert(verificationReport.contract === "rb-harness-artifact-verification/v1", "Packed verifier emitted an unexpected contract");
   assert(/^[a-f0-9]{64}$/.test(verificationReport.artifactFingerprint), "Packed verifier omitted the artifact-tree fingerprint");

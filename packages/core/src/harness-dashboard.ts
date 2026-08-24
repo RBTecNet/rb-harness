@@ -1,21 +1,68 @@
 import type { HarnessRunState } from "./standalone-types.js";
 import type { ProviderMode } from "./harness-provider.js";
+import {
+  HARNESS_STAGE_LABELS,
+  addUsage,
+  emptyUsage,
+  type HarnessStage,
+  type ProviderUsage,
+} from "./harness-telemetry.js";
 
 type DashboardEvent =
   | { type: "state"; state: HarnessRunState }
-  | { type: "provider-start"; provider: string; model: string; mode: ProviderMode }
+  | { type: "provider-start"; provider: string; model: string; mode: ProviderMode; stage: HarnessStage }
   | { type: "provider-output"; bytes: number; firstOutputMilliseconds?: number }
-  | { type: "provider-end"; exitCode: number; bytes: number }
+  | { type: "provider-end"; exitCode: number; bytes: number; usage: ProviderUsage }
+  | { type: "stage"; stage: HarnessStage }
   | { type: "activity"; message: string };
 
 interface ViewState {
   version: string;
   startedAt: number;
   state?: HarnessRunState;
+  stage?: HarnessStage;
   provider?: { name: string; model: string; mode: ProviderMode; startedAt: number; bytes: number; firstOutputMilliseconds?: number; exitCode?: number };
+  providerCalls: number;
+  usage: ProviderUsage;
   recent: string[];
   paused: boolean;
   final: boolean;
+}
+
+/** Documentation stages the operator can see advance, in order. */
+const PIPELINE: readonly HarnessStage[] = [
+  "inventory", "gap-analysis", "generation", "materialization", "validation", "publication",
+];
+
+const COMPACT_LABEL: Readonly<Record<HarnessStage, string>> = {
+  "inventory": "Inventário",
+  "gap-analysis": "Lacunas",
+  "awaiting-human": "Resposta",
+  "evidence": "Evidências",
+  "generation": "Geração",
+  "materialization": "Materialização",
+  "validation": "Validação",
+  "structural-repair": "Correção",
+  "publication": "Publicação",
+};
+
+/**
+ * The documentation stage implied by a run status. The dashboard prefers the
+ * stage a live provider call reported, because it distinguishes evidence
+ * discovery from package generation inside one status.
+ */
+export function stageForStatus(status: HarnessRunState["status"] | undefined): HarnessStage | undefined {
+  switch (status) {
+    case "inventory": return "inventory";
+    case "interview": case "interview-failed": return "gap-analysis";
+    case "generating": case "generation-failed": case "blocked": return "generation";
+    case "materializing": return "materialization";
+    case "validating": case "auditing": return "validation";
+    case "repairing": return "structural-repair";
+    case "publishing": return "publication";
+    case "complete": return "publication";
+    default: return undefined;
+  }
 }
 
 const C = {
@@ -47,21 +94,27 @@ function duration(seconds: number): string {
   return hours ? `${hours}h ${String(minutes).padStart(2, "0")}m` : `${minutes}m ${String(rest).padStart(2, "0")}s`;
 }
 
-function stageState(status: HarnessRunState["status"] | undefined, stage: string): "done" | "run" | "wait" | "fail" {
-  const order = ["interview", "generating", "validating", "publishing", "complete"];
-  if (!status) return "wait";
-  if (status.endsWith("failed") || status === "blocked") {
-    const failedStage = status.startsWith("interview") ? "interview" : "generating";
-    const failedIndex = order.indexOf(failedStage);
-    const targetIndex = order.indexOf(stage);
-    if (targetIndex < failedIndex) return "done";
-    return stage === failedStage ? "fail" : "wait";
-  }
-  const normalized = status === "auditing" ? "validating" : status;
-  const current = order.indexOf(normalized);
-  const target = order.indexOf(stage);
-  if (status === "complete" || (current >= 0 && target < current)) return "done";
-  if (target === current) return "run";
+export function stageState(
+  status: HarnessRunState["status"] | undefined,
+  active: HarnessStage | undefined,
+  stage: HarnessStage,
+): "done" | "run" | "wait" | "fail" {
+  if (!status && !active) return "wait";
+  if (status === "complete") return "done";
+  // A live provider stage outside the visible pipeline (evidence discovery,
+  // waiting for a human) belongs to the pipeline step that owns it.
+  const owner: Partial<Record<HarnessStage, HarnessStage>> = {
+    "awaiting-human": "gap-analysis",
+    "evidence": "generation",
+    "structural-repair": "validation",
+  };
+  const current = active ? owner[active] ?? active : stageForStatus(status);
+  const currentIndex = current ? PIPELINE.indexOf(current) : -1;
+  const targetIndex = PIPELINE.indexOf(stage);
+  const failed = Boolean(status && (status.endsWith("failed") || status === "blocked"));
+  if (currentIndex < 0) return "wait";
+  if (targetIndex < currentIndex) return "done";
+  if (targetIndex === currentIndex) return failed ? "fail" : "run";
   return "wait";
 }
 
@@ -111,14 +164,11 @@ export function renderHarnessDashboard(view: ViewState, requestedWidth?: number)
   lines.push(`${C.cyan}PROJETO${C.reset} ${C.white}${fit(clean(state?.projectRoot || "aguardando"), Math.max(18, Math.floor(width / 3))).trimEnd()}${C.reset}   ${C.cyan}DURAÇÃO${C.reset} ${duration(elapsed)}`);
   lines.push(`${C.cyan}WORKFLOW${C.reset} ${C.white}${state?.workflow || "—"}${C.reset}   ${C.cyan}RUN${C.reset} ${C.white}${clean(state?.id || "a inicializar")}${C.reset}`);
   lines.push("");
-  lines.push(border("PIPELINE", width));
-  const stages: Array<[string, string]> = [
-    ["interview", "Entrevista"], ["generating", "Geração"], ["validating", "Contrato"],
-    ["publishing", "Publicação"],
-  ];
-  lines.push(row(stages.map(([key, label]) => `${stageMark(stageState(state?.status, key))} ${label}`).join("    "), width));
-  const legacyAudits = state?.artifactAudits?.length ?? 0;
-  lines.push(row(`${C.cyan}status${C.reset} ${C.white}${clean(state?.status || "inicializando")}${C.reset}    ${C.cyan}respostas${C.reset} ${state?.answers.length ?? 0}    ${C.cyan}gate${C.reset} contrato determinístico${legacyAudits ? ` · ${legacyAudits} auditoria(s) legada(s)` : ""}`, width));
+  lines.push(border("PIPELINE DOCUMENTAL", width));
+  lines.push(row(PIPELINE.map((stage) => `${stageMark(stageState(state?.status, view.stage, stage))} ${COMPACT_LABEL[stage]}`).join("  "), width));
+  const activeLabel = view.stage ? HARNESS_STAGE_LABELS[view.stage] : "inicializando";
+  lines.push(row(`${C.cyan}etapa${C.reset} ${C.white}${activeLabel}${C.reset}    ${C.cyan}status${C.reset} ${C.white}${clean(state?.status || "inicializando")}${C.reset}    ${C.cyan}respostas${C.reset} ${state?.answers.length ?? 0}    ${C.cyan}correções${C.reset} ${state?.repairsUsed ?? 0}/1`, width));
+  lines.push(row(`${C.cyan}gate${C.reset} contrato determinístico · sem gerente ou auditor LLM`, width));
   lines.push(border("", width, true));
   lines.push("");
   lines.push(border("PROVIDER ATUAL", width));
@@ -131,6 +181,13 @@ export function renderHarnessDashboard(view: ViewState, requestedWidth?: number)
     ? `aguardando a primeira saída · ${provider?.bytes ?? 0} bytes`
     : `primeira saída em ${Math.max(1, Math.round(provider.firstOutputMilliseconds / 1000))}s · ${provider.bytes} bytes observados`;
   lines.push(row(`${C.cyan}atividade${C.reset} ${C.white}${provider ? first : "preparando o próximo estágio"}${C.reset}`, width));
+  lines.push(border("", width, true));
+  lines.push("");
+  lines.push(border("TELEMETRIA", width));
+  lines.push(row(`${C.cyan}chamadas${C.reset} ${view.providerCalls}    ${C.cyan}ferramentas${C.reset} ${view.usage.toolCalls}    ${C.cyan}requisições${C.reset} ${view.usage.requests}`, width));
+  lines.push(row(view.usage.measured
+    ? `${C.cyan}tokens${C.reset} entrada ${view.usage.inputTokens} · cache ${view.usage.cachedInputTokens} · criação ${view.usage.cacheCreationInputTokens} · saída ${view.usage.outputTokens} · total ${view.usage.totalTokens}`
+    : `${C.grey}tokens não medidos por este provider · nenhum custo é estimado${C.reset}`, width));
   lines.push(border("", width, true));
   lines.push("");
   lines.push(border("EVENTOS RECENTES", width));
@@ -150,7 +207,15 @@ class HarnessDashboard {
   private enabled = false;
 
   constructor(version: string) {
-    this.view = { version, startedAt: Date.now(), recent: [], paused: false, final: false };
+    this.view = {
+      version,
+      startedAt: Date.now(),
+      providerCalls: 0,
+      usage: emptyUsage(),
+      recent: [],
+      paused: false,
+      final: false,
+    };
   }
 
   start(): void {
@@ -168,17 +233,27 @@ class HarnessDashboard {
   event(event: DashboardEvent): void {
     if (event.type === "state") {
       this.view.state = event.state;
+      this.view.stage ??= stageForStatus(event.state.status);
+      if (!this.view.provider || this.view.provider.exitCode !== undefined) {
+        this.view.stage = stageForStatus(event.state.status) ?? this.view.stage;
+      }
       this.view.recent.push(`estado · ${event.state.status}`);
     } else if (event.type === "provider-start") {
       this.view.provider = { name: event.provider, model: event.model, mode: event.mode, startedAt: Date.now(), bytes: 0 };
-      this.view.recent.push(`provider · ${event.mode} iniciado`);
+      this.view.providerCalls += 1;
+      this.view.stage = event.stage;
+      this.view.recent.push(`${HARNESS_STAGE_LABELS[event.stage]} · chamada ${this.view.providerCalls} iniciada`);
     } else if (event.type === "provider-output" && this.view.provider) {
       this.view.provider.bytes = event.bytes;
       if (event.firstOutputMilliseconds !== undefined) this.view.provider.firstOutputMilliseconds = event.firstOutputMilliseconds;
     } else if (event.type === "provider-end" && this.view.provider) {
       this.view.provider.exitCode = event.exitCode;
       this.view.provider.bytes = event.bytes;
+      addUsage(this.view.usage, event.usage);
       this.view.recent.push(`provider · encerrado com exit ${event.exitCode}`);
+    } else if (event.type === "stage") {
+      this.view.stage = event.stage;
+      this.view.recent.push(`etapa · ${HARNESS_STAGE_LABELS[event.stage]}`);
     } else if (event.type === "activity") this.view.recent.push(event.message);
     this.view.recent = this.view.recent.slice(-12);
     this.render();

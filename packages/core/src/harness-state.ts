@@ -1,5 +1,7 @@
 import { chmod, mkdir, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { hostname } from "node:os";
 import { dirname, resolve } from "node:path";
+import { HARNESS_VERSION } from "./version.js";
 import { STANDALONE_STATE_CONTRACT, type HarnessRunState } from "./standalone-types.js";
 import { emitHarnessDashboard } from "./harness-dashboard.js";
 
@@ -46,21 +48,69 @@ function processAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
+/**
+ * Lock identity. Enough to tell an active run from residue left by a power
+ * loss: the PID alone is ambiguous once it has been reused, and a lock written
+ * on another machine (a shared checkout, a container) can never be probed by
+ * `kill(0)` here at all.
+ */
+export interface HarnessLockRecord {
+  pid: number;
+  host: string;
+  runId: string;
+  harnessVersion: string;
+  startedAt: string;
+}
+
+export function harnessLockDisposition(
+  current: HarnessLockRecord | undefined,
+  alive: (pid: number) => boolean = processAlive,
+): { state: "free" | "active" | "residue"; reason?: string } {
+  if (!current) return { state: "free" };
+  if (current.host !== hostname()) {
+    return { state: "active", reason: `held by PID ${current.pid} on host ${current.host}` };
+  }
+  if (current.pid === process.pid) return { state: "free" };
+  if (alive(current.pid)) return { state: "active", reason: `held by live PID ${current.pid}` };
+  return { state: "residue", reason: `PID ${current.pid} from ${current.startedAt} is no longer running` };
+}
+
 export async function acquireHarnessLock(projectRoot: string, runId: string): Promise<() => Promise<void>> {
   const root = harnessRunRoot(projectRoot, runId);
   const lock = resolve(root, ".lock.json");
   await mkdir(root, { recursive: true, mode: 0o700 });
+  let current: HarnessLockRecord | undefined;
   try {
-    const current = JSON.parse(await readFile(lock, "utf8")) as { pid?: number };
-    if (typeof current.pid === "number" && current.pid !== process.pid && processAlive(current.pid)) {
-      throw new Error(`Harness run is already active under PID ${current.pid}: ${runId}`);
+    const parsed = JSON.parse(await readFile(lock, "utf8")) as Partial<HarnessLockRecord>;
+    if (typeof parsed.pid === "number") {
+      current = {
+        pid: parsed.pid,
+        host: typeof parsed.host === "string" ? parsed.host : hostname(),
+        runId: typeof parsed.runId === "string" ? parsed.runId : runId,
+        harnessVersion: typeof parsed.harnessVersion === "string" ? parsed.harnessVersion : "unknown",
+        startedAt: typeof parsed.startedAt === "string" ? parsed.startedAt : "an unknown time",
+      };
     }
-    await rm(lock, { force: true });
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith("Harness run is already active")) throw error;
+  } catch {
+    // A missing or unreadable lock is treated as residue and reported below.
   }
+  const disposition = harnessLockDisposition(current);
+  if (disposition.state === "active") {
+    throw new Error(`Harness run is already active (${disposition.reason}): ${runId}`);
+  }
+  if (disposition.state === "residue") {
+    process.stdout.write(`[rb-harness] lock residual recuperado automaticamente: ${disposition.reason}.\n`);
+  }
+  await rm(lock, { force: true });
+  const record: HarnessLockRecord = {
+    pid: process.pid,
+    host: hostname(),
+    runId,
+    harnessVersion: HARNESS_VERSION,
+    startedAt: new Date().toISOString(),
+  };
   const handle = await open(lock, "wx", 0o600);
-  await handle.writeFile(`${JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() })}\n`);
+  await handle.writeFile(`${JSON.stringify(record)}\n`);
   await handle.close();
   return async () => { await rm(lock, { force: true }); };
 }

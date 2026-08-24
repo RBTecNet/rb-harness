@@ -1,5 +1,8 @@
 # Artifact Conventions
 
+> Reference material for maintainers.
+> The executable now owns the machine-enforced conventions through `rb-harness-contract-digest/v1` (see `packages/core/src/harness-contract-digest.ts`), which is what the provider actually receives. This document is the human-readable rationale and is no longer injected into a prompt.
+
 ## Tree
 
 Write under `.rb/` except for the compact root `AGENTS.md` index:

@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-import { appendFile, mkdir, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { appendFile } from "node:fs/promises";
 
 const chunks = [];
 for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
@@ -8,9 +7,12 @@ const prompt = Buffer.concat(chunks).toString("utf8");
 if (process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE) {
   await appendFile(process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE, `${process.env.RB_HARNESS_MODE ?? "unknown"}\n`, "utf8");
 }
+if (process.env.RB_HARNESS_TEST_PROMPT_FILE) {
+  await appendFile(process.env.RB_HARNESS_TEST_PROMPT_FILE, `===== ${process.env.RB_HARNESS_MODE} =====\n${prompt}\n`, "utf8");
+}
 
 if (process.env.RB_HARNESS_MODE === "interview") {
-  const pending = prompt.includes('"disposition":"PENDING"');
+  const pending = prompt.includes('"rawAnswer"');
   const result = pending ? {
     contract: "rb-harness-interview/v1",
     status: "ready",
@@ -41,23 +43,7 @@ if (process.env.RB_HARNESS_MODE === "interview") {
   process.exit(0);
 }
 
-if (process.env.RB_HARNESS_MODE === "audit") {
-  const result = {
-    contract: "rb-harness-artifact-audit/v1",
-    status: "pass",
-    summary: "The fixture artifacts are bounded, traceable, and mechanically provable.",
-    findings: [],
-  };
-  process.stdout.write(`RB_HARNESS_ARTIFACT_AUDIT_JSON_BEGIN\n${JSON.stringify(result)}\nRB_HARNESS_ARTIFACT_AUDIT_JSON_END\n`);
-  process.exit(0);
-}
-
-const feature = resolve(process.cwd(), ".rb/features/standalone-test");
-await mkdir(feature, { recursive: true });
-await writeFile(resolve(feature, "REQUEST.md"), "# Request\n\nGenerate the isolated requested feature only.\n", "utf8");
-await writeFile(resolve(feature, "SPEC.md"), "# Specification\n\n## RF-001\n\nThe feature must expose one observable version command.\n", "utf8");
-await writeFile(resolve(feature, "PLAN.md"), "# Plan\n\nImplement RF-001 with a regression test.\n", "utf8");
-await writeFile(resolve(feature, "PHASES.md"), `# RB Execution Plan: Standalone test
+const phases = `# RB Execution Plan: Standalone test
 
 <!-- rb-execution-contract: rb-execution/v1 -->
 <!-- rb-artifact-id: standalone-test-execution -->
@@ -83,5 +69,18 @@ await writeFile(resolve(feature, "PHASES.md"), `# RB Execution Plan: Standalone 
   - **Validation:**
     - \`npm test\`
   - **Expected evidence:** Source changes, regression tests, and passing validation output.
-`, "utf8");
-process.stdout.write("Generated standalone fixture artifacts.\n");
+`;
+
+const bundle = {
+  contract: "rb-harness-documents/v1",
+  status: "complete",
+  summary: "Generated the standalone fixture feature documentation.",
+  documents: [
+    { path: ".rb/features/standalone-test/REQUEST.md", content: "# Request\n\nGenerate the isolated requested feature only.\n" },
+    { path: ".rb/features/standalone-test/SPEC.md", content: "# Specification\n\n## RF-001\n\nThe feature must expose one observable version command.\n" },
+    { path: ".rb/features/standalone-test/PLAN.md", content: "# Plan\n\nImplement RF-001 with a regression test.\n" },
+    { path: ".rb/features/standalone-test/PHASES.md", content: phases },
+  ],
+  blocked: [],
+};
+process.stdout.write(`RB_HARNESS_DOCUMENTS_JSON_BEGIN\n${JSON.stringify(bundle)}\nRB_HARNESS_DOCUMENTS_JSON_END\n`);

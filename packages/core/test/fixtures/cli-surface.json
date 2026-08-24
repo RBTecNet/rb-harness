@@ -1,0 +1,237 @@
+{
+  "rb-harness": [
+    "--login",
+    "--no-splash",
+    "--splash",
+    "--ver",
+    "--version"
+  ],
+  "rb-harness contract": [],
+  "rb-harness contract validate": [
+    "--json"
+  ],
+  "rb-harness contract inspect": [
+    "--format"
+  ],
+  "rb-harness contract extract": [
+    "--phase",
+    "--task"
+  ],
+  "rb-harness contract tasks": [
+    "--format",
+    "--phase"
+  ],
+  "rb-harness contract validations": [
+    "--format",
+    "--phase"
+  ],
+  "rb-harness operations": [],
+  "rb-harness operations validate": [
+    "--json"
+  ],
+  "rb-harness review": [
+    "--adapter",
+    "--answers",
+    "--credential",
+    "--dashboard",
+    "--depth",
+    "--effort",
+    "--file",
+    "--findings",
+    "--first-output-timeout",
+    "--focus",
+    "--model",
+    "--non-interactive",
+    "--output",
+    "--plan-all-confirmed",
+    "--project",
+    "--prompt",
+    "--provider",
+    "--questions",
+    "--timeout"
+  ],
+  "rb-harness review validate-responsive": [
+    "--json"
+  ],
+  "rb-harness project": [],
+  "rb-harness project init": [
+    "--id",
+    "--name"
+  ],
+  "rb-harness headless": [],
+  "rb-harness headless version": [],
+  "rb-harness headless init": [
+    "--output"
+  ],
+  "rb-harness headless interview": [],
+  "rb-harness headless interview version": [],
+  "rb-harness headless interview validate": [],
+  "rb-harness headless interview run": [
+    "--first-output-timeout",
+    "--state",
+    "--timeout"
+  ],
+  "rb-harness manifest": [],
+  "rb-harness manifest sync": [
+    "--json"
+  ],
+  "rb-harness tree": [],
+  "rb-harness tree validate": [
+    "--artifacts-dir",
+    "--json"
+  ],
+  "rb-harness tree resolve": [
+    "--artifacts-dir",
+    "--format",
+    "--kind",
+    "--status"
+  ],
+  "rb-harness inspect": [
+    "--no-sync",
+    "--output"
+  ],
+  "rb-harness init": [
+    "--adapter",
+    "--answers",
+    "--credential",
+    "--dashboard",
+    "--effort",
+    "--file",
+    "--first-output-timeout",
+    "--model",
+    "--non-interactive",
+    "--output",
+    "--project",
+    "--prompt",
+    "--provider",
+    "--questions",
+    "--timeout"
+  ],
+  "rb-harness ai-context": [
+    "--adapter",
+    "--answers",
+    "--credential",
+    "--dashboard",
+    "--depth",
+    "--effort",
+    "--file",
+    "--first-output-timeout",
+    "--model",
+    "--non-interactive",
+    "--output",
+    "--project",
+    "--prompt",
+    "--provider",
+    "--questions",
+    "--timeout"
+  ],
+  "rb-harness plan": [
+    "--adapter",
+    "--answers",
+    "--credential",
+    "--dashboard",
+    "--effort",
+    "--file",
+    "--first-output-timeout",
+    "--model",
+    "--non-interactive",
+    "--output",
+    "--project",
+    "--prompt",
+    "--provider",
+    "--questions",
+    "--timeout"
+  ],
+  "rb-harness evolve": [
+    "--adapter",
+    "--answers",
+    "--credential",
+    "--dashboard",
+    "--effort",
+    "--file",
+    "--first-output-timeout",
+    "--model",
+    "--non-interactive",
+    "--output",
+    "--project",
+    "--prompt",
+    "--provider",
+    "--questions",
+    "--timeout"
+  ],
+  "rb-harness wizard": [],
+  "rb-harness auth": [],
+  "rb-harness auth login": [
+    "--label",
+    "--protocol",
+    "--provider"
+  ],
+  "rb-harness auth list": [
+    "--json"
+  ],
+  "rb-harness auth logout": [],
+  "rb-harness provider": [],
+  "rb-harness provider list": [
+    "--json"
+  ],
+  "rb-harness provider test": [
+    "--credential",
+    "--effort",
+    "--json",
+    "--model",
+    "--provider",
+    "--timeout"
+  ],
+  "rb-harness _provider-run": [
+    "--artifacts-dir",
+    "--credential",
+    "--effort",
+    "--evidence-dir",
+    "--model",
+    "--permission",
+    "--project",
+    "--provider",
+    "--role"
+  ],
+  "rb-harness status": [
+    "--json",
+    "--output",
+    "--project"
+  ],
+  "rb-harness resume": [
+    "--answers",
+    "--dashboard",
+    "--first-output-timeout",
+    "--non-interactive",
+    "--project",
+    "--questions",
+    "--timeout"
+  ],
+  "rb-harness artifacts": [],
+  "rb-harness artifacts inspect": [
+    "--json",
+    "--output",
+    "--project"
+  ],
+  "rb-harness artifacts verify": [
+    "--adapter",
+    "--against",
+    "--answers",
+    "--artifacts-dir",
+    "--credential",
+    "--dashboard",
+    "--deterministic-only",
+    "--effort",
+    "--first-output-timeout",
+    "--from-report",
+    "--json",
+    "--model",
+    "--non-interactive",
+    "--project",
+    "--provider",
+    "--questions",
+    "--remediate",
+    "--report",
+    "--timeout"
+  ]
+}

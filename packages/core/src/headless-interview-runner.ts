@@ -39,6 +39,12 @@ import type {
 export const HEADLESS_INTERVIEW_DRAFT_SCHEMA_SHA256 = sha256Text("rb-headless-interview-question/v1");
 const STATE_CONTRACT = "rb-headless-interview-state/v1";
 const MAX_PROVIDER_ROUNDS = 128;
+/**
+ * The public rb-headless-interview/v1 budget. It is deliberately independent
+ * of the internal Harness interview budget: an integrating service versions
+ * this boundary and must not be reshaped by an internal product decision.
+ */
+const HEADLESS_QUESTIONS_PER_ROUND = 8;
 const MAX_ADAPTER_OUTPUT = 2 * 1024 * 1024;
 
 type SessionStatus = "active" | "complete" | "blocked";
@@ -393,7 +399,7 @@ async function analyze(
   const pending = session.answers.filter((answer) => answer.disposition === "PENDING");
   const resources = [
     "Headless continuity rule: preserve every still-unanswered question from the prior checkpoint with its stable ID. A materially unresolved submitted answer requires a new focused follow-up ID.",
-    await loadWorkflowResources("init"),
+    await loadWorkflowResources("init", { section: "interview" }),
   ].join("\n");
   let repair: string | undefined;
   let rejected: string | undefined;
@@ -406,7 +412,7 @@ async function analyze(
     if (!sameSnapshot(beforeWorkspace, await workspaceSnapshot(workspace, stateRoot)) || beforeState !== await sha256File(stateFile)) throw new Error("workspace_modified");
     if (outcome.exitCode !== 0) throw new Error(outcome.exitCode === 75 ? "adapter_unavailable" : "adapter_failed");
     try {
-      const analysis = parseInterviewAnalysis(outcome.stdout, pending);
+      const analysis = parseInterviewAnalysis(outcome.stdout, { pendingAnswers: pending, round: 1, maxQuestions: HEADLESS_QUESTIONS_PER_ROUND });
       rejectReusedQuestionIds(syntheticState(session, workspace), analysis);
       return analysis;
     } catch (error) {

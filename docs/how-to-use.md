@@ -45,9 +45,11 @@ CLI providers are `codex`, `claude`, and `opencode`. Native API providers are
 `--provider custom --adapter /absolute/path/to/executable` for another CLI. The
 custom adapter receives the prompt through stdin and model, effort, mode, and
 project metadata through `RB_HARNESS_*` environment variables.
-`RB_HARNESS_MODE` is `interview`, `generation`, or `audit`. Interview and audit
-calls are read-only by contract; generation calls may write only the isolated
-`.rb` staging tree.
+`RB_HARNESS_MODE` is `interview`, `generation`, or `repair`. All three are
+read-only by contract and answer with their declared JSON envelope on stdout;
+the orchestrator materializes the returned documents. Orchestrator-private
+variables — resource root, dashboard, telemetry, and Ralph run variables — are
+removed from the adapter environment.
 
 ## Login and native APIs
 
@@ -159,85 +161,83 @@ the adaptive interview boundary separately from terminal artifact generation.
 ## Artifact quality gate
 
 RB Harness uses one artifact writer, not a writer/manager loop. Product choices
-and contradictions must be resolved by the adaptive interview before that
-writer starts. The writer receives the normalized answers and complete workflow
-authorities in a fresh context, then writes only to an isolated `.rb` staging
-tree.
+and contradictions must be resolved by the finite interview before that writer
+starts: one batch of at most five material questions, at most one focused
+follow-up with at most three, then a closed decision checkpoint or `BLOCKED`.
+
+The writer receives that checkpoint plus a compact, code-owned output contract
+and returns the complete document set as a typed `path`/`content` bundle. The
+Harness materializes it into a staging tree containing only `.rb`, derives every
+mechanical field — manifest, hashes, IDs, statuses, the TSV projection — and
+validates.
 
 Publication is owned by deterministic gates: manifest hashes and identities,
 workflow-required outputs, `rb-execution/v1`, optional formal contracts,
 explicit `BLOCKED.md` state, and the complete artifact tree. A RIGID requirement
 cannot claim that deterministic code recognizes unlimited natural-language
 meaning unless the artifacts define a finite grammar, typed authority, finite
-matrix, or explicit classifier and failure contract. The generation prompt
-requires that proof boundary up front; malformed or unready output fails with a
-specific contract diagnostic instead of buying repeated LLM repair passes.
+matrix, or explicit classifier and failure contract.
 
-Historical runs stopped by the retired `rb-harness-artifact-audit/v1` stage are
-still resumable. Their complete staged tree is revalidated by the current
-deterministic gates, old audit rows remain historical metadata, and no writer or
-auditor is called again.
+When validation finds repairable structural errors, exactly one localized repair
+runs. It receives the ordered, machine-generated error list and only the
+affected documents, and must preserve everything else byte for byte. It cannot
+reopen the interview, re-explore the repository, or re-emit the tree. A second
+failure is reported with its diagnostic; there is no loop.
 
-Use the optional verifier after generation and before RB Ralph when the change
-is large, an authority changed after the original interview, or the package was
-produced elsewhere:
+Historical runs stopped by the retired `rb-harness-artifact-audit/v1` stage
+remain readable. Their audit rows are historical metadata and no longer gate any
+result; no auditor is ever called again.
+
+Use the verifier after generation and before RB Ralph when the change is large,
+an authority changed after the original interview, or the package was produced
+elsewhere:
 
 ```bash
 rb-harness artifacts verify \
   --project . \
   --artifacts-dir .rb \
-  --against docs/original-request.md \
-  --provider codex --model gpt-5.6-sol --effort high
+  --against docs/original-request.md
 ```
 
-This is not a generation manager. It never repairs artifacts and never loops
-with the writer. Deterministic failures stop before a provider call; a
-mechanically usable tree receives one exhaustive read-only semantic audit,
-with at most one format-only correction if the provider violates the JSON
-protocol. The report is persisted below `.rb-harness/verifications/`, with exit
-`0` for safe, `2` for repairable material findings, and `3` for a real product
-decision.
+Verification is deterministic by contract. It starts no provider, spends no
+tokens, and never repairs or republishes artifacts. It proves the manifest
+schema, artifact hashes, the execution/operational/responsive contracts,
+ready-plan discovery, cold phase context paths, task-reference integrity,
+requirement coverage, and path portability. The report is persisted below
+`.rb-harness/verifications/`, with exit `0` for safe, `2` for repairable
+material findings, and `3` for a real product decision.
 
-For a token-free CI/preflight check:
+`--deterministic-only` remains accepted and describes the only behavior:
 
 ```bash
 rb-harness artifacts verify --project . --artifacts-dir .rb \
   --deterministic-only --json
 ```
 
-To repair a failed package, keep the first verification report and invoke the
-bounded remediation mode. It reuses the newest report whose artifact-tree and
-source-authority fingerprints still match, so the expensive initial audit is
-not repeated:
+`--remediate` and `--from-report` were removed with the semantic manager and
+fail with explicit guidance. To repair a failed package, run the workflow again;
+the single bounded structural repair now happens inside generation.
 
-```bash
-rb-harness artifacts verify --project . --artifacts-dir .rb \
-  --provider codex --model gpt-5.6-sol --effort high \
-  --remediate --questions one-by-one
-```
-
-`--from-report <path>` selects a particular report. A report becomes stale when
-the artifacts, original request, or accepted interview authority changes.
-An `--against` authority used by the original audit is inherited from the
-selected report, so it does not need to be repeated during remediation.
-The remediation interview asks only decisions absent from accepted authority;
-technical findings remain writer responsibilities. Harness performs one full
-isolated re-emission, preserves the old artifact tree, and runs one final
-verification. A failed final report ends the command without another repair
-cycle.
-
-Agentic generation transcripts are byte-counted and bounded at 128 MiB;
-interview responses remain bounded at 32 MiB. Exceeding
-a role limit or timeout stops the provider and every discovered descendant,
-including tools that opened a separate process session. The run remains
-resumable and the failed provider log records the precise limit diagnostic.
+Documentation transcripts are byte-counted and bounded: 32 MiB for generation,
+16 MiB for the repair, and 8 MiB for the interview. Exceeding a role limit,
+a timeout, a cancellation, a Harness failure, or host exit starts the same
+idempotent teardown ladder — stop admitting work, `SIGTERM` the process group,
+wait one short grace window, `SIGKILL` the survivors, and confirm quiescence
+before the run lock is released. A grandchild that traps `SIGTERM` cannot be
+orphaned. The run remains resumable and the failed provider log records the
+precise limit diagnostic.
 
 If the writer completed and a later manifest/contract gate failed, run the
-normal `rb-harness resume <run-id> --project .` command. The Harness recognizes
-the complete generation checkpoint, revalidates deterministic indexes with the
-installed runtime, and proceeds to publication without repeating the writer
-call. Long or normalization-colliding artifact paths receive stable
-hash-suffixed IDs during manifest sync.
+normal `rb-harness resume <run-id> --project .` command. Durable checkpoints
+separate the completed interview, the received document bundle, materialization,
+validation, and publication, so a complete provider response that is already
+preserved is never requested again. Long or normalization-colliding artifact
+paths receive stable hash-suffixed IDs during manifest sync.
+
+Each run also writes `telemetry.json` beside its state, recording the duration
+of every documentation stage, the number of provider calls, and the token and
+cache usage the provider actually reported. A provider that reports no usage is
+recorded as unmeasured; no cost is ever estimated.
 
 ## Start a new project
 

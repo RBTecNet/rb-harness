@@ -1,8 +1,37 @@
 import { spawn } from "node:child_process";
 import { lstat, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { basename, dirname, relative, resolve, sep } from "node:path";
+import { HARNESS_BUDGET } from "./harness-budget.js";
+import {
+  OMITTED_DIRECTORIES,
+  classifyProjectPath,
+  isVisibleProjectPath,
+  resolveProjectPath,
+} from "./path-policy.js";
 
-export type ApiAgentRole = "harness-interview" | "harness-generation" | "harness-audit" | "ralph-agent" | "ralph-manager";
+export type ApiAgentRole =
+  | "harness-interview"
+  | "harness-generation"
+  | "harness-repair"
+  | "ralph-agent"
+  | "ralph-manager";
+
+/**
+ * Accumulated tool spend for one documentation session. Independent reads may
+ * run concurrently, but the total number of calls and the total retained
+ * output stay bounded so a model cannot turn evidence discovery into an
+ * open-ended repository crawl.
+ */
+export interface ToolGovernor {
+  calls: number;
+  outputBytes: number;
+  lastSignature?: string;
+  repeats: number;
+}
+
+export function createToolGovernor(): ToolGovernor {
+  return { calls: 0, outputBytes: 0, repeats: 0 };
+}
 
 export interface ApiAgentToolContext {
   projectRoot: string;
@@ -10,6 +39,13 @@ export interface ApiAgentToolContext {
   permissionMode: "yolo" | "protected";
   artifactDirectory?: string;
   evidenceDirectory?: string;
+  /** Present for documentation roles; Ralph roles keep their own limits. */
+  governor?: ToolGovernor;
+}
+
+/** Documentation roles read the target project and never write or execute. */
+export function isDocumentationRole(role: ApiAgentRole): boolean {
+  return role === "harness-interview" || role === "harness-generation" || role === "harness-repair";
 }
 
 export interface ToolDefinition {
@@ -18,13 +54,12 @@ export interface ToolDefinition {
   inputSchema: Record<string, unknown>;
 }
 
-const SKIPPED_DIRECTORIES = new Set([".git", "node_modules", "vendor", "dist", "build", "coverage", ".next", ".nuxt", "target"]);
 const SENSITIVE_FILE = /^(?:\.env(?:\..+)?|id_(?:rsa|dsa|ecdsa|ed25519)|credentials(?:\.json)?|secrets?\.json)$/i;
 const SENSITIVE_EXTENSION = /\.(?:pem|key|p12|pfx|jks|keystore)$/i;
 const MAX_TOOL_OUTPUT = 256 * 1024;
 
 function isWriteRole(role: ApiAgentRole): boolean {
-  return role === "harness-generation" || role === "ralph-agent";
+  return role === "ralph-agent";
 }
 
 function assertString(value: unknown, label: string, maximum = 4096): string {
@@ -46,10 +81,23 @@ function lexicalPath(root: string, input: string): string {
   return absolute;
 }
 
-async function existingPath(root: string, input: string): Promise<string> {
-  const lexical = lexicalPath(root, input);
+/**
+ * Resolve an existing project path. The lexical check rejects traversal, the
+ * shared policy rejects control-plane and credential targets, and the realpath
+ * check rejects a symlink that points out of the project — all three are
+ * needed, because each defeats a different escape.
+ */
+async function existingPath(root: string, input: string, enforcePolicy: boolean): Promise<string> {
+  const lexical = enforcePolicy
+    ? resolveProjectPath(root, input).absolute
+    : lexicalPath(root, input);
   const actual = await realpath(lexical);
   if (actual !== root && !actual.startsWith(`${root}${sep}`)) throw new Error("path resolves outside the project root");
+  if (enforcePolicy) {
+    // Re-check after symlink resolution: a link inside the project may still
+    // aim at a denied area of the same project.
+    resolveProjectPath(root, relative(root, actual).replaceAll("\\", "/") || ".");
+  }
   return actual;
 }
 
@@ -61,9 +109,6 @@ async function writablePath(context: ApiAgentToolContext, input: string): Promis
   if (!relativePath || relativePath === ".") throw new Error("writing the project root is not allowed");
   if (relativePath === ".git" || relativePath.startsWith(".git/") || relativePath === ".rb/runs" || relativePath.startsWith(".rb/runs/")) {
     throw new Error("orchestrator and Git control-plane paths are read-only");
-  }
-  if (context.role === "harness-generation" && relativePath !== ".rb" && !relativePath.startsWith(".rb/")) {
-    throw new Error("Harness generation may write only under .rb/");
   }
   if (context.role === "ralph-agent" && context.artifactDirectory) {
     const artifact = context.artifactDirectory.replace(/^\.\//, "").replace(/\/$/, "");
@@ -136,9 +181,9 @@ async function walk(root: string, start: string, maximum: number): Promise<strin
       const absolute = resolve(directory, entry.name);
       const path = relative(root, absolute).replaceAll("\\", "/");
       if (entry.isDirectory()) {
-        if (SKIPPED_DIRECTORIES.has(entry.name) || path === ".rb/runs" || path.startsWith(".rb/runs/")) continue;
+        if (OMITTED_DIRECTORIES.has(entry.name) || !isVisibleProjectPath(path)) continue;
         await visit(absolute);
-      } else if (entry.isFile() && !sensitive(absolute)) results.push(path);
+      } else if (entry.isFile() && isVisibleProjectPath(path) && !sensitive(absolute)) results.push(path);
     }
   }
   await visit(start);
@@ -162,12 +207,15 @@ function definitions(context: ApiAgentToolContext): ToolDefinition[] {
       description: "Search literal text in regular project files and return path, line, and matching content.",
       inputSchema: { type: "object", properties: { query: { type: "string" }, path: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } }, required: ["query"], additionalProperties: false },
     },
-    {
-      name: "git_diff",
-      description: "Read the current Git status and textual diff without changing the repository.",
-      inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    },
   ];
+  // A documentation role gets exactly these three read capabilities: no shell,
+  // no Git, no test execution, no subagents, no jobs, no application writes.
+  if (isDocumentationRole(context.role)) return tools;
+  tools.push({
+    name: "git_diff",
+    description: "Read the current Git status and textual diff without changing the repository.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  });
   if (isWriteRole(context.role)) {
     tools.push(
       {
@@ -243,36 +291,87 @@ async function command(argv: string[], cwd: string, timeoutSeconds: number): Pro
   });
 }
 
+/**
+ * Charge one call against the documentation budget. Repeated identical calls
+ * make no progress; after the repeat limit the runtime refuses them and says
+ * so, instead of letting a stuck model burn the whole budget on one query.
+ */
+function chargeToolCall(context: ApiAgentToolContext, name: string, input: Record<string, unknown>): void {
+  const governor = context.governor;
+  if (!governor || !isDocumentationRole(context.role)) return;
+  governor.calls += 1;
+  if (governor.calls > HARNESS_BUDGET.tools.maxCalls) {
+    throw new Error(
+      `the documentation tool budget of ${HARNESS_BUDGET.tools.maxCalls} calls is exhausted; write the documents from the evidence already gathered`,
+    );
+  }
+  if (governor.outputBytes > HARNESS_BUDGET.tools.accumulatedOutputBytes) {
+    throw new Error(
+      `the documentation tool output budget of ${HARNESS_BUDGET.tools.accumulatedOutputBytes} bytes is exhausted; write the documents from the evidence already gathered`,
+    );
+  }
+  const signature = `${name}\u0000${JSON.stringify(input, Object.keys(input).sort())}`;
+  governor.repeats = signature === governor.lastSignature ? governor.repeats + 1 : 1;
+  governor.lastSignature = signature;
+  if (governor.repeats >= HARNESS_BUDGET.tools.repeatCallLimit) {
+    throw new Error(`${name} was called with identical arguments ${governor.repeats} times without progress; change approach or conclude`);
+  }
+}
+
+function recordToolOutput(context: ApiAgentToolContext, output: string): string {
+  if (context.governor && isDocumentationRole(context.role)) {
+    const bounded = truncate(output, HARNESS_BUDGET.tools.maxOutputBytes);
+    context.governor.outputBytes += Buffer.byteLength(bounded);
+    return bounded;
+  }
+  return output;
+}
+
 export async function executeApiAgentTool(
   context: ApiAgentToolContext,
   name: string,
   input: Record<string, unknown>,
 ): Promise<string> {
+  chargeToolCall(context, name, input);
+  return recordToolOutput(context, await runApiAgentTool(context, name, input));
+}
+
+async function runApiAgentTool(
+  context: ApiAgentToolContext,
+  name: string,
+  input: Record<string, unknown>,
+): Promise<string> {
+  const documentation = isDocumentationRole(context.role);
   const root = await realpath(context.projectRoot);
   if (name === "list_files") {
-    const start = await existingPath(root, relativeInput(input.path));
+    const start = await existingPath(root, relativeInput(input.path), documentation);
     if (!(await lstat(start)).isDirectory()) throw new Error("list_files path must be a directory");
-    const limit = Number.isInteger(input.limit) ? Math.min(2000, Math.max(1, Number(input.limit))) : 500;
+    const ceiling = documentation ? HARNESS_BUDGET.tools.maxListedFiles : 2000;
+    const limit = Number.isInteger(input.limit) ? Math.min(ceiling, Math.max(1, Number(input.limit))) : Math.min(ceiling, 500);
     const files = await walk(root, start, limit + 1);
     const overflow = files.length > limit;
     return `${files.slice(0, limit).join("\n")}${overflow ? `\n[listing truncated at ${limit} files]` : ""}`;
   }
   if (name === "read_file") {
-    const path = await existingPath(root, relativeInput(input.path));
+    const path = await existingPath(root, relativeInput(input.path), documentation);
     if (sensitive(path)) throw new Error("reading credential or environment-secret files is not allowed");
     if (!(await lstat(path)).isFile()) throw new Error("read_file path must be a regular file");
     const lines = (await readFile(path, "utf8")).split(/\r?\n/);
     const start = Number.isInteger(input.start_line) ? Math.max(1, Number(input.start_line)) : 1;
-    const end = Number.isInteger(input.end_line) ? Math.min(lines.length, Number(input.end_line)) : Math.min(lines.length, start + 399);
-    if (end < start || end - start > 999) throw new Error("read_file supports at most 1000 ordered lines");
+    const span = documentation ? HARNESS_BUDGET.tools.maxReadLines : 1000;
+    const end = Number.isInteger(input.end_line) ? Math.min(lines.length, Number(input.end_line)) : Math.min(lines.length, start + span - 1);
+    if (end < start || end - start >= span) throw new Error(`read_file supports at most ${span} ordered lines`);
     return truncate(lines.slice(start - 1, end).map((line, index) => `${start + index}: ${line}`).join("\n"));
   }
   if (name === "search_text") {
     const query = assertString(input.query, "query", 1000);
-    const start = await existingPath(root, relativeInput(input.path));
-    const limit = Number.isInteger(input.limit) ? Math.min(500, Math.max(1, Number(input.limit))) : 100;
+    const start = await existingPath(root, relativeInput(input.path), documentation);
+    const ceiling = documentation ? HARNESS_BUDGET.tools.maxSearchMatches : 500;
+    const limit = Number.isInteger(input.limit) ? Math.min(ceiling, Math.max(1, Number(input.limit))) : Math.min(ceiling, 100);
     const info = await lstat(start);
-    const files = info.isFile() ? [relative(root, start).replaceAll("\\", "/")] : await walk(root, start, 10_000);
+    const files = info.isFile()
+      ? [relative(root, start).replaceAll("\\", "/")].filter((file) => !documentation || isVisibleProjectPath(file))
+      : await walk(root, start, 10_000);
     const matches: string[] = [];
     for (const file of files) {
       if (matches.length >= limit) break;
@@ -312,7 +411,7 @@ export async function executeApiAgentTool(
     if (context.permissionMode !== "yolo") throw new Error("direct API execution cannot provide an OS sandbox; use --yolo or a sandboxed CLI provider");
     if (!Array.isArray(input.argv) || !input.argv.length || input.argv.length > 64) throw new Error("argv must contain 1-64 strings");
     const argv = input.argv.map((entry, index) => assertString(entry, `argv[${index}]`, 8192));
-    const cwd = await existingPath(root, relativeInput(input.cwd, "cwd"));
+    const cwd = await existingPath(root, relativeInput(input.cwd, "cwd"), false);
     if (!(await lstat(cwd)).isDirectory()) throw new Error("command cwd must be a directory");
     const timeout = Number.isInteger(input.timeout_seconds) ? Math.min(900, Math.max(1, Number(input.timeout_seconds))) : 300;
     return await command(argv, cwd, timeout);

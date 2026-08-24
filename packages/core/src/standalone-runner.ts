@@ -1,12 +1,32 @@
+/**
+ * The documentation state machine.
+ *
+ * inventory → gap analysis (1 batch, at most 1 follow-up) → closed decision
+ * checkpoint → one authoring call → materialization → deterministic validation
+ * → at most one localized structural repair → atomic publication.
+ *
+ * The graph is acyclic apart from those two explicitly counted allowances.
+ * There is no manager, no semantic auditor, and no stage that can restart
+ * itself: an exhausted budget produces a resumable checkpoint and an explicit
+ * diagnostic, never more provider spend.
+ */
+
 import { createHash, randomBytes } from "node:crypto";
-import { chmod, lstat, mkdir, readFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { createInterface, type Interface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
+import { HARNESS_BUDGET } from "./harness-budget.js";
 import { inspectProjectInventory } from "./harness-inventory.js";
 import { requestInterviewAnalysis } from "./harness-interview.js";
-import { runProvider } from "./harness-provider.js";
-import { loadWorkflowResources, requestNeedsHeadlessContracts } from "./standalone-resources.js";
+import {
+  requestDocumentBundle,
+  requestStructuralRepair,
+  type StructuralError,
+} from "./harness-generator.js";
+import { materializeDocuments, type DocumentBundle } from "./harness-documents.js";
+import { discardEvidenceProjection, prepareEvidenceProjection } from "./harness-evidence.js";
+import { buildInputPackage, type HarnessInputPackage } from "./harness-input-package.js";
 import {
   acquireHarnessLock,
   harnessRunRoot,
@@ -15,30 +35,31 @@ import {
   writeRunState,
 } from "./harness-state.js";
 import {
-  generationSourceSummary,
-  prepareGenerationWorkspace,
-  publishGeneratedArtifacts,
+  prepareStagingTree,
+  publishStagedArtifacts,
   recoverInterruptedPublication,
-  validateGeneratedWorkspace,
+  validateStagedTree,
 } from "./harness-workspace.js";
-import { slugify } from "./manifest.js";
+import {
+  finishHarnessTelemetry,
+  formatTelemetryReport,
+  harnessTelemetry,
+  startHarnessTelemetry,
+} from "./harness-telemetry.js";
 import { pauseHarnessDashboard, resumeHarnessDashboard } from "./harness-dashboard.js";
 import {
   STANDALONE_STATE_CONTRACT,
   type HarnessRunState,
-  type InterviewAnswer,
   type InterviewQuestion,
+  type RunCheckpoints,
   type StandaloneRunOptions,
 } from "./standalone-types.js";
 
-const MAX_ADAPTIVE_INTERVIEW_ROUNDS = 128;
-
 export function nextInterviewRound(
-  state: Pick<HarnessRunState, "interviewRound" | "activeInterviewRound" | "diagnostic">,
+  state: Pick<HarnessRunState, "interviewRound" | "activeInterviewRound">,
 ): number {
   if (state.activeInterviewRound) return state.activeInterviewRound;
-  const legacyCompletedRounds = state.diagnostic === "interview exceeded six adaptive rounds" ? 6 : 0;
-  return Math.max(state.interviewRound ?? 0, legacyCompletedRounds) + 1;
+  return (state.interviewRound ?? 0) + 1;
 }
 
 export function hasReadyInterviewCheckpoint(
@@ -62,6 +83,11 @@ async function regularDirectory(path: string): Promise<string> {
   const info = await lstat(absolute);
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error(`project must be a regular directory: ${path}`);
   return absolute;
+}
+
+function checkpoints(state: HarnessRunState): RunCheckpoints {
+  state.checkpoints ??= {};
+  return state.checkpoints;
 }
 
 async function loadProvidedAnswers(path?: string): Promise<Record<string, string>> {
@@ -149,29 +175,40 @@ async function collectInterviewAnswers(
 ): Promise<void> {
   const unanswered = questions.filter((question) =>
     !state.answers.some((answer) => answer.questionId === question.id));
-  for (let index = 0; index < unanswered.length; index += 1) {
-    const question = unanswered[index]!;
-    const rawAnswer = await answerQuestion(question, index, unanswered.length, provided, terminal);
-    state.answers.push({
-      questionId: question.id,
-      question: question.question,
-      rawAnswer,
-      disposition: "PENDING",
-      answeredAt: new Date().toISOString(),
-    });
-    await writeRunState(state);
+  if (!unanswered.length) return;
+  const telemetry = harnessTelemetry();
+  const previousStage = telemetry?.activeStage();
+  telemetry?.beginStage("awaiting-human");
+  try {
+    for (let index = 0; index < unanswered.length; index += 1) {
+      const question = unanswered[index]!;
+      const rawAnswer = await answerQuestion(question, index, unanswered.length, provided, terminal);
+      state.answers.push({
+        questionId: question.id,
+        question: question.question,
+        rawAnswer,
+        disposition: "PENDING",
+        answeredAt: new Date().toISOString(),
+      });
+      await writeRunState(state);
+    }
+  } finally {
+    if (previousStage) telemetry?.beginStage(previousStage);
   }
 }
 
 async function interview(
   state: HarnessRunState,
   runRoot: string,
+  evidenceRoot: string,
+  inputPackage: HarnessInputPackage,
   options: StandaloneRunOptions,
 ): Promise<void> {
   const provided = await loadProvidedAnswers(options.answersFile);
   const terminal = !options.nonInteractive && process.stdin.isTTY && process.stdout.isTTY
     ? createInterface({ input, output })
     : undefined;
+  const telemetry = harnessTelemetry();
   try {
     let normalizedCarriedAnswer = false;
     for (const question of state.analysis?.questions ?? []) {
@@ -193,24 +230,42 @@ async function interview(
       await collectInterviewAnswers(state, carriedQuestions, provided, terminal);
     }
     const firstRound = nextInterviewRound(state);
-    for (let round = firstRound; round <= MAX_ADAPTIVE_INTERVIEW_ROUNDS; round += 1) {
+    for (let round = firstRound; round <= HARNESS_BUDGET.interview.maxRounds; round += 1) {
+      telemetry?.beginStage("gap-analysis");
       state.activeInterviewRound = round;
       state.diagnostic = undefined;
       await writeRunState(state);
-      process.stdout.write(`[rb-harness] analisando lacunas da entrevista (rodada ${round}/${MAX_ADAPTIVE_INTERVIEW_ROUNDS})...\n`);
-      state.analysis = await requestInterviewAnalysis(
+      process.stdout.write(`[rb-harness] analisando lacunas (rodada ${round}/${HARNESS_BUDGET.interview.maxRounds})...\n`);
+      state.analysis = await requestInterviewAnalysis({
         state,
+        inputPackage,
         runRoot,
+        evidenceRoot,
         round,
-        options.timeoutSeconds,
-        options.firstOutputTimeoutSeconds,
-      );
+        timeoutSeconds: options.timeoutSeconds,
+        firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
+      });
       state.interviewRound = round;
       state.activeInterviewRound = undefined;
       applyAnswerReviews(state);
       state.diagnostic = undefined;
       await writeRunState(state);
-      if (state.analysis.status === "ready") return;
+      for (const normalization of state.analysis.normalizations ?? []) {
+        process.stdout.write(`[rb-harness] protocolo normalizado: ${normalization}\n`);
+      }
+      for (const defect of state.analysis.semanticDefects ?? []) {
+        process.stdout.write(`[rb-harness] classificação não aceita: ${defect}\n`);
+      }
+      if (state.analysis.overflowQuestions) {
+        process.stdout.write(
+          `[rb-harness] ${state.analysis.overflowQuestions} pergunta(s) acima do orçamento foram registradas como decisões adiadas.\n`,
+        );
+      }
+      if (state.analysis.status === "ready") {
+        checkpoints(state).interviewCompletedAt = new Date().toISOString();
+        await writeRunState(state);
+        return;
+      }
       if (state.analysis.status === "blocked") {
         state.status = "blocked";
         state.diagnostic = state.analysis.unresolved.join("; ") || "material interview decision remains blocked";
@@ -222,8 +277,10 @@ async function interview(
       }
       await collectInterviewAnswers(state, state.analysis.questions, provided, terminal);
     }
+    // The parser converts an exhausted final round into `blocked`, so reaching
+    // this point means the budget itself was violated.
     state.status = "blocked";
-    state.diagnostic = `interview exceeded the safety ceiling of ${MAX_ADAPTIVE_INTERVIEW_ROUNDS} adaptive rounds`;
+    state.diagnostic = `the interview budget of ${HARNESS_BUDGET.interview.maxRounds} rounds is exhausted and a material decision remains open`;
     await writeRunState(state);
     throw new Error(state.diagnostic);
   } finally {
@@ -231,100 +288,150 @@ async function interview(
   }
 }
 
-async function generationPrompt(
-  state: HarnessRunState,
-  workspace: string,
-): Promise<string> {
-  const resources = await loadWorkflowResources(state.workflow, {
-    includeHeadlessContracts: requestNeedsHeadlessContracts(state.request),
-  });
-  const decisions = state.answers.filter((answer) => answer.disposition === "ACCEPTED").map((answer) => ({
-    questionId: answer.questionId,
-    decision: answer.normalizedDecision,
-    sourceAnswer: answer.rawAnswer,
-  }));
-  return [
-    "You are the standalone RB Harness artifact writer.",
-    "This is an isolated copy of the project. Generate documentation only; never implement or modify application code.",
-    "Write exclusively under .rb/. Preserve compatible existing artifacts and confirmed manual edits unless this request supersedes them.",
-    "Do not create provider-specific instructions, credentials, secrets, commits, branches, Ralph runtime state, or hidden chat-session dependencies.",
-    "The standalone orchestrator owns manifest sync and deterministic validation after this call. You must still produce contract-correct artifacts.",
-    "This is the only artifact-generation call. There is no later LLM documentation manager or repair pass, so inspect the complete staged tree and resolve every engineering detail before returning.",
-    "Do not ask questions in this call. If a material contradiction still prevents safe readiness, write BLOCKED documentation and do not pretend PHASES is ready.",
-    "Before claiming readiness, verify that every RIGID natural-language rule has a finite implementation authority: typed data, an exact grammar/matrix, or an explicitly declared classifier and failure contract. Never turn examples or a growing keyword list into an allegedly exhaustive semantic validator.",
-    "Keep independently failing concerns in independently verifiable tasks. Name one canonical source and the synchronization mechanism for any derived or distributable copy.",
-    "In PHASES.md, declare every task Scope as concrete project-relative backtick paths or bounded globs and choose the smallest real validation command that proves the affected behavior. Do not duplicate tests for a future manager; RB Ralph owns command execution and consumes scopes for safe retry invalidation.",
-    `\nWorkflow: ${state.workflow}`,
-    `\nDeveloper request:\n${state.request}`,
-    `\nNormalized interview checkpoint:\n${state.analysis?.summary ?? ""}`,
-    `\nAccepted decisions:\n${JSON.stringify(decisions)}`,
-    `\nExplicit assumptions:\n${JSON.stringify(state.analysis?.assumptions ?? [])}`,
-    `\nUnresolved non-rigid or blocking items:\n${JSON.stringify(state.analysis?.unresolved ?? [])}`,
-    `\nExisting artifact inventory:\n${await generationSourceSummary(workspace)}`,
-    resources,
-  ].join("\n");
+function bundlePath(runRoot: string): string {
+  return resolve(runRoot, "bundle.json");
 }
 
-async function generate(state: HarnessRunState, runRoot: string, options: StandaloneRunOptions): Promise<void> {
-  const stagedWorkspace = resolve(runRoot, "workspace");
-  const legacyValidationFailure = state.status === "generation-failed"
-    && state.diagnostic?.startsWith("generated artifact tree is invalid:");
-  const legacyAuditedWorkspace = (state.status === "auditing" || state.status === "blocked")
-    && Boolean(state.artifactAudits?.length);
-  const checkpointMatches = state.generationCheckpoint?.contract === "rb-harness-generation-checkpoint/v1"
-    && state.generationCheckpoint.pass >= 1;
-  let reuseGeneratedWorkspace = false;
-  if (legacyValidationFailure || checkpointMatches || legacyAuditedWorkspace) {
-    try {
-      const workspaceInfo = await lstat(stagedWorkspace);
-      const artifactInfo = await lstat(resolve(stagedWorkspace, ".rb"));
-      const stagedWorkspaceAvailable = workspaceInfo.isDirectory() && !workspaceInfo.isSymbolicLink()
-        && artifactInfo.isDirectory() && !artifactInfo.isSymbolicLink();
-      reuseGeneratedWorkspace = stagedWorkspaceAvailable;
-    } catch { /* an incomplete checkpoint is regenerated safely */ }
+async function persistBundle(state: HarnessRunState, runRoot: string, bundle: DocumentBundle, repaired: boolean): Promise<void> {
+  const path = bundlePath(runRoot);
+  const serialized = `${JSON.stringify(bundle, null, 2)}\n`;
+  const temporary = `${path}.tmp-${process.pid}`;
+  await mkdir(runRoot, { recursive: true, mode: 0o700 });
+  await writeFile(temporary, serialized, { encoding: "utf8", mode: 0o600 });
+  await rename(temporary, path);
+  state.bundle = {
+    contract: "rb-harness-documents/v1",
+    documents: bundle.documents.length,
+    sha256: hash(serialized),
+    receivedAt: new Date().toISOString(),
+    repaired,
+  };
+  checkpoints(state).bundleReceivedAt = state.bundle.receivedAt;
+  await writeRunState(state);
+}
+
+async function loadPersistedBundle(state: HarnessRunState, runRoot: string): Promise<DocumentBundle | undefined> {
+  if (!state.bundle) return undefined;
+  try {
+    const serialized = await readFile(bundlePath(runRoot), "utf8");
+    if (hash(serialized) !== state.bundle.sha256) return undefined;
+    return JSON.parse(serialized) as DocumentBundle;
+  } catch {
+    return undefined;
   }
-  const workspace = reuseGeneratedWorkspace
-    ? stagedWorkspace
-    : await prepareGenerationWorkspace(state, runRoot);
-  if (reuseGeneratedWorkspace) {
-    process.stdout.write("[rb-harness] saída completa recuperada; retomando da validação determinística sem reinvocar o provider.\n");
-    if (legacyAuditedWorkspace) {
-      process.stdout.write("[rb-harness] registro de auditoria legado preservado como histórico, mas não participa mais do gate de publicação.\n");
-    }
+}
+
+function formatStructuralErrors(errors: StructuralError[]): string {
+  return errors
+    .slice(0, 12)
+    .map((error) => `${error.code}${error.path ? ` [${error.path}]` : ""}: ${error.message}`)
+    .join("; ");
+}
+
+async function materializeAndValidate(
+  state: HarnessRunState,
+  runRoot: string,
+  bundle: DocumentBundle,
+): Promise<Awaited<ReturnType<typeof validateStagedTree>>> {
+  const telemetry = harnessTelemetry();
+  telemetry?.beginStage("materialization");
+  state.status = "materializing";
+  await writeRunState(state);
+  const staging = await prepareStagingTree(state, runRoot);
+  await materializeDocuments(staging, bundle);
+  checkpoints(state).materializedAt = new Date().toISOString();
+  await writeRunState(state);
+  telemetry?.beginStage("validation");
+  state.status = "validating";
+  await writeRunState(state);
+  return validateStagedTree(staging, state.workflow);
+}
+
+async function generate(
+  state: HarnessRunState,
+  runRoot: string,
+  evidenceRoot: string,
+  inputPackage: HarnessInputPackage,
+  options: StandaloneRunOptions,
+): Promise<void> {
+  const telemetry = harnessTelemetry();
+  let bundle = await loadPersistedBundle(state, runRoot);
+  if (bundle) {
+    process.stdout.write(`[rb-harness] pacote documental completo recuperado do checkpoint (${bundle.documents.length} documentos); provider não será reinvocado.\n`);
   } else {
+    telemetry?.beginStage("generation");
     state.status = "generating";
     state.diagnostic = undefined;
-    state.generationCheckpoint = undefined;
     await writeRunState(state);
-    process.stdout.write(`[rb-harness] workspace isolado pronto; geração única com ${state.provider.provider}/${state.provider.model || "provider-default"}...\n`);
-    await runProvider({
-      configuration: state.provider,
-      mode: "generation",
-      projectRoot: workspace,
-      prompt: await generationPrompt(state, workspace),
-      logPath: resolve(runRoot, "logs/generation.log"),
+    process.stdout.write(`[rb-harness] geração única com ${state.provider.provider}/${state.provider.model || "provider-default"}...\n`);
+    bundle = await requestDocumentBundle({
+      state,
+      inputPackage,
+      runRoot,
+      evidenceRoot,
       timeoutSeconds: options.timeoutSeconds,
       firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
-      streamOutput: true,
+      streamOutput: false,
     });
-    state.generationCheckpoint = {
-      contract: "rb-harness-generation-checkpoint/v1",
-      pass: 1,
-      providerCompletedAt: new Date().toISOString(),
-    };
+    await persistBundle(state, runRoot, bundle, false);
+    process.stdout.write(`[rb-harness] pacote recebido: ${bundle.documents.length} documento(s).\n`);
   }
-  state.status = "validating";
-  state.diagnostic = undefined;
+
+  if (bundle.status === "blocked") {
+    state.status = "blocked";
+    state.diagnostic = `generation is blocked: ${bundle.blocked.join("; ")}`;
+    await writeRunState(state);
+    throw new Error(state.diagnostic);
+  }
+
+  let validation = await materializeAndValidate(state, runRoot, bundle);
+  if (!validation.valid) {
+    const repairsUsed = state.repairsUsed ?? 0;
+    if (!validation.repairable || repairsUsed >= HARNESS_BUDGET.generation.structuralRepairs) {
+      state.status = "generation-failed";
+      state.diagnostic = `generated artifact tree is invalid: ${formatStructuralErrors(validation.errors)}`;
+      await writeRunState(state);
+      throw new Error(state.diagnostic);
+    }
+    telemetry?.beginStage("structural-repair");
+    state.status = "repairing";
+    state.repairsUsed = repairsUsed + 1;
+    state.diagnostic = undefined;
+    await writeRunState(state);
+    process.stdout.write(`[rb-harness] ${validation.errors.length} erro(s) estrutural(is); executando a única correção localizada.\n`);
+    bundle = await requestStructuralRepair({
+      state,
+      bundle,
+      errors: validation.errors,
+      runRoot,
+      evidenceRoot,
+      timeoutSeconds: options.timeoutSeconds,
+      firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
+      streamOutput: false,
+    });
+    await persistBundle(state, runRoot, bundle, true);
+    validation = await materializeAndValidate(state, runRoot, bundle);
+    if (!validation.valid) {
+      state.status = "generation-failed";
+      state.diagnostic = `structural repair did not converge: ${formatStructuralErrors(validation.errors)}`;
+      await writeRunState(state);
+      throw new Error(state.diagnostic);
+    }
+  }
+
+  checkpoints(state).validatedAt = new Date().toISOString();
   await writeRunState(state);
-  const validation = await validateGeneratedWorkspace(workspace, state.workflow);
-  process.stdout.write(`[rb-harness] validação estrutural verde: ${validation.artifacts} artefatos, ${validation.readyPlans} planos prontos.\n`);
+  process.stdout.write(`[rb-harness] validação determinística verde: ${validation.artifacts} artefatos, ${validation.readyPlans} plano(s) pronto(s).\n`);
+
+  telemetry?.beginStage("publication");
   state.status = "publishing";
   await writeRunState(state);
-  const previous = await publishGeneratedArtifacts(state, runRoot, workspace);
+  const previous = await publishStagedArtifacts(state, runRoot, resolve(runRoot, "staging"));
   state.previousArtifacts = previous;
   state.status = "complete";
   state.generationCheckpoint = undefined;
   state.publishedAt = new Date().toISOString();
+  checkpoints(state).publishedAt = state.publishedAt;
   state.diagnostic = undefined;
   await writeRunState(state);
   process.stdout.write(`[rb-harness] artefatos publicados em ${state.artifactDirectory}.\n`);
@@ -350,19 +457,24 @@ function optionsFromState(state: HarnessRunState, current: Partial<StandaloneRun
 
 export async function runStandaloneWorkflow(options: StandaloneRunOptions): Promise<HarnessRunState> {
   const projectRoot = await regularDirectory(options.projectRoot);
+  const telemetry = startHarnessTelemetry();
   let state: HarnessRunState;
   if (options.resumeId) {
     state = await readRunState(projectRoot, options.resumeId);
     options = optionsFromState(state, options);
-    if (state.status === "complete") return state;
+    if (state.status === "complete") {
+      finishHarnessTelemetry();
+      return state;
+    }
   } else {
+    telemetry.beginStage("inventory");
     const inventory = await inspectProjectInventory(projectRoot, options.artifactDirectory);
     const createdAt = new Date().toISOString();
     state = {
       contract: STANDALONE_STATE_CONTRACT,
       id: runId({ ...options, projectRoot }),
       workflow: options.workflow,
-      status: "interview",
+      status: "inventory",
       projectRoot,
       artifactDirectory: options.artifactDirectory,
       request: options.request,
@@ -371,6 +483,8 @@ export async function runStandaloneWorkflow(options: StandaloneRunOptions): Prom
       provider: options.provider,
       answers: [],
       inventory,
+      checkpoints: {},
+      repairsUsed: 0,
       createdAt,
       updatedAt: createdAt,
     };
@@ -379,21 +493,59 @@ export async function runStandaloneWorkflow(options: StandaloneRunOptions): Prom
   const runRoot = harnessRunRoot(projectRoot, state.id);
   await mkdir(runRoot, { recursive: true, mode: 0o700 });
   await chmod(runRoot, 0o700).catch(() => undefined);
+  let evidenceRoot: string | undefined;
   const releaseLock = await acquireHarnessLock(projectRoot, state.id);
   try {
     if (await recoverInterruptedPublication(state, runRoot)) {
       process.stdout.write(`[rb-harness] publicação interrompida detectada; revisão anterior restaurada em ${state.artifactDirectory}.\n`);
       await writeRunState(state);
     }
+    telemetry.beginStage("inventory");
     state.inventory = await inspectProjectInventory(projectRoot, state.artifactDirectory);
+    // The provider never runs in the project itself: it runs in a bounded,
+    // read-only projection that contains no Harness or Git control state.
+    // Deliberately not under `runRoot`: a projection beside the run state puts
+    // `../state.json` one directory away from the provider.
+    const evidence = await prepareEvidenceProjection({
+      projectRoot,
+      artifactDirectory: state.artifactDirectory,
+    });
+    evidenceRoot = evidence.root;
+    process.stdout.write(
+      `[rb-harness] projeção de evidências pronta: ${evidence.files} arquivo(s), ${evidence.bytes} bytes`
+      + `${evidence.truncated ? " (truncada pelo orçamento de inventário)" : ""}.\n`,
+    );
+    const inputPackage = await buildInputPackage({
+      workflow: state.workflow,
+      projectRoot,
+      artifactDirectory: state.artifactDirectory,
+      request: state.request,
+      requestSource: state.requestSource,
+      inventory: state.inventory,
+      answers: state.answers,
+      assumptions: state.analysis?.assumptions,
+      unresolved: state.analysis?.unresolved,
+    });
     if (hasReadyInterviewCheckpoint(state)) {
       process.stdout.write("[rb-harness] checkpoint de entrevista pronto; retomando diretamente da geração.\n");
     } else {
       state.status = "interview";
       await writeRunState(state);
-      await interview(state, runRoot, options);
+      await interview(state, runRoot, evidence.root, inputPackage, options);
     }
-    await generate(state, runRoot, options);
+    // Accepted decisions become part of the closed checkpoint handed to the writer.
+    const closedPackage = await buildInputPackage({
+      workflow: state.workflow,
+      projectRoot,
+      artifactDirectory: state.artifactDirectory,
+      request: state.request,
+      requestSource: state.requestSource,
+      inventory: state.inventory,
+      answers: state.answers,
+      assumptions: state.analysis?.assumptions,
+      unresolved: state.analysis?.unresolved,
+    });
+    await generate(state, runRoot, evidence.root, closedPackage, options);
     return state;
   } catch (error) {
     if (state.status !== "blocked") {
@@ -403,6 +555,20 @@ export async function runStandaloneWorkflow(options: StandaloneRunOptions): Prom
     await writeRunState(state);
     throw error;
   } finally {
+    // The evidence projection is a derived, rebuildable copy in its own
+    // temporary root; it is removed once this invocation's provider calls end.
+    if (evidenceRoot) await discardEvidenceProjection(evidenceRoot);
+    const report = finishHarnessTelemetry();
+    if (report) {
+      state.telemetry = report;
+      await writeRunState(state).catch(() => undefined);
+      await writeFile(
+        resolve(runRoot, "telemetry.json"),
+        `${JSON.stringify(report, null, 2)}\n`,
+        { encoding: "utf8", mode: 0o600 },
+      ).catch(() => undefined);
+      process.stdout.write(`${formatTelemetryReport(report)}\n`);
+    }
     await releaseLock();
   }
 }

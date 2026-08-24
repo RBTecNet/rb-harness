@@ -11,13 +11,19 @@ answers as intent.
 
 ## Required references
 
-Read these files completely before writing artifacts:
+Read this file completely before producing artifacts:
 
-- [Interview policy](../../references/interview-policy.md)
-- [Artifact conventions](../../references/artifact-conventions.md)
-- [Execution template](../../references/execution-template.md)
-- [Operational acceptance template](../../references/operational-template.md)
 - [Evolution artifact shapes](artifact-shapes.md)
+
+## How your output is delivered
+
+You do not write files and you do not run commands. Return every document as a
+`path`/`content` pair in the document bundle envelope described in your prompt.
+The orchestrator materializes the files, derives the manifest, IDs, hashes, and
+statuses, runs every deterministic validator, and publishes atomically. The
+exact output contract for this workflow — required documents, the
+`rb-execution/v1` grammar, the `rb-operational/v1` shape, and the conventions —
+is supplied in the prompt as `rb-harness-contract-digest/v1`.
 
 ## Routing rule
 
@@ -51,7 +57,7 @@ isolated from existing behavior.
 8. Run the pre-write ambiguity audit and confirm one normalized checkpoint that
    separates accepted delta, preservation rules, assumptions, deferrals, and
    conflicts.
-9. Write the artifacts from `artifact-shapes.md`. Every TO BE RIGID requirement
+9. Return the artifacts from `artifact-shapes.md`. Every TO BE RIGID requirement
    traces to an impact, preservation/regression entry, and plan task. Emit formal
    contracts only when the public boundary requires them.
 10. Derive `PLAN.md` and a 1:1 `PHASES.md`. Tasks are small, dependency-aware,
@@ -62,14 +68,11 @@ isolated from existing behavior.
     clean-room pass. Audit exact standard/dialect matrices, independent hostile
     schema/secret cases, explicit quality commands, validation capability, and
     lossless RIGID/preservation/regression traceability before returning.
-11. Run, fix, and repeat until green:
-    - `contract validate .rb/evolutions/<slug>/PHASES.md`
-    - `operations validate .rb/evolutions/<slug>/OPERATIONS.json` when emitted
-    - `manifest sync .`
-    - `tree validate .`
-12. Report freshness, changed/preserved/deprecated/unknown counts, impact and
-    regression coverage, assumptions, blockers, artifact paths, and validation.
-    Never edit application code or commit.
+11. The orchestrator runs every deterministic validator after your call; produce documents that already satisfy them, and never claim to have run a command. They cover `rb-execution/v1`, `rb-operational/v1`, the manifest, and
+    the whole tree.
+12. State freshness, changed/preserved/deprecated/unknown counts, impact and
+    regression coverage, assumptions, and blockers in the bundle summary.
+    Never edit application code, run a command, or commit.
 
 These resources are loaded by the standalone executable. Generated documents
 must not depend on the location of this resource tree or any plugin host.

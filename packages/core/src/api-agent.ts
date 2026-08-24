@@ -3,7 +3,15 @@ import { randomBytes } from "node:crypto";
 import { chmod, mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { stdin, stdout } from "node:process";
-import { executeApiAgentTool, apiAgentToolDefinitions, type ApiAgentRole, type ApiAgentToolContext } from "./api-agent-tools.js";
+import {
+  apiAgentToolDefinitions,
+  createToolGovernor,
+  executeApiAgentTool,
+  isDocumentationRole,
+  type ApiAgentRole,
+  type ApiAgentToolContext,
+} from "./api-agent-tools.js";
+import { HARNESS_BUDGET } from "./harness-budget.js";
 import { resolveCredential } from "./credential-store.js";
 import { directProvider, type DirectProviderId } from "./provider-registry.js";
 
@@ -21,6 +29,7 @@ export interface DirectApiAgentOptions {
 }
 
 interface UsageTotals {
+  requests: number;
   inputTokens: number;
   cachedInputTokens: number;
   cacheCreationInputTokens: number;
@@ -40,6 +49,7 @@ function number(value: unknown): number {
 }
 
 function addOpenAiUsage(totals: UsageTotals, usage: Record<string, unknown> | undefined): void {
+  totals.requests += 1;
   if (!usage) return;
   const details = usage.prompt_tokens_details as Record<string, unknown> | undefined;
   totals.inputTokens += number(usage.prompt_tokens ?? usage.input_tokens);
@@ -49,6 +59,7 @@ function addOpenAiUsage(totals: UsageTotals, usage: Record<string, unknown> | un
 }
 
 function addAnthropicUsage(totals: UsageTotals, usage: Record<string, unknown> | undefined): void {
+  totals.requests += 1;
   if (!usage) return;
   totals.inputTokens += number(usage.input_tokens);
   totals.cachedInputTokens += number(usage.cache_read_input_tokens);
@@ -64,6 +75,25 @@ async function atomicJson(path: string, value: unknown): Promise<void> {
   await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
   await rename(temporary, path);
   await chmod(path, 0o600).catch(() => undefined);
+}
+
+/**
+ * Report what the provider actually measured. The Harness never invents a
+ * token count or a price: an adapter that reports no usage stays unmeasured.
+ */
+async function writeHarnessUsage(usage: UsageTotals, toolCalls: number): Promise<void> {
+  const path = process.env.RB_HARNESS_USAGE_FILE;
+  if (!path) return;
+  await atomicJson(resolve(path), {
+    schema: "rb-harness-usage/v1",
+    requests: usage.requests,
+    inputTokens: usage.inputTokens,
+    cachedInputTokens: usage.cachedInputTokens,
+    cacheCreationInputTokens: usage.cacheCreationInputTokens,
+    outputTokens: usage.outputTokens,
+    totalTokens: usage.totalTokens,
+    toolCalls,
+  }).catch(() => undefined);
 }
 
 async function writeTelemetry(options: DirectApiAgentOptions, usage: UsageTotals): Promise<void> {
@@ -88,14 +118,15 @@ async function writeTelemetry(options: DirectApiAgentOptions, usage: UsageTotals
 function systemInstruction(options: DirectApiAgentOptions): string {
   const permission = options.role === "ralph-agent"
     ? "You are the implementation executor. You may inspect, edit, and run commands through the provided local tools."
-    : options.role === "harness-generation"
-      ? "You are the documentation writer in an isolated snapshot. You may write only under .rb through the provided local tools."
+    : isDocumentationRole(options.role)
+      ? "You are a read-only documentation analyst. You may list, search, and read bounded ranges of the target project; you cannot edit files, run commands, start subagents, or execute the project. Documents are delivered in your final answer envelope, never written to disk."
       : "You are an independent read-only analyst. You may inspect with tools but cannot edit or execute commands.";
   return [
     "You are running inside the RB local API agent runtime.",
     permission,
     "The model itself has no filesystem access. Use the supplied tools for every repository fact or change; never invent tool results.",
     "Project-relative paths are required. Never request credentials, environment-secret files, .git internals, or orchestrator-owned run state.",
+    "Gather only the evidence the task needs; the tool budget is finite and repeated identical calls are refused.",
     "Complete the full requested task before returning a final answer. Keep the final answer protocol from the user prompt exact.",
   ].join(" ");
 }
@@ -251,6 +282,12 @@ export async function probeDirectProvider(options: DirectProviderProbeOptions): 
   };
 }
 
+/**
+ * The tool catalog is computed once per session and never mutated. Mode
+ * restrictions are execution rules enforced inside the tools, not opportunistic
+ * schema edits: a catalog that changes between steps invalidates the provider
+ * prefix cache on every turn and silently multiplies input cost.
+ */
 function openAiTools(context: ApiAgentToolContext): unknown[] {
   return apiAgentToolDefinitions(context).map((tool) => ({
     type: "function",
@@ -259,11 +296,18 @@ function openAiTools(context: ApiAgentToolContext): unknown[] {
 }
 
 function anthropicTools(context: ApiAgentToolContext): unknown[] {
-  return apiAgentToolDefinitions(context).map((tool) => ({
+  const tools = apiAgentToolDefinitions(context).map((tool) => ({
     name: tool.name,
     description: tool.description,
     input_schema: tool.inputSchema,
   }));
+  // Cache the stable system + tool prefix; new evidence enters append-only.
+  const last = tools.at(-1);
+  return last ? [...tools.slice(0, -1), { ...last, cache_control: { type: "ephemeral" } }] : tools;
+}
+
+function maximumTurns(role: ApiAgentRole): number {
+  return isDocumentationRole(role) ? HARNESS_BUDGET.tools.maxCalls : 80;
 }
 
 function parseObject(value: unknown): Record<string, unknown> {
@@ -271,15 +315,25 @@ function parseObject(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+const READ_ONLY_TOOLS = new Set(["list_files", "read_file", "search_text"]);
+
+/**
+ * Independent reads run concurrently; anything that can mutate state stays
+ * strictly sequential. Results are always returned in the model's original
+ * call order so the transcript — and therefore the cache prefix — is
+ * deterministic regardless of completion order.
+ */
 async function executeCalls(context: ApiAgentToolContext, calls: ToolCall[]): Promise<Array<{ call: ToolCall; output: string }>> {
-  const results: Array<{ call: ToolCall; output: string }> = [];
-  for (const call of calls) {
-    process.stderr.write(`[rb-api] ferramenta ${call.name}\n`);
-    let output: string;
-    try { output = await executeApiAgentTool(context, call.name, call.input); }
-    catch (error) { output = `ERROR: ${error instanceof Error ? error.message : String(error)}`; }
-    results.push({ call, output });
+  const run = async (call: ToolCall): Promise<{ call: ToolCall; output: string }> => {
+    process.stderr.write(`[rb-tool] ${call.name}\n`);
+    try { return { call, output: await executeApiAgentTool(context, call.name, call.input) }; }
+    catch (error) { return { call, output: `ERROR: ${error instanceof Error ? error.message : String(error)}` }; }
+  };
+  if (calls.length > 1 && calls.every((call) => READ_ONLY_TOOLS.has(call.name))) {
+    return Promise.all(calls.map(run));
   }
+  const results: Array<{ call: ToolCall; output: string }> = [];
+  for (const call of calls) results.push(await run(call));
   return results;
 }
 
@@ -288,17 +342,22 @@ async function runOpenAiDialect(
   headers: Record<string, string>,
   context: ApiAgentToolContext,
   usage: UsageTotals,
+  counters: { toolCalls: number },
 ): Promise<string> {
   const definition = directProvider(options.provider);
+  // Byte-stable prefix: system instruction, prompt, and tool catalog are
+  // serialized once; every later turn only appends to `messages`.
+  const tools = openAiTools(context);
   const messages: Array<Record<string, unknown>> = [
     { role: "system", content: systemInstruction(options) },
     { role: "user", content: options.prompt },
   ];
-  for (let turn = 1; turn <= 80; turn += 1) {
+  const turns = maximumTurns(options.role);
+  for (let turn = 1; turn <= turns; turn += 1) {
     const body: Record<string, unknown> = {
       model: options.model,
       messages,
-      tools: openAiTools(context),
+      tools,
       tool_choice: "auto",
       stream: false,
     };
@@ -328,11 +387,12 @@ async function runOpenAiDialect(
       if (!content.trim()) throw new Error(`provider stopped without a final response (finish_reason=${String(choice.finish_reason ?? "unknown")})`);
       return content;
     }
+    counters.toolCalls += calls.length;
     for (const result of await executeCalls(context, calls)) {
       messages.push({ role: "tool", tool_call_id: result.call.id, content: result.output });
     }
   }
-  throw new Error("direct API agent exceeded 80 tool-use turns");
+  throw new Error(`direct API agent exceeded ${turns} tool-use turns`);
 }
 
 async function runAnthropicDialect(
@@ -340,15 +400,19 @@ async function runAnthropicDialect(
   headers: Record<string, string>,
   context: ApiAgentToolContext,
   usage: UsageTotals,
+  counters: { toolCalls: number },
 ): Promise<string> {
+  const tools = anthropicTools(context);
+  const system = [{ type: "text", text: systemInstruction(options), cache_control: { type: "ephemeral" } }];
   const messages: Array<Record<string, unknown>> = [{ role: "user", content: options.prompt }];
-  for (let turn = 1; turn <= 80; turn += 1) {
+  const turns = maximumTurns(options.role);
+  for (let turn = 1; turn <= turns; turn += 1) {
     const body: Record<string, unknown> = {
       model: options.model,
       max_tokens: 32768,
-      system: systemInstruction(options),
+      system,
       messages,
-      tools: anthropicTools(context),
+      tools,
     };
     if (options.effort) body.output_config = { effort: options.effort };
     const payload = await requestJson(directProvider(options.provider).endpoint, {
@@ -368,13 +432,14 @@ async function runAnthropicDialect(
       if (!text.trim()) throw new Error(`Anthropic stopped without a final text response (stop_reason=${String(payload.stop_reason ?? "unknown")})`);
       return text;
     }
+    counters.toolCalls += calls.length;
     const results = await executeCalls(context, calls);
     messages.push({
       role: "user",
       content: results.map((result) => ({ type: "tool_result", tool_use_id: result.call.id, content: result.output })),
     });
   }
-  throw new Error("direct Anthropic agent exceeded 80 tool-use turns");
+  throw new Error(`direct Anthropic agent exceeded ${turns} tool-use turns`);
 }
 
 export async function runDirectApiAgent(options: DirectApiAgentOptions): Promise<string> {
@@ -390,18 +455,22 @@ export async function runDirectApiAgent(options: DirectApiAgentOptions): Promise
     permissionMode: options.permissionMode,
     artifactDirectory: options.artifactDirectory,
     evidenceDirectory: options.evidenceDirectory,
+    ...(isDocumentationRole(options.role) ? { governor: createToolGovernor() } : {}),
   };
   const auth = await authorization(options);
-  const usage: UsageTotals = { inputTokens: 0, cachedInputTokens: 0, cacheCreationInputTokens: 0, outputTokens: 0, totalTokens: 0 };
+  const counters = { toolCalls: 0 };
+  const usage: UsageTotals = { requests: 0, inputTokens: 0, cachedInputTokens: 0, cacheCreationInputTokens: 0, outputTokens: 0, totalTokens: 0 };
   try {
     const definition = directProvider(options.provider);
     const result = definition.dialect === "anthropic-messages"
-      ? await runAnthropicDialect(options, auth.headers, context, usage)
-      : await runOpenAiDialect(options, auth.headers, context, usage);
+      ? await runAnthropicDialect(options, auth.headers, context, usage, counters)
+      : await runOpenAiDialect(options, auth.headers, context, usage, counters);
     await writeTelemetry(options, usage);
+    await writeHarnessUsage(usage, counters.toolCalls);
     return result;
   } catch (error) {
     await writeTelemetry(options, usage).catch(() => undefined);
+    await writeHarnessUsage(usage, counters.toolCalls).catch(() => undefined);
     throw error;
   }
 }
