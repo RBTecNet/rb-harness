@@ -26,7 +26,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.3.11 is an executable rather than a workflow that must run inside
+RB Harness 0.3.12 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -47,7 +47,7 @@ the current shell. Verify the exact installed build with:
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.3.11
+# Both print 0.3.12
 ```
 
 Run without arguments to start the wizard:
@@ -376,6 +376,38 @@ path is embedded into the documentation.
 
 ## Review and generated-plan quality gates
 
+Generation uses one writer and no manager loop. A separate operator-invoked
+verification command is available when a fresh second opinion is useful before
+RB Ralph:
+
+```bash
+rb-harness artifacts verify \
+  --project . \
+  --artifacts-dir .rb \
+  --against docs/original-request.md \
+  --provider codex --model gpt-5.6-sol --effort high \
+  --dashboard
+```
+
+The verifier never edits or republishes artifacts. It first checks manifest
+schema, hashes, execution/operational contracts, ready-plan discovery, cold
+phase context paths, and task-reference integrity. Mechanical blockers stop
+before the provider starts, so a broken tree does not spend verification
+tokens. A mechanically usable tree receives one fresh, read-only, exhaustive
+semantic audit against the original request, matching Harness interview
+decisions, project source, and public workflow/headless authorities. If the
+provider violates the audit JSON protocol, it receives at most one format-only
+correction attempt; findings never trigger a writer/manager repair loop.
+
+`--against` is optional when the matching completed Harness run remains in
+`.rb-harness/runs`, and recommended for imported or regenerated packages.
+`--deterministic-only` performs a token-free preflight. Reports use the
+`rb-harness-artifact-verification/v1` contract and are stored with mode `0600`
+under `.rb-harness/verifications/` unless `--report` selects another path.
+Exit `0` means Ralph-ready (possibly with minor warnings), `2` means material
+repairable findings, `3` means a real unresolved developer decision, and `1`
+means the verifier/provider itself failed.
+
 Version 0.1.1 strengthens generation and deterministic validation around the
 failure modes found in cross-model execution trials:
 
@@ -465,6 +497,9 @@ rb-harness tree resolve . --format tsv
 rb-harness tree validate . --artifacts-dir .spec
 rb-harness tree resolve . --artifacts-dir .spec --format tsv
 rb-harness inspect .
+rb-harness artifacts verify --project . --artifacts-dir .rb --against request.md \
+  --provider codex --model gpt-5.6-sol --effort high
+rb-harness artifacts verify --project . --artifacts-dir .rb --deterministic-only --json
 ```
 
 `tree resolve --format tsv` reads `.rb/rb-manifest.json` by default and emits a

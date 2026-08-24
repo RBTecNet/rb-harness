@@ -15,6 +15,7 @@ import { finishHarnessDashboard, startHarnessDashboard } from "./harness-dashboa
 import { HARNESS_VERSION } from "./version.js";
 import { printProviderList, runProviderTestCommand } from "./provider-cli.js";
 import { listRunStates } from "./harness-state.js";
+import { artifactVerificationExitCode, formatArtifactVerification, verifyArtifacts } from "./artifact-verifier.js";
 import { runHarnessWizard } from "./harness-wizard.js";
 import {
   defaultRequestForWorkflow,
@@ -74,6 +75,7 @@ program
     "  rb-harness plan --file change.md --provider codex --model gpt-5.6-sol --effort high",
     "  rb-harness review --project . --provider claude --model opus --output .rb",
     "  rb-harness provider test          Test a configured API through the guided wizard",
+    "  rb-harness artifacts verify       Verify whether generated artifacts are safe for Ralph",
     "  rb-harness status --project .     Summarize existing artifacts and resumable runs",
   ].join("\n"));
 
@@ -410,16 +412,19 @@ program
     }
   });
 
-interface WorkflowCliOptions {
-  prompt?: string;
-  file?: string;
-  project: string;
-  output: string;
+interface ProviderCliOptions {
   provider: string;
   model: string;
   effort: string;
   credential?: string;
   adapter?: string;
+}
+
+interface WorkflowCliOptions extends ProviderCliOptions {
+  prompt?: string;
+  file?: string;
+  project: string;
+  output: string;
   answers?: string;
   questions: string;
   nonInteractive?: boolean;
@@ -465,7 +470,7 @@ function applyWorkflowControls(workflow: HarnessWorkflow, request: string, optio
   return controls.length ? `${request}\n\nRB Harness operator controls (authoritative):\n- ${controls.join("\n- ")}` : request;
 }
 
-function providerConfiguration(options: WorkflowCliOptions): ProviderConfiguration {
+function providerConfiguration(options: ProviderCliOptions): ProviderConfiguration {
   if (!isCliProvider(options.provider) && !isDirectProvider(options.provider)) {
     throw new Error(`--provider must be one of: ${PROVIDER_HELP}`);
   }
@@ -683,6 +688,59 @@ artifacts
   .action(async (options: { project: string; output: string; json?: boolean }) => {
     const inventory = await inspectProjectInventory(resolve(options.project), options.output);
     process.stdout.write(options.json ? `${JSON.stringify(inventory, null, 2)}\n` : `${formatProjectInventory(inventory)}\n`);
+  });
+
+artifacts
+  .command("verify")
+  .description("Run deterministic and one-pass semantic readiness checks without editing artifacts")
+  .option("--project <path>", "project root", ".")
+  .option("--artifacts-dir <dir>", "physical artifact directory relative to the project", ".rb")
+  .option("--against <path>", "authoritative original request file; a matching Harness run is used by default")
+  .option("--provider <name>", PROVIDER_HELP, process.env.RB_HARNESS_PROVIDER ?? "codex")
+  .option("--model <id>", "provider model ID", process.env.RB_HARNESS_MODEL ?? "")
+  .option("--effort <level>", "provider reasoning effort", process.env.RB_HARNESS_EFFORT ?? "")
+  .option("--credential <id-or-label>", "saved credential selector for a direct API provider")
+  .option("--adapter <path>", "custom headless adapter executable")
+  .option("--deterministic-only", "skip the semantic provider audit")
+  .option("--timeout <seconds>", "semantic provider wall timeout; 0 disables", "3600")
+  .option("--first-output-timeout <seconds>", "semantic provider first-output timeout; 0 disables", "300")
+  .option("--report <path>", "report path relative to the project; defaults under .rb-harness/verifications")
+  .option("--json", "emit rb-harness-artifact-verification/v1 JSON")
+  .option("--dashboard", "show the live Harness terminal dashboard")
+  .action(async (options: ProviderCliOptions & {
+    project: string;
+    artifactsDir: string;
+    against?: string;
+    deterministicOnly?: boolean;
+    timeout: string;
+    firstOutputTimeout: string;
+    report?: string;
+    json?: boolean;
+    dashboard?: boolean;
+  }) => {
+    const timeoutSeconds = Number(options.timeout);
+    const firstOutputTimeoutSeconds = Number(options.firstOutputTimeout);
+    if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 0) throw new Error("--timeout must be a non-negative integer");
+    if (!Number.isInteger(firstOutputTimeoutSeconds) || firstOutputTimeoutSeconds < 0) {
+      throw new Error("--first-output-timeout must be a non-negative integer");
+    }
+    if (options.dashboard) startHarnessDashboard(HARNESS_VERSION);
+    try {
+      const report = await verifyArtifacts({
+        projectRoot: resolve(options.project),
+        artifactDirectory: options.artifactsDir,
+        againstFile: options.against,
+        provider: providerConfiguration(options),
+        deterministicOnly: Boolean(options.deterministicOnly),
+        timeoutSeconds,
+        firstOutputTimeoutSeconds,
+        reportPath: options.report,
+      });
+      process.stdout.write(options.json ? `${JSON.stringify(report, null, 2)}\n` : `${formatArtifactVerification(report)}\n`);
+      process.exitCode = artifactVerificationExitCode(report);
+    } finally {
+      if (options.dashboard) finishHarnessDashboard();
+    }
   });
 
 async function main(): Promise<void> {

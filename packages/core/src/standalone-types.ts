@@ -63,6 +63,7 @@ export interface InterviewAnalysis {
 
 export interface ArtifactAuditFinding {
   id: string;
+  severity?: "blocker" | "major" | "minor";
   category:
     | "ambiguity"
     | "contradiction"

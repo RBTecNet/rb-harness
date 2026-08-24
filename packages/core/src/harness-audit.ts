@@ -33,12 +33,15 @@ function requiredString(value: unknown, label: string, max = 20_000): string {
 function parseFinding(value: unknown): ArtifactAuditFinding {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("artifact audit finding must be an object");
   const finding = value as Record<string, unknown>;
-  const allowed = new Set(["id", "category", "artifact", "criterion", "evidence", "requiredChange"]);
+  const allowed = new Set(["id", "severity", "category", "artifact", "criterion", "evidence", "requiredChange"]);
   for (const key of Object.keys(finding)) if (!allowed.has(key)) throw new Error(`unsupported artifact audit finding field: ${key}`);
   const id = requiredString(finding.id, "artifact audit finding id", 120);
   if (!FINDING_ID.test(id)) throw new Error(`artifact audit finding has invalid id: ${id}`);
   if (!CATEGORIES.has(finding.category as ArtifactAuditFinding["category"])) {
     throw new Error(`artifact audit finding ${id} has an invalid category`);
+  }
+  if (finding.severity !== undefined && !(new Set(["blocker", "major", "minor"])).has(String(finding.severity))) {
+    throw new Error(`artifact audit finding ${id} has an invalid severity`);
   }
   const artifact = requiredString(finding.artifact, `artifact audit finding ${id}.artifact`, 500);
   if (!artifact.startsWith(".rb/") || artifact.startsWith(".rb/runs/") || artifact.includes("\0") || artifact.split("/").includes("..")) {
@@ -46,6 +49,7 @@ function parseFinding(value: unknown): ArtifactAuditFinding {
   }
   return {
     id,
+    ...(finding.severity ? { severity: finding.severity as ArtifactAuditFinding["severity"] } : {}),
     category: finding.category as ArtifactAuditFinding["category"],
     artifact,
     criterion: requiredString(finding.criterion, `artifact audit finding ${id}.criterion`, 500),
@@ -121,10 +125,15 @@ function acceptedDecisions(answers: InterviewAnswer[]): Array<{ questionId: stri
     .map((answer) => ({ questionId: answer.questionId, decision: answer.normalizedDecision }));
 }
 
-function auditPrompt(state: HarnessRunState, resources: string, repair?: string): string {
+function auditPrompt(
+  state: HarnessRunState,
+  resources: string,
+  artifactDirectory: string,
+  repair?: string,
+): string {
   return [
     "You are the independent RB Harness artifact quality auditor running in a fresh, read-only context.",
-    "Read the complete generated .rb artifact tree, excluding .rb/runs. Do not write files, implement code, or trust the writer's completion claim.",
+    `Read the complete generated artifact tree at ${artifactDirectory}, excluding runtime run state. Manifest paths remain logical .rb/... paths even when the physical directory is relocated. Do not write files, implement code, or trust the writer's completion claim.`,
     "Audit the whole tree and return every material finding in one batch. Group examples that share one invariant into one root-cause finding; do not emit one finding per paraphrase or stop at the first failure.",
     "Judge only execution safety, internal consistency, source fidelity, proofability, traceability, and bounded task design. Do not report optional prose or style preferences.",
     "A RIGID requirement or binary criterion is invalid when deterministic code would need to infer an unbounded natural-language meaning without an exact grammar, typed field, finite authority, or an explicitly declared classifier with a versioned decision/failure contract. Examples and keyword lists are not an exhaustive grammar unless the accepted decision explicitly makes them exhaustive.",
@@ -133,6 +142,7 @@ function auditPrompt(state: HarnessRunState, resources: string, repair?: string)
     "Use status revise whenever the writer can repair the artifacts from accepted sources or select a safest compatible engineering detail. Missing commands, incomplete contracts, implementation mechanisms, schemas, task boundaries, tests, and other technical design work are revise findings, not developer blockers.",
     "Use blocked only when the accepted request and decisions leave at least two incompatible product-observable outcomes and do not authorize choosing between them. A blocked result must ask one direct developer question, explain why existing sources cannot answer it, and provide two to five distinct alternatives. Never use blocked merely because the repair is large or because the current draft invented an unsupported mechanism.",
     "Use pass only when no material finding remains.",
+    "Classify severity as blocker only when Ralph cannot implement safely without inventing a product or integration authority, major when the artifacts materially increase failure/retry/regression risk, and minor when the issue is real but execution remains safe.",
     "Finding IDs identify invariant root causes and must remain stable across a repair. requiredChange must describe the invariant to establish, not a patch for the quoted example.",
     `Return exactly ${BEGIN}, one JSON object, and ${END}. Do not use Markdown fences or surrounding prose.`,
     "The JSON shape is:",
@@ -142,6 +152,7 @@ function auditPrompt(state: HarnessRunState, resources: string, repair?: string)
       summary: "whole-tree verdict",
       findings: [{
         id: "stable.root-cause-id",
+        severity: "blocker | major | minor",
         category: "ambiguity | contradiction | proofability | regression-coverage | source-authority | task-boundary | traceability",
         artifact: ".rb/path/file.md",
         criterion: "requirement, criterion, or section identifier",
@@ -167,6 +178,7 @@ export async function requestArtifactAudit(
   pass: number,
   timeoutSeconds: number,
   firstOutputTimeoutSeconds: number,
+  artifactDirectory = state.artifactDirectory,
 ): Promise<ArtifactAudit> {
   const resources = await loadWorkflowResources(state.workflow, {
     includeHeadlessContracts: requestNeedsHeadlessContracts(state.request),
@@ -177,7 +189,7 @@ export async function requestArtifactAudit(
       configuration: state.provider as ProviderConfiguration,
       mode: "audit",
       projectRoot: workspace,
-      prompt: auditPrompt(state, resources, repair),
+      prompt: auditPrompt(state, resources, artifactDirectory, repair),
       logPath: resolve(runRoot, `logs/artifact-audit-pass-${pass}-protocol-${attempt}.log`),
       timeoutSeconds,
       firstOutputTimeoutSeconds,

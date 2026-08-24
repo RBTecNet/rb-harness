@@ -80,6 +80,28 @@ try {
     (await readFile(resolve(project, ".rb/features/standalone-test/PHASES.md"), "utf8")).includes("rb-execution/v1"),
     "Packed standalone command did not complete a workflow through a bin symlink",
   );
+  const verification = execFileSync(process.execPath, [
+    launcher,
+    "--no-splash",
+    "artifacts", "verify",
+    "--project", project,
+    "--artifacts-dir", ".rb",
+    "--provider", "custom",
+    "--adapter", fixtureProvider,
+    "--model", "fixture-model",
+    "--effort", "high",
+    "--timeout", "30",
+    "--first-output-timeout", "5",
+    "--json",
+  ], {
+    cwd: project,
+    env: { ...process.env, RB_HARNESS_SPLASH: "0" },
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const verificationReport = JSON.parse(verification);
+  assert(verificationReport.contract === "rb-harness-artifact-verification/v1", "Packed verifier emitted an unexpected contract");
+  assert(verificationReport.readyForRalph === true, "Packed verifier did not approve its valid generated fixture");
   console.log(`OK: packed standalone includes every workflow and runs through an installed bin symlink (${packResult[0].filename}).`);
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });

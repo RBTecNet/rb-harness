@@ -178,6 +178,33 @@ still resumable. Their complete staged tree is revalidated by the current
 deterministic gates, old audit rows remain historical metadata, and no writer or
 auditor is called again.
 
+Use the optional verifier after generation and before RB Ralph when the change
+is large, an authority changed after the original interview, or the package was
+produced elsewhere:
+
+```bash
+rb-harness artifacts verify \
+  --project . \
+  --artifacts-dir .rb \
+  --against docs/original-request.md \
+  --provider codex --model gpt-5.6-sol --effort high
+```
+
+This is not a generation manager. It never repairs artifacts and never loops
+with the writer. Deterministic failures stop before a provider call; a
+mechanically usable tree receives one exhaustive read-only semantic audit,
+with at most one format-only correction if the provider violates the JSON
+protocol. The report is persisted below `.rb-harness/verifications/`, with exit
+`0` for safe, `2` for repairable material findings, and `3` for a real product
+decision.
+
+For a token-free CI/preflight check:
+
+```bash
+rb-harness artifacts verify --project . --artifacts-dir .rb \
+  --deterministic-only --json
+```
+
 Agentic generation transcripts are byte-counted and bounded at 128 MiB;
 interview responses remain bounded at 32 MiB. Exceeding
 a role limit or timeout stops the provider and every discovered descendant,

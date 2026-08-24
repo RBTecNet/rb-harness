@@ -15,4 +15,5 @@ export * from "./standalone-types.js";
 export * from "./harness-inventory.js";
 export * from "./harness-provider.js";
 export * from "./harness-audit.js";
+export * from "./artifact-verifier.js";
 export * from "./standalone-runner.js";
