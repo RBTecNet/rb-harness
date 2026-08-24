@@ -15,7 +15,7 @@ autoria semântica acontece exatamente uma vez.
 
 ## Instalação do executável
 
-O RB Harness 0.4.0 exige Node.js 20 ou superior. No clone do repositório:
+O RB Harness 0.4.1 exige Node.js 20 ou superior. No clone do repositório:
 
 ```bash
 npm install
@@ -34,7 +34,7 @@ Confira a versão instalada:
 ```bash
 rb-harness --version
 rb-harness --ver
-# 0.4.0
+# 0.4.1
 ```
 
 Executar apenas `rb-harness` abre o assistente interativo. O splash com a
@@ -137,13 +137,24 @@ ponta: ele é dono do catálogo de ferramentas, conta cada chamada e reporta o
 usage devolvido pelo provider. Uma CLI externa roda o próprio loop de agente, e o
 Harness declara explicitamente o que consegue ou não medir:
 
-| Adapter | Eventos estruturados | Orçamento de turns/tools | Métricas de uso | Confinamento de leitura |
-|---|---|---|---|---|
-| APIs diretas | aplicado localmente | aplicado | reportado quando o provider devolve `usage` | aplicado em processo |
-| `opencode` | consumido via `run --format json` | aplicado | não reportado pela CLI — não medido | nenhum |
-| `codex` | `exec --json` anunciado, não consumido | não alegado | não medido | nenhum |
-| `claude` | `--output-format stream-json` anunciado, não consumido | não alegado | não medido | nenhum |
-| `custom` | nada declarado | não alegado | não medido | nenhum |
+| Adapter | Controle interno | Orçamento de turns/tools | Métricas de uso | Confinamento de leitura | Transporte do stdout |
+|---|---|---|---|---|---|
+| APIs diretas | aplicado localmente | aplicado | reportado quando o provider devolve `usage` | aplicado em processo | texto final |
+| `opencode` | consumido via `run --format json` | aplicado | não reportado pela CLI — não medido | nenhum | eventos JSONL |
+| `codex` | `exec --json` anunciado, não consumido | não alegado | não medido | nenhum | texto final |
+| `claude` | `--output-format stream-json` anunciado, não consumido | não alegado | não medido | nenhum | texto final |
+| `custom` | nada declarado | não alegado | não medido | nenhum | texto final |
+
+Controle e transporte são colunas separadas porque são fatos separados. Um
+provider de API direta roda pelo runtime embutido, que é dono do catálogo de
+ferramentas, conta cada chamada, reporta o usage real do provider e confina
+leituras — ele é de fato controlado. Mesmo assim, o que esse runtime escreve no
+stdout é uma coisa só: a resposta final do modelo, envelope incluído. Apenas o
+`opencode`, cujo stream de eventos JSONL o Harness realmente consome, tem a
+resposta final reconstruída a partir de eventos; o stdout de qualquer outro
+adapter é entregue ao parser de envelopes byte a byte. Cada log de execução
+registra `stdout_transport=final-text` ou `stdout_transport=jsonl-events`, então
+a distinção fica visível por execução.
 
 Cada declaração foi lida do `--help` de uma versão instalada localmente, não
 inventada. Um adapter cujo stream o Harness não consome é governado apenas por
@@ -378,6 +389,11 @@ rb-harness status --project .
 rb-harness resume --project .
 rb-harness resume <run-id> --project .
 ```
+
+Uma resposta do provider que chegou ao log da execução é evidência autoritativa:
+o log registra exatamente os bytes que o provider escreveu. Um envelope válido
+quando foi gravado continua recuperável no resume, mesmo que a execução que o
+produziu tenha falhado depois.
 
 Os checkpoints duráveis separam entrevista concluída, pacote documental
 recebido, materialização, validação e publicação. Uma resposta completa do

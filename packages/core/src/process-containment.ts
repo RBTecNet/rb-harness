@@ -20,7 +20,7 @@
  * as best-effort for the same reason.
  */
 
-import { mkdirSync, readFileSync, rmdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmdirSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 
@@ -82,6 +82,29 @@ function nonStructural(kind: ContainmentKind, reason: string): TreeContainment {
   };
 }
 
+/**
+ * Whether a failure to read `cgroup.procs` positively proves the cgroup holds
+ * no process.
+ *
+ * Only a missing directory does: the kernel refuses to remove a cgroup that
+ * still has members, so its absence is evidence of emptiness. A permission or
+ * I/O failure proves nothing at all and must not be read as an empty tree.
+ */
+export function cgroupAbsenceProven(code: string | undefined): boolean {
+  return code === "ENOENT" || code === "ENODEV";
+}
+
+/**
+ * Whether a `kill(pid, 0)` failure proves the creating process is gone.
+ *
+ * Only `ESRCH` does. `EPERM` means the process is alive and owned by someone
+ * else, and any other error means the probe itself failed — reaping on either
+ * would destroy the containment of a run that is still starting up.
+ */
+export function creatorProvenGone(code: string | undefined): boolean {
+  return code === "ESRCH";
+}
+
 function cgroupContainment(directory: string): TreeContainment {
   let destroyed = false;
   return {
@@ -102,15 +125,18 @@ function cgroupContainment(directory: string): TreeContainment {
       };
     },
     members(): number[] | undefined {
+      // Absence is only reported when it is positively established: this
+      // containment was torn down, or the cgroup directory is gone — and a
+      // cgroup can only be removed once it holds no process. Anything else
+      // (EACCES, EIO, a remount) is a failure to observe, not an empty tree.
       if (destroyed) return [];
       try {
         return readFileSync(resolve(directory, "cgroup.procs"), "utf8")
           .split("\n")
           .map((line) => Number(line.trim()))
           .filter((pid) => Number.isInteger(pid) && pid > 0);
-      } catch {
-        // The directory is gone, which means the cgroup is empty and removed.
-        return [];
+      } catch (error) {
+        return cgroupAbsenceProven((error as NodeJS.ErrnoException).code) ? [] : undefined;
       }
     },
     killAll(): boolean {
@@ -170,6 +196,43 @@ export function detectContainmentSupport(): ContainmentSupport {
 }
 
 /**
+ * Remove empty cgroups left by a Harness process that died without running its
+ * own cleanup — a `SIGKILL`, a crash, a killed CI worker. Only directories
+ * whose creating PID is gone and that hold no process are removed, so a
+ * concurrent run is never disturbed.
+ */
+function reapAbandonedCgroups(parent: string): void {
+  let entries: string[];
+  try {
+    entries = readdirSync(parent);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const owner = entry.match(/^rb-harness-(\d+)-[0-9a-f]+$/)?.[1];
+    if (!owner) continue;
+    if (Number(owner) === process.pid) continue;
+    try {
+      process.kill(Number(owner), 0);
+      continue; // Its creator is still running; leave it alone.
+    } catch (error) {
+      // Only ESRCH proves the creator no longer exists. EPERM means it is
+      // alive and owned by someone else, and any other error means we simply
+      // could not tell — in both cases the cgroup stays, because removing one
+      // belonging to a starting run would destroy its containment.
+      if (!creatorProvenGone((error as NodeJS.ErrnoException).code)) continue;
+    }
+    try {
+      // `rmdir` refuses a cgroup that still has members, which is the guard
+      // that keeps this from touching a live tree.
+      rmdirSync(resolve(parent, entry));
+    } catch {
+      // Still populated, or removed by someone else. Either way, not ours.
+    }
+  }
+}
+
+/**
  * Create the strongest containment this platform allows. Falls back to the
  * declared non-structural mechanism whenever the cgroup subtree is not
  * writable — a container, a restricted session, or a non-delegated slice.
@@ -179,12 +242,25 @@ export function createTreeContainment(): TreeContainment {
   if (support.kind !== "cgroup2") return nonStructural(support.kind, support.reason);
   const own = currentCgroupPath();
   if (!own) return nonStructural("process-group", "no cgroup v2 unified hierarchy for this process");
-  const directory = resolve(CGROUP_ROOT, `.${own}`, `rb-harness-${process.pid}-${randomBytes(4).toString("hex")}`);
+  const parent = resolve(CGROUP_ROOT, `.${own}`);
+  reapAbandonedCgroups(parent);
+  const directory = resolve(parent, `rb-harness-${process.pid}-${randomBytes(4).toString("hex")}`);
+  let created = false;
   try {
     mkdirSync(directory, { recursive: false });
+    created = true;
     // Prove the control files are usable before promising containment.
     readFileSync(resolve(directory, "cgroup.procs"), "utf8");
   } catch (error) {
+    // A directory that was created but cannot be used is not containment; it
+    // would linger as an unusable cgroup, so it is removed before falling back.
+    if (created) {
+      try {
+        rmdirSync(directory);
+      } catch {
+        // Nothing more can be done; it holds no process either way.
+      }
+    }
     return nonStructural(
       "process-group",
       `the cgroup v2 subtree is not writable (${error instanceof Error ? error.message : String(error)}); `

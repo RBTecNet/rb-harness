@@ -34,10 +34,15 @@ export interface ProcessTreeSpawnOptions extends SpawnOptions {
  * of the parent chain, so absence really means absence.
  */
 export interface SettleOutcome {
+  /**
+   * Whether the tree's membership could be determined at all. When false,
+   * `quiescent` and `survivors` carry no information: nothing was observed.
+   */
+  observed: boolean;
   quiescent: boolean;
   verified: boolean;
   containment: ContainmentSupport;
-  /** Members still alive, when the mechanism can tell. */
+  /** Members still alive. Meaningful only when `observed` is true. */
   survivors: number[];
 }
 
@@ -72,6 +77,8 @@ export interface ProcessTreeHandle {
   terminateForHostExit(): void;
   /** Stop tracking this tree once the caller has confirmed quiescence. */
   dispose(): void;
+  /** Whether this tree needs the periodic process-table sample. */
+  samplesProcessTable(): boolean;
 }
 
 export interface ProcessRow {
@@ -91,15 +98,22 @@ function sleep(milliseconds: number): Promise<void> {
   });
 }
 
-/** One process-table snapshot; an empty list means the table was unreadable. */
-export function readProcessTable(): ProcessRow[] {
-  if (process.platform === "win32") return [];
+/**
+ * One process-table snapshot, or `undefined` when the table could not be read.
+ *
+ * The distinction is the whole point. `ps` can fail — a timeout or a buffer
+ * overflow on a loaded machine — and an empty result is then indistinguishable
+ * from "nothing is running". Reporting that as an empty table turned a missing
+ * observation into a claim that the tree was gone.
+ */
+export function readProcessTable(): ProcessRow[] | undefined {
+  if (process.platform === "win32") return undefined;
   const listed = spawnSync("ps", ["-axo", "pid=,ppid=,pgid=,stat="], {
     encoding: "utf8",
     timeout: 4_000,
     maxBuffer: 8 * 1024 * 1024,
   });
-  if (listed.status !== 0 || !listed.stdout) return [];
+  if (listed.status !== 0 || !listed.stdout) return undefined;
   const rows: ProcessRow[] = [];
   for (const line of listed.stdout.split("\n")) {
     const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(\S+)/);
@@ -119,7 +133,7 @@ export function readProcessTable(): ProcessRow[] {
  * transitive descendant that escaped it. Unreaped zombies are excluded — they
  * still answer `kill(0)` but can execute no work.
  */
-export function liveTreeMembers(rootPid: number, rows = readProcessTable()): number[] {
+export function liveTreeMembers(rootPid: number, rows: ProcessRow[] = readProcessTable() ?? []): number[] {
   const children = new Map<number, number[]>();
   const byPid = new Map<number, ProcessRow>();
   for (const row of rows) {
@@ -186,7 +200,7 @@ export function spawnProcessTree(
   let disposed = false;
 
   const rememberMembers = (rows = readProcessTable()): number[] => {
-    if (!rootPid || process.platform === "win32") return [];
+    if (!rootPid || process.platform === "win32" || rows === undefined) return [];
     const members = liveTreeMembers(rootPid, rows);
     for (const pid of members) {
       if (pid === rootPid) continue;
@@ -202,7 +216,11 @@ export function spawnProcessTree(
    * meantime, which is precisely how a detached survivor escapes.
    */
   const startSampling = (): void => {
-    if (process.platform === "win32" || !rootPid) return;
+    // Structural containment enumerates membership directly, so the remembered
+    // set is never consulted. Sampling anyway would spawn a `ps` ten times a
+    // second per run, burning processes and contending for the very table the
+    // fallback path depends on.
+    if (process.platform === "win32" || !rootPid || containment.structural) return;
     sampler = setInterval(() => {
       if (disposed) return;
       rememberMembers();
@@ -237,11 +255,16 @@ export function spawnProcessTree(
       signalPid(rootPid, signal);
     }
     const targets = new Set(members);
+    // Without a readable table a remembered PID cannot be confirmed to still be
+    // the process we saw, and signalling it could hit an unrelated process that
+    // inherited the number. The group signal above is then as far as this goes,
+    // and the teardown reports that it proved nothing.
     for (const [pid, groupId] of remembered) {
+      if (rows === undefined) break;
       const row = rows.find((entry) => entry.pid === pid);
       // Only signal a remembered PID that still exists in the group we saw it
       // in. Anything else is a recycled PID belonging to someone else.
-      if (rows.length && (!row || row.groupId !== groupId)) continue;
+      if (!row || row.groupId !== groupId) continue;
       targets.add(pid);
     }
     for (const pid of targets) {
@@ -250,32 +273,63 @@ export function spawnProcessTree(
     }
   };
 
-  const members = (): number[] => {
+  const leaderRunning = (): boolean => child.exitCode === null && child.signalCode === null;
+
+  /**
+   * Observe the tree. `known: false` means the membership could not be
+   * determined at all — never that it is empty.
+   */
+  const observe = (): { known: true; members: number[] } | { known: false } => {
     // A structural mechanism enumerates the real membership, including a
     // descendant that changed session and lost every link to the leader.
     const contained = containment.members();
-    if (contained !== undefined) return [...contained].sort((left, right) => left - right);
-    if (!rootPid) return [];
+    if (contained !== undefined) {
+      return { known: true, members: [...contained].sort((left, right) => left - right) };
+    }
+    // A structural mechanism that cannot answer leaves the tree unobserved.
+    // The process table is not a substitute: its whole weakness is that it
+    // cannot see a descendant that left the parental relationship, which is
+    // exactly what structural containment exists to catch.
+    if (containment.structural) return { known: false };
+    if (!rootPid) return { known: true, members: [] };
     if (process.platform === "win32") {
-      return child.exitCode === null && child.signalCode === null ? [rootPid] : [];
+      // The direct child's exit is the only observable boundary here, and
+      // taskkill /T has already walked the tree with it.
+      return { known: true, members: leaderRunning() ? [rootPid] : [] };
     }
     const rows = readProcessTable();
-    if (!rows.length) return child.exitCode === null && child.signalCode === null ? [rootPid] : [];
+    if (rows === undefined) {
+      // The leader is still ours to see through the child handle; anything
+      // beyond it is unknown, and unknown is not empty.
+      return leaderRunning() ? { known: true, members: [rootPid] } : { known: false };
+    }
     const live = new Set(liveTreeMembers(rootPid, rows));
     for (const [pid, groupId] of remembered) {
       const row = rows.find((entry) => entry.pid === pid);
       if (row && !row.zombie && row.groupId === groupId) live.add(pid);
     }
-    return [...live].sort((left, right) => left - right);
+    return { known: true, members: [...live].sort((left, right) => left - right) };
   };
 
-  const alive = (): boolean => members().length > 0;
+  /** Best-effort membership for logging and callers; unknown reads as empty. */
+  const members = (): number[] => {
+    const observation = observe();
+    return observation.known ? observation.members : [];
+  };
+
+  // An unknown observation counts as alive: the ladder must keep escalating
+  // rather than conclude success from a missing measurement.
+  const alive = (): boolean => {
+    const observation = observe();
+    return observation.known ? observation.members.length > 0 : true;
+  };
 
   const handle: ProcessTreeHandle = {
     pid: rootPid,
     child,
     containment: { kind: containment.kind, structural: containment.structural, reason: containment.reason },
     liveMembers: members,
+    samplesProcessTable: () => sampler !== undefined,
     sample(): void {
       if (!disposed) rememberMembers();
     },
@@ -293,13 +347,25 @@ export function spawnProcessTree(
         clearInterval(sampler);
         sampler = undefined;
       }
-      const survivors = members();
+      const observation = observe();
+      const survivors = observation.known ? observation.members : [];
+      // Quiescence is a positive finding, not the absence of one: an
+      // unobservable tree proves nothing and is never an empty one.
+      const quiescent = observation.known && survivors.length === 0;
       return {
-        quiescent: survivors.length === 0,
+        observed: observation.known,
+        quiescent,
         // Absence only proves absence when membership is enumerable
         // independently of the parent chain.
-        verified: containment.structural && survivors.length === 0,
-        containment: declared,
+        verified: containment.structural && quiescent,
+        containment: observation.known
+          ? declared
+          : {
+            ...declared,
+            reason: `${declared.reason}; ${containment.structural
+              ? "the cgroup could not be observed"
+              : "the process table could not be read"}, so the teardown proved nothing`,
+          },
         survivors,
       };
     },

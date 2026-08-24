@@ -7,9 +7,15 @@ import { isDirectProvider } from "./provider-registry.js";
 import { emitHarnessDashboard, harnessDashboardActive } from "./harness-dashboard.js";
 import { HARNESS_BUDGET } from "./harness-budget.js";
 import { spawnProcessTree, type SettleOutcome } from "./process-tree.js";
-import { describeContainment, detectContainmentSupport } from "./process-containment.js";
-import { describeAdapterControl, describeReadConfinement, isControlledAdapter } from "./provider-capabilities.js";
+import { describeContainment, detectContainmentSupport, type TreeContainment } from "./process-containment.js";
+import {
+  describeAdapterControl,
+  describeReadConfinement,
+  providerCapabilities,
+  usesStructuredStdout,
+} from "./provider-capabilities.js";
 import { ProviderStreamObserver, type StreamAccounting, type StreamDialect } from "./provider-events.js";
+import type { StdoutTransport } from "./provider-capabilities.js";
 import {
   emptyUsage,
   harnessTelemetry,
@@ -31,6 +37,8 @@ export interface ProviderRunOptions {
   streamMode?: "structured" | "opaque";
   /** Test override for the adapter's event dialect. */
   streamDialect?: StreamDialect;
+  /** Test seam: force a specific process-tree containment mechanism. */
+  containment?: TreeContainment;
   projectRoot: string;
   prompt: string;
   logPath: string;
@@ -45,9 +53,9 @@ export interface ProviderRunOptions {
 export interface ProviderRunResult {
   exitCode: number;
   /**
-   * The transcript used for envelope extraction. For a controlled adapter this
-   * is the text recovered from its event stream; for an opaque one it is the
-   * raw stdout.
+   * The transcript used for envelope extraction. For an event transport this
+   * is the text recovered from the stream; for a final-text transport it is
+   * the raw stdout, unchanged.
    */
   stdout: string;
   /** Raw stdout exactly as the adapter wrote it, for the log. */
@@ -58,6 +66,8 @@ export interface ProviderRunResult {
   usage: ProviderUsage;
   /** What the Harness could actually account for on this adapter. */
   stream: StreamAccounting;
+  /** The format this adapter actually wrote to stdout. */
+  stdoutTransport: StdoutTransport;
   /** What the teardown could actually prove about the process tree. */
   settlement: SettleOutcome;
 }
@@ -191,6 +201,7 @@ async function writeProviderLog(
   diagnostic?: string,
   stream?: StreamAccounting,
   settlementRecord?: SettleOutcome,
+  stdoutTransport?: StdoutTransport,
 ): Promise<void> {
   await writeFile(options.logPath, [
     `provider=${options.configuration.provider}`,
@@ -200,6 +211,7 @@ async function writeProviderLog(
     `stage=${options.stage}`,
     `exit_code=${result.exitCode}`,
     `first_output_ms=${result.firstOutputMilliseconds ?? "none"}`,
+    ...(stdoutTransport ? [`stdout_transport=${stdoutTransport}`] : []),
     ...(stream
       ? [
         `stream_mode=${stream.mode}${stream.degraded ? " (degraded to unmeasured)" : ""}`,
@@ -212,6 +224,7 @@ async function writeProviderLog(
       ? [
         `tree_containment=${settlementRecord.containment.kind}`,
         `tree_containment_structural=${settlementRecord.containment.structural}`,
+        `tree_observed=${settlementRecord.observed}`,
         `tree_quiescent=${settlementRecord.quiescent}`,
         `tree_quiescence_verified=${settlementRecord.verified}`,
       ]
@@ -273,15 +286,30 @@ export async function runProvider(options: ProviderRunOptions): Promise<Provider
   let failure: string | undefined;
   let toolCalls = 0;
   let settlement: SettleOutcome | undefined;
-  const controlled = options.streamMode
+  // An adapter's internal control (tool budget, measured usage, read
+  // confinement — see `isControlledAdapter`) says nothing about the format it
+  // writes to stdout. The bundled direct-API runtime is fully controlled *and*
+  // writes plain final text; conflating the two made the observer read an
+  // envelope's own `{` as an event and flatten it, turning a complete paid
+  // response into "malformed JSON". Only the transport decides parsing.
+  const structuredStdout = options.streamMode
     ? options.streamMode === "structured"
-    : isControlledAdapter(options.configuration.provider);
+    : usesStructuredStdout(options.configuration.provider);
+  const transport = structuredStdout ? "jsonl-events" : "final-text";
   const observer = new ProviderStreamObserver({
-    mode: controlled ? "structured" : "opaque",
-    dialect: options.streamDialect ?? (options.configuration.provider === "opencode" ? "opencode" : "generic"),
+    mode: structuredStdout ? "structured" : "opaque",
+    dialect: options.streamDialect
+      ?? (providerCapabilities(options.configuration.provider).stdoutTransport === "jsonl-events"
+        && options.configuration.provider === "opencode"
+        ? "opencode"
+        : "generic"),
   });
   if (!harnessDashboardActive()) {
     process.stderr.write(`[rb-harness] adapter ${options.configuration.provider}: ${describeAdapterControl(options.configuration.provider)}.\n`);
+    process.stderr.write(
+      `[rb-harness] transporte do stdout: ${transport}`
+      + `${structuredStdout ? " (a resposta final é reconstruída a partir dos eventos)" : " (a resposta final é entregue byte a byte)"}.\n`,
+    );
     process.stderr.write(`[rb-harness] ${describeContainment(detectContainmentSupport())}.\n`);
     process.stderr.write(`[rb-harness] ${describeReadConfinement(options.configuration.provider)}.\n`);
   }
@@ -289,6 +317,7 @@ export async function runProvider(options: ProviderRunOptions): Promise<Provider
     cwd: options.projectRoot,
     env: invocation.environment,
     stdio: ["pipe", "pipe", "pipe"],
+    ...(options.containment ? { containment: options.containment } : {}),
   });
   try {
     exitCode = await new Promise<number>((resolveRun, reject) => {
@@ -396,7 +425,15 @@ export async function runProvider(options: ProviderRunOptions): Promise<Provider
       );
     }
     settlement = await handle.settle("provider run finished with live descendants");
-    if (!settlement.quiescent) {
+    if (!settlement.observed) {
+      // Nothing was observed, so there is no survivor count to report. Saying
+      // "0 descendants alive" here would be both false and reassuring.
+      process.stderr.write(
+        `[rb-harness] atenção: a árvore do provider não pôde ser verificada: ${settlement.containment.reason}.\n`,
+      );
+      failure ??= `the provider tree could not be verified after the teardown ladder: ${settlement.containment.reason}`;
+      exitCode = exitCode === 0 ? 70 : exitCode;
+    } else if (!settlement.quiescent) {
       process.stderr.write(
         `[rb-harness] atenção: ${settlement.survivors.length} descendente(s) do provider não confirmaram encerramento dentro da janela.\n`,
       );
@@ -423,7 +460,10 @@ export async function runProvider(options: ProviderRunOptions): Promise<Provider
   const stream = observer.report();
   const usage = usagePath ? await readUsageFile(usagePath) : emptyUsage();
   // Tool counts are only claimed where they were actually observed.
-  if (!usage.toolCalls) usage.toolCalls = toolCalls || (controlled ? stream.toolEvents : 0);
+  // Stream-derived tool counts are only claimed when a structured stream was
+  // actually parsed; a controlled adapter reports its own through the usage
+  // file, which is authoritative and already read above.
+  if (!usage.toolCalls) usage.toolCalls = toolCalls || (structuredStdout ? stream.toolEvents : 0);
   if (stream.degraded && !harnessDashboardActive()) {
     process.stderr.write(
       `[rb-harness] o adapter ${options.configuration.provider} não emitiu eventos estruturados; `
@@ -434,16 +474,19 @@ export async function runProvider(options: ProviderRunOptions): Promise<Provider
   const durationMilliseconds = Date.now() - started;
   const result: ProviderRunResult = {
     exitCode,
-    // A controlled adapter's envelope lives inside its events; an opaque one
-    // writes it straight to stdout.
-    stdout: controlled && stream.events > 0 ? observer.recoveredText() : stdout,
+    // Only an event transport has an answer to reconstruct. A final-text
+    // transport is returned byte for byte, so the envelope parser sees exactly
+    // what the provider wrote.
+    stdout: structuredStdout && stream.events > 0 ? observer.recoveredText() : stdout,
     rawStdout: stdout,
     stderr,
     ...(firstOutputAt ? { firstOutputMilliseconds: firstOutputAt - started } : {}),
     durationMilliseconds,
     usage,
     stream,
+    stdoutTransport: transport,
     settlement: settlement ?? {
+      observed: true,
       quiescent: true,
       verified: false,
       containment: handle.containment,
@@ -462,7 +505,7 @@ export async function runProvider(options: ProviderRunOptions): Promise<Provider
     ...(firstOutputAt ? { firstOutputMilliseconds: firstOutputAt - started } : {}),
     usage,
   });
-  await writeProviderLog(options, invocation.environment, { ...result, stdout }, failure, stream, result.settlement);
+  await writeProviderLog(options, invocation.environment, { ...result, stdout }, failure, stream, result.settlement, transport);
   emitHarnessDashboard({
     type: "provider-end",
     exitCode,

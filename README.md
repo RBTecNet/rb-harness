@@ -28,7 +28,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.4.0 is an executable rather than a workflow that must run inside
+RB Harness 0.4.1 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -49,7 +49,7 @@ the current shell. Verify the exact installed build with:
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.4.0
+# Both print 0.4.1
 ```
 
 Run without arguments to start the wizard:
@@ -280,13 +280,24 @@ end: it owns the tool catalog, counts every call, and reports the usage the
 provider returned. An external CLI runs its own agent loop, so the Harness
 states plainly what it can and cannot account for:
 
-| Adapter | Structured events | Turn/tool budget | Usage metrics | Read confinement |
-|---|---|---|---|---|
-| direct APIs | enforced locally | enforced | reported when the provider returns `usage` | enforced in process |
-| `opencode` | consumed via `run --format json` | enforced | not reported by the CLI — unmeasured | none |
-| `codex` | `exec --json` advertised, not consumed | not claimed | unmeasured | none |
-| `claude` | `--output-format stream-json` advertised, not consumed | not claimed | unmeasured | none |
-| `custom` | none declared | not claimed | unmeasured | none |
+| Adapter | Internal control | Turn/tool budget | Usage metrics | Read confinement | stdout transport |
+|---|---|---|---|---|---|
+| direct APIs | enforced locally | enforced | reported when the provider returns `usage` | enforced in process | final text |
+| `opencode` | consumed via `run --format json` | enforced | not reported by the CLI — unmeasured | none | JSONL events |
+| `codex` | `exec --json` advertised, not consumed | not claimed | unmeasured | none | final text |
+| `claude` | `--output-format stream-json` advertised, not consumed | not claimed | unmeasured | none | final text |
+| `custom` | none declared | not claimed | unmeasured | none | final text |
+
+Control and transport are separate columns because they are separate facts. A
+direct API provider runs through the bundled runtime, which owns the tool
+catalog, counts every call, reports the provider's real usage, and confines
+reads — it is genuinely controlled. What that runtime writes to stdout is
+nonetheless one thing: the model's final answer, envelope included. Only
+`opencode`, whose JSONL event stream the Harness actually consumes, has its
+final answer reconstructed from events; every other adapter's stdout is handed
+to the envelope parser byte for byte. Each provider log records
+`stdout_transport=final-text` or `stdout_transport=jsonl-events` so the
+distinction is visible per run.
 
 Every declaration was read from the `--help` of a locally installed version, not
 guessed. An adapter whose event stream the Harness does not consume is governed
@@ -361,6 +372,11 @@ validation fails, the private workspace remains checkpointed. Resume
 revalidates that exact staged tree and proceeds to publication without paying
 for a second writer call. The workspace is regenerated only when no complete
 checkpoint can be proven.
+
+A provider response that reached the run log is authoritative evidence: the log
+records the exact bytes the provider wrote. If an envelope was valid when it was
+written, it stays recoverable on resume even when the run that produced it
+failed afterwards.
 
 On resume, the Harness also first revalidates any successful interview provider response that
 was already written to the private run log. If the current protocol accepts

@@ -25,6 +25,7 @@ import { parseDocumentBundle } from "../src/harness-documents.js";
 import { spawnProcessTree, trackedProcessTrees } from "../src/process-tree.js";
 import { currentCgroupPath, describeContainment, detectContainmentSupport } from "../src/process-containment.js";
 import { acquireHarnessLock } from "../src/harness-state.js";
+import { isExecutable } from "./support/process-liveness.js";
 import { HARNESS_BUDGET } from "../src/harness-budget.js";
 import { parseInterviewAnalysis } from "../src/harness-interview.js";
 import { createToolGovernor, executeApiAgentTool } from "../src/api-agent-tools.js";
@@ -48,14 +49,12 @@ const snoopingProvider = resolve(fixtures, "snooping-provider.mjs");
 const escapingProvider = resolve(fixtures, "escaping-provider.mjs");
 const fakeProvider = resolve(fixtures, "fake-provider.mjs");
 
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
+/**
+ * A process that can still execute work. Deliberately not `kill(pid, 0)`,
+ * which also succeeds for a zombie awaiting reaping — see
+ * `test/support/process-liveness.ts`.
+ */
+const alive = isExecutable;
 
 function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds));
@@ -142,6 +141,39 @@ describe.skipIf(process.platform === "win32")("CR-001 · a descendant that escap
     } finally {
       delete process.env.RB_HARNESS_TEST_TREE_PID_FILE;
     }
+  }, 60_000);
+
+  it("never reports zero survivors for a tree it could not observe", async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), "rb-harness-unobserved-"));
+    await chmod(fakeProvider, 0o755);
+    // A structural mechanism that cannot answer: the run is unobserved, and
+    // "0 descendant process(es) alive" would be both false and reassuring.
+    await expect(runProvider({
+      configuration: { provider: "custom", model: "fixture", effort: "", command: fakeProvider },
+      mode: "interview",
+      stage: "gap-analysis",
+      projectRoot: directory,
+      prompt: "fixture prompt",
+      logPath: resolve(directory, "provider.log"),
+      timeoutSeconds: 20,
+      firstOutputTimeoutSeconds: 5,
+      containment: {
+        kind: "cgroup2",
+        structural: true,
+        reason: "fixture cgroup that cannot be observed",
+        wrap: (command, args) => ({ command, args }),
+        members: () => undefined,
+        killAll: () => false,
+        destroy: () => undefined,
+      },
+    })).rejects.toThrow(/tree could not be verified[\s\S]*could not be observed/);
+
+    const log = await readFile(resolve(directory, "provider.log"), "utf8");
+    expect(log).toMatch(/^tree_observed=false$/m);
+    expect(log).toMatch(/^tree_quiescent=false$/m);
+    expect(log).toMatch(/^tree_quiescence_verified=false$/m);
+    // The false, reassuring phrasing must be gone entirely.
+    expect(log).not.toContain("left 0 descendant");
   }, 60_000);
 
   it("declares what the platform can and cannot guarantee", () => {
