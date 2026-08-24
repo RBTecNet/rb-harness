@@ -106,6 +106,16 @@ export async function validateGeneratedWorkspace(workspace: string, workflow: Ha
     throw new Error(`generated artifact tree is invalid: ${details}`);
   }
   if (!workflowArtifactReady(workflow, manifest.artifacts)) {
+    const declaredBlockers = manifest.artifacts
+      .filter((artifact) => artifact.status === "blocked" || basename(artifact.path).toUpperCase() === "BLOCKED.MD")
+      .map((artifact) => artifact.path)
+      .slice(0, 3);
+    if (declaredBlockers.length) {
+      throw new Error(
+        `generated workflow explicitly declared BLOCKED in ${declaredBlockers.join(", ")}; `
+        + `the required ready output for workflow ${workflow} was not emitted`,
+      );
+    }
     throw new Error(`generated artifacts do not contain the required ready output for workflow ${workflow}`);
   }
   return {

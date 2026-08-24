@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rbtecnologia.net.br/contracts/rb-headless-init-v1.schema.json",
+  "title": "RB Headless Init v1",
+  "oneOf": [{ "$ref": "#/$defs/request" }, { "$ref": "#/$defs/result" }],
+  "$defs": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "relativePath": {
+      "type": "string", "minLength": 1, "maxLength": 240,
+      "pattern": "^[^/\\\\\\u0000]+(?:/[^/\\\\\\u0000]+){0,15}$",
+      "$comment": "Paths are NFC-normalized and compared with Unicode lowercase by the contract validator.",
+      "allOf": [{ "not": { "pattern": "^[A-Za-z]:" } }, { "not": { "pattern": "(^|/)\\.\\.?(/|$)" } }]
+    },
+    "resource": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "kind", "label", "sha256"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" }, "kind": { "enum": ["reference", "attachment"] },
+        "label": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "reference": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "path": { "$ref": "#/$defs/relativePath" },
+        "mediaType": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "bytes": { "type": "integer", "minimum": 0, "maximum": 10485760 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      },
+      "oneOf": [
+        { "properties": { "kind": { "const": "attachment" } }, "required": ["path", "mediaType", "bytes"], "not": { "required": ["reference"] } },
+        { "properties": { "kind": { "const": "reference" } }, "required": ["reference"], "not": { "anyOf": [{ "required": ["path"] }, { "required": ["mediaType"] }, { "required": ["bytes"] }] } }
+      ]
+    },
+    "specification": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "title", "description", "decisions", "metadata", "snapshotHash", "resources"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" }, "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 100000 },
+        "decisions": { "type": "array", "maxItems": 200, "items": { "type": "string", "minLength": 1, "maxLength": 4000 } },
+        "metadata": { "type": "object", "maxProperties": 100 }, "snapshotHash": { "$ref": "#/$defs/sha256" },
+        "resources": {
+          "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/resource" },
+          "allOf": [{
+            "contains": { "type": "object", "required": ["kind"], "properties": { "kind": { "const": "attachment" } } },
+            "minContains": 0, "maxContains": 20
+          }],
+          "$comment": "The validator enforces the request-wide 100 attachment and 100 MiB aggregate limits. JSON Schema cannot sum numeric values across nested arrays."
+        }
+      }
+    },
+    "answer": {
+      "type": "object", "additionalProperties": false,
+      "required": ["questionId", "question", "answer", "disposition"],
+      "properties": {
+        "questionId": { "$ref": "#/$defs/id" }, "question": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "answer": { "type": "string", "minLength": 1, "maxLength": 10000 }, "disposition": { "const": "accepted" }
+      }
+    },
+    "request": {
+      "type": "object", "additionalProperties": false,
+      "required": ["contract", "kind", "requestId", "workflow", "projectKind", "project", "artifactSet", "revision", "specifications", "additionalInstructions", "interviewAnswers"],
+      "properties": {
+        "contract": { "const": "rb-headless-init/v1" }, "kind": { "const": "request" }, "requestId": { "$ref": "#/$defs/id" },
+        "workflow": { "const": "init" }, "projectKind": { "const": "new" },
+        "project": {
+          "type": "object", "additionalProperties": false, "required": ["id", "name", "description", "metadata"],
+          "properties": {
+            "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$", "maxLength": 100 },
+            "name": { "type": "string", "minLength": 1, "maxLength": 200 }, "description": { "type": "string", "minLength": 1, "maxLength": 10000 },
+            "metadata": { "type": "object", "maxProperties": 100 }
+          }
+        },
+        "artifactSet": {
+          "type": "object", "additionalProperties": false, "required": ["id", "name", "description", "strategy"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" }, "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "description": { "type": "string", "maxLength": 10000 }, "strategy": { "type": "string", "maxLength": 10000 }
+          }
+        },
+        "revision": {
+          "type": "object", "additionalProperties": false, "required": ["id", "number", "createdAt"],
+          "properties": { "id": { "$ref": "#/$defs/id" }, "number": { "type": "integer", "minimum": 1 }, "createdAt": { "type": "string", "format": "date-time" } }
+        },
+        "specifications": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/specification" } },
+        "additionalInstructions": { "type": "string", "maxLength": 20000 }, "interviewAnswers": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/answer" } }
+      }
+    },
+    "validation": {
+      "type": "object", "additionalProperties": false, "required": ["name", "passed", "exitCode"],
+      "properties": {
+        "name": { "enum": ["request", "paths", "contract", "operations", "manifest", "tree", "secrets"] },
+        "passed": { "type": "boolean" }, "exitCode": { "type": "integer" }, "diagnosticCode": { "type": "string", "maxLength": 200 }
+      }
+    },
+    "file": {
+      "type": "object", "additionalProperties": false, "required": ["path", "bytes", "sha256", "mediaType"],
+      "properties": {
+        "path": { "$ref": "#/$defs/relativePath" }, "bytes": { "type": "integer", "minimum": 0, "maximum": 5242880 },
+        "sha256": { "$ref": "#/$defs/sha256" }, "mediaType": { "type": "string", "minLength": 1, "maxLength": 200 }
+      }
+    },
+    "result": {
+      "type": "object", "additionalProperties": false,
+      "required": ["contract", "kind", "requestId", "requestHash", "status", "harness", "adapter", "files", "validations", "startedAt", "finishedAt"],
+      "properties": {
+        "contract": { "const": "rb-headless-init/v1" }, "kind": { "const": "result" }, "requestId": { "$ref": "#/$defs/id" }, "requestHash": { "$ref": "#/$defs/sha256" },
+        "status": { "enum": ["ready", "invalid", "failed"] },
+        "harness": { "type": "object", "additionalProperties": false, "required": ["version", "sha256"], "properties": { "version": { "type": "string", "minLength": 1, "maxLength": 100 }, "sha256": { "$ref": "#/$defs/sha256" } } },
+        "adapter": { "type": "object", "additionalProperties": false, "required": ["id", "version", "provider", "model"], "properties": { "id": { "$ref": "#/$defs/id" }, "version": { "type": "string", "minLength": 1, "maxLength": 100 }, "provider": { "type": "string", "minLength": 1, "maxLength": 120 }, "model": { "type": "string", "minLength": 1, "maxLength": 160 } } },
+        "files": {
+          "type": "array", "maxItems": 2000, "items": { "$ref": "#/$defs/file" },
+          "$comment": "The validator enforces 100 MiB aggregate output bytes and normalized-path collision detection."
+        },
+        "validations": { "type": "array", "minItems": 1, "maxItems": 7, "items": { "$ref": "#/$defs/validation" } },
+        "diagnosticCode": { "type": "string", "maxLength": 200 }, "startedAt": { "type": "string", "format": "date-time" }, "finishedAt": { "type": "string", "format": "date-time" }
+      },
+      "allOf": [{
+        "if": { "required": ["status"], "properties": { "status": { "const": "ready" } } },
+        "then": {
+          "properties": {
+            "files": { "minItems": 1 },
+            "validations": {
+              "minItems": 7, "maxItems": 7,
+              "items": { "allOf": [{ "$ref": "#/$defs/validation" }, { "properties": { "passed": { "const": true }, "exitCode": { "const": 0 } } }] },
+              "allOf": [
+                { "contains": { "properties": { "name": { "const": "request" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+                { "contains": { "properties": { "name": { "const": "paths" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+                { "contains": { "properties": { "name": { "const": "contract" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+                { "contains": { "properties": { "name": { "const": "operations" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+                { "contains": { "properties": { "name": { "const": "manifest" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+                { "contains": { "properties": { "name": { "const": "tree" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+                { "contains": { "properties": { "name": { "const": "secrets" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 }
+              ]
+            }
+          }
+        },
+        "else": { "properties": { "files": { "maxItems": 0 } } }
+      }]
+    }
+  }
+}

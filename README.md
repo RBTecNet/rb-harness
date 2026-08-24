@@ -26,7 +26,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.3.4 is an executable rather than a workflow that must run inside
+RB Harness 0.3.7 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -47,7 +47,7 @@ the current shell. Verify the exact installed build with:
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.3.4
+# Both print 0.3.7
 ```
 
 Run without arguments to start the wizard:
@@ -226,6 +226,16 @@ On resume, the Harness first revalidates any successful provider response that
 was already written to the private run log. If the current protocol accepts
 it and it still matches the pending-answer state, the response is reused
 without spending another provider call.
+When the durable interview checkpoint is already `ready` and has no pending
+answer, resume skips interview analysis entirely and continues directly from
+artifact generation. A writer-declared `BLOCKED.md` or blocked plan is also
+reported by its artifact path instead of being collapsed into a generic
+missing-output error.
+Requests that integrate RB Harness itself receive the public
+`rb-headless-init/v1` and `rb-headless-interview/v1` authorities in the
+interview, writer, and independent-auditor contexts. Hosted products therefore
+cannot silently document generation while omitting the adaptive question and
+answer boundary.
 Interview adapters may omit `options` for `text` and `confirm` questions; the
 Harness normalizes the field to an empty list. Only `single-choice` questions
 may carry two to six choices, preventing protocol repair from inventing a
@@ -239,6 +249,29 @@ to each fresh interview call, reducing repeated repository discovery while
 keeping code and tests as source authority. If input is interrupted partway
 through a question batch, resume presents the unanswered questions before
 starting another provider call.
+
+Services such as RB Memory can use the same adaptive acceptance gate without
+scraping the interactive terminal or copying Harness prompts. The separate
+`rb-headless-interview/v1` boundary exposes durable JSON messages, one active
+question, explicit recommended-option flags, focused rejection, cursor-based
+resume, and idempotent answer submission:
+
+```bash
+rb-harness headless interview version
+rb-harness headless interview validate < message.json
+rb-harness headless interview run \
+  --state /srv/rb-memory/interviews \
+  --timeout 3600 --first-output-timeout 300 < message.json
+```
+
+An `interview_start` request carries a validated `rb-headless-init/v1` request
+projection and a capture hash. An `answer` carries the active sequence,
+question ID, cursor, and idempotency key. `interview_complete.acceptedAnswers`
+is already in the exact shape accepted by `headless init`; ambiguous, partial,
+contradicted, deferred, or pending answers cannot enter generation authority.
+State writes are atomic, dead-PID locks recover automatically, and repeating a
+committed answer returns its stored response after power loss. See
+`contracts/rb-headless-interview-v1.md` for the complete machine and exit codes.
 
 For automation, provide answers without opening a terminal:
 
@@ -275,7 +308,8 @@ Existing plugin-generated `.rb` trees, manifests, contracts, IDs, logical
 paths, and relocated physical artifact directories remain supported. The
 deterministic `contract`, `operations`, `project`, `manifest`, `tree`, and
 `inspect` commands are unchanged. `headless init` also retains its versioned
-Memory integration contract.
+Memory integration contract. The adaptive service boundary is additive as
+`headless interview`; it does not widen or reinterpret `rb-headless-init/v1`.
 
 The old Codex skills and Claude commands remain temporarily available as a
 transition adapter, but new work should use `rb-harness` directly. To install

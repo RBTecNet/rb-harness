@@ -7,7 +7,7 @@ import { inspectProjectInventory } from "./harness-inventory.js";
 import { artifactAuditFingerprint, requestArtifactAudit } from "./harness-audit.js";
 import { requestInterviewAnalysis } from "./harness-interview.js";
 import { runProvider } from "./harness-provider.js";
-import { loadWorkflowResources } from "./standalone-resources.js";
+import { loadWorkflowResources, requestNeedsHeadlessContracts } from "./standalone-resources.js";
 import {
   acquireHarnessLock,
   harnessRunRoot,
@@ -41,6 +41,13 @@ export function nextInterviewRound(
   if (state.activeInterviewRound) return state.activeInterviewRound;
   const legacyCompletedRounds = state.diagnostic === "interview exceeded six adaptive rounds" ? 6 : 0;
   return Math.max(state.interviewRound ?? 0, legacyCompletedRounds) + 1;
+}
+
+export function hasReadyInterviewCheckpoint(
+  state: Pick<HarnessRunState, "analysis" | "answers">,
+): boolean {
+  return state.analysis?.status === "ready"
+    && !state.answers.some((answer) => answer.disposition === "PENDING");
 }
 
 function hash(value: string): string {
@@ -231,7 +238,9 @@ async function generationPrompt(
   workspace: string,
   priorAudit?: ArtifactAuditRecord,
 ): Promise<string> {
-  const resources = await loadWorkflowResources(state.workflow);
+  const resources = await loadWorkflowResources(state.workflow, {
+    includeHeadlessContracts: requestNeedsHeadlessContracts(state.request),
+  });
   const decisions = state.answers.filter((answer) => answer.disposition === "ACCEPTED").map((answer) => ({
     questionId: answer.questionId,
     decision: answer.normalizedDecision,
@@ -397,9 +406,13 @@ export async function runStandaloneWorkflow(options: StandaloneRunOptions): Prom
       await writeRunState(state);
     }
     state.inventory = await inspectProjectInventory(projectRoot, state.artifactDirectory);
-    state.status = "interview";
-    await writeRunState(state);
-    await interview(state, runRoot, options);
+    if (hasReadyInterviewCheckpoint(state)) {
+      process.stdout.write("[rb-harness] checkpoint de entrevista pronto; retomando diretamente da geração.\n");
+    } else {
+      state.status = "interview";
+      await writeRunState(state);
+      await interview(state, runRoot, options);
+    }
     await generate(state, runRoot, options);
     return state;
   } catch (error) {

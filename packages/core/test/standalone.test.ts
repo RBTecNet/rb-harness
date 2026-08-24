@@ -7,9 +7,9 @@ import { artifactAuditFingerprint, parseArtifactAudit } from "../src/harness-aud
 import { providerInvocation, runProvider } from "../src/harness-provider.js";
 import { inspectProjectInventory } from "../src/harness-inventory.js";
 import { composeHarnessSplash, harnessBrand, renderHarnessSplashFrame } from "../src/harness-splash.js";
-import { resolveWorkflowResourceRoot } from "../src/standalone-resources.js";
-import { nextInterviewRound, normalizeInterviewAnswer, runStandaloneWorkflow } from "../src/standalone-runner.js";
-import { assertNoEnvironmentSecrets, prepareGenerationWorkspace, recoverInterruptedPublication } from "../src/harness-workspace.js";
+import { loadWorkflowResources, requestNeedsHeadlessContracts, resolveWorkflowResourceRoot } from "../src/standalone-resources.js";
+import { hasReadyInterviewCheckpoint, nextInterviewRound, normalizeInterviewAnswer, runStandaloneWorkflow } from "../src/standalone-runner.js";
+import { assertNoEnvironmentSecrets, prepareGenerationWorkspace, recoverInterruptedPublication, validateGeneratedWorkspace } from "../src/harness-workspace.js";
 import { validateManifestTree } from "../src/manifest.js";
 
 const fakeProvider = resolve(process.cwd(), "test/fixtures/standalone/fake-provider.mjs");
@@ -22,6 +22,24 @@ describe("standalone RB Harness", () => {
     expect(nextInterviewRound({ diagnostic: "interview exceeded six adaptive rounds" })).toBe(7);
     expect(nextInterviewRound({ interviewRound: 7 })).toBe(8);
     expect(nextInterviewRound({ interviewRound: 7, activeInterviewRound: 8 })).toBe(8);
+  });
+
+  it("reuses only a fully resolved ready interview checkpoint on resume", () => {
+    const ready = {
+      analysis: {
+        contract: "rb-harness-interview/v1" as const,
+        status: "ready" as const,
+        summary: "All material decisions are resolved.",
+        discoveries: [], assumptions: [], unresolved: [], answerReviews: [], questions: [],
+      },
+      answers: [{
+        questionId: "scope", question: "Scope?", rawAnswer: "Confirmed", normalizedDecision: "Confirmed",
+        disposition: "ACCEPTED" as const, answeredAt: new Date().toISOString(),
+      }],
+    };
+    expect(hasReadyInterviewCheckpoint(ready)).toBe(true);
+    expect(hasReadyInterviewCheckpoint({ ...ready, answers: [{ ...ready.answers[0]!, disposition: "PENDING" as const }] })).toBe(false);
+    expect(hasReadyInterviewCheckpoint({ ...ready, analysis: { ...ready.analysis, status: "needs_input" as const } })).toBe(false);
   });
 
   it("normalizes recommendation shortcuts and numbered choices before persistence", () => {
@@ -49,6 +67,16 @@ describe("standalone RB Harness", () => {
       workingDirectory: resolve(installation, "unrelated-project"),
       configuredRoot: "",
     })).toBe(packagedResources);
+  });
+
+  it("injects both public headless authorities for RB Harness integration requests", async () => {
+    expect(requestNeedsHeadlessContracts("Integrate the hosted service with RB Harness.")).toBe(true);
+    expect(requestNeedsHeadlessContracts("Plan an unrelated local command.")).toBe(false);
+    const resources = await loadWorkflowResources("evolve", { includeHeadlessContracts: true });
+    expect(resources).toContain("contracts/rb-headless-init-v1.md");
+    expect(resources).toContain("rb-headless-init/v1");
+    expect(resources).toContain("contracts/rb-headless-interview-v1.md");
+    expect(resources).toContain("rb-headless-interview/v1");
   });
 
   it("preserves the versioned RB wordmark and capybara mascot", () => {
@@ -210,6 +238,21 @@ describe("standalone RB Harness", () => {
     } finally {
       delete process.env.RB_HARNESS_TEST_SECRET;
     }
+  });
+
+  it("reports an explicit generated blocker instead of a generic missing-output error", async () => {
+    const workspace = await mkdtemp(resolve(tmpdir(), "rb-harness-declared-blocker-"));
+    await mkdir(resolve(workspace, ".rb/evolutions/example"), { recursive: true });
+    await writeFile(resolve(workspace, ".rb/rb-manifest.json"), `${JSON.stringify({
+      manifestVersion: "rb-manifest/v1",
+      project: { id: "blocked-fixture", name: "Blocked fixture" },
+      artifactRoot: ".rb",
+      generatedAt: new Date().toISOString(),
+      artifacts: [],
+    }, null, 2)}\n`, "utf8");
+    await writeFile(resolve(workspace, ".rb/evolutions/example/BLOCKED.md"), "# BLOCKED\n\nExternal contract is unavailable.\n", "utf8");
+    await expect(validateGeneratedWorkspace(workspace, "evolve"))
+      .rejects.toThrow("explicitly declared BLOCKED in .rb/evolutions/example/BLOCKED.md");
   });
 
   it("interviews headlessly, validates in isolation, publishes to a custom directory, and preserves prior artifacts", async () => {

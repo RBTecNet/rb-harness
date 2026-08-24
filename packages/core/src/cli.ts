@@ -1,8 +1,11 @@
 import { readFile } from "node:fs/promises";
+import { isUtf8 } from "node:buffer";
 import { resolve } from "node:path";
 import { Command } from "commander";
 import { writeEvidence } from "./evidence.js";
 import { HEADLESS_HARNESS_SHA256, HEADLESS_HARNESS_VERSION, runHeadlessInit } from "./headless-runner.js";
+import { HEADLESS_INTERVIEW_CONTRACT, validateHeadlessInterviewJson } from "./headless-interview-contract.js";
+import { runHeadlessInterview } from "./headless-interview-runner.js";
 import { formatProjectInventory, inspectProjectInventory } from "./harness-inventory.js";
 import { harnessBrand, playHarnessSplash } from "./harness-splash.js";
 import { logoutCredential, printCredentialList, runLoginWizard } from "./auth-cli.js";
@@ -275,6 +278,56 @@ headless
       process.stdin.once("end", () => resolveInput(Buffer.concat(chunks)));
     });
     const outcome = await runHeadlessInit({ input, outputRoot: options.output });
+    process.stdout.write(`${JSON.stringify(outcome.result)}\n`);
+    process.exitCode = outcome.exitCode;
+  });
+
+const headlessInterview = headless.command("interview").description("Run the durable adaptive interview contract");
+headlessInterview
+  .command("version")
+  .description("Print the versioned headless interview boundary identity as JSON")
+  .action(() => {
+    process.stdout.write(`${JSON.stringify({
+      contract: HEADLESS_INTERVIEW_CONTRACT,
+      version: HEADLESS_HARNESS_VERSION,
+      sha256: HEADLESS_HARNESS_SHA256,
+    })}\n`);
+  });
+headlessInterview
+  .command("validate")
+  .description("Validate one headless interview request or response from stdin")
+  .action(async () => {
+    const input = await new Promise<Buffer>((resolveInput, reject) => {
+      const chunks: Buffer[] = [];
+      process.stdin.on("data", (chunk: Buffer | string) => chunks.push(Buffer.from(chunk)));
+      process.stdin.once("error", reject);
+      process.stdin.once("end", () => resolveInput(Buffer.concat(chunks)));
+    });
+    const validation = isUtf8(input)
+      ? validateHeadlessInterviewJson(input.toString("utf8"))
+      : { valid: false, issues: [{ code: "headless.interview.encoding", message: "stdin must be valid UTF-8", severity: "error" as const, path: "$" }] };
+    process.stdout.write(`${JSON.stringify(validation)}\n`);
+    if (!validation.valid) process.exitCode = 2;
+  });
+headlessInterview
+  .command("run")
+  .requiredOption("--state <path>", "absolute durable interview state root")
+  .option("--timeout <seconds>", "adapter wall timeout", "3600")
+  .option("--first-output-timeout <seconds>", "adapter first output timeout", "300")
+  .description("Process one interview_start or answer message from stdin")
+  .action(async (options: { state: string; timeout: string; firstOutputTimeout: string }) => {
+    const input = await new Promise<Buffer>((resolveInput, reject) => {
+      const chunks: Buffer[] = [];
+      process.stdin.on("data", (chunk: Buffer | string) => chunks.push(Buffer.from(chunk)));
+      process.stdin.once("error", reject);
+      process.stdin.once("end", () => resolveInput(Buffer.concat(chunks)));
+    });
+    const timeoutSeconds = Number(options.timeout);
+    const firstOutputTimeoutSeconds = Number(options.firstOutputTimeout);
+    if (!Number.isFinite(timeoutSeconds) || timeoutSeconds < 0 || !Number.isFinite(firstOutputTimeoutSeconds) || firstOutputTimeoutSeconds < 0) {
+      throw new Error("headless interview timeouts must be non-negative numbers");
+    }
+    const outcome = await runHeadlessInterview({ input, stateRoot: options.state, timeoutSeconds, firstOutputTimeoutSeconds });
     process.stdout.write(`${JSON.stringify(outcome.result)}\n`);
     process.exitCode = outcome.exitCode;
   });

@@ -10,7 +10,7 @@ import { loadManifest, syncManifest, validateManifestTree, validateManifestValue
 import { validateOperationalJson } from "./operational-contract.js";
 import { buildHeadlessInitPrompt } from "./headless-prompt.js";
 
-export const HEADLESS_HARNESS_VERSION = "0.3.4";
+export const HEADLESS_HARNESS_VERSION = "0.3.7";
 export const HEADLESS_HARNESS_SHA256 = sha256Text(`rb-harness@${HEADLESS_HARNESS_VERSION}`);
 const VALIDATIONS = ["request", "paths", "contract", "operations", "manifest", "tree", "secrets"] as const;
 const SAFE_BASE_ENV = ["PATH", "LANG", "LC_ALL", "TZ"] as const;
@@ -25,7 +25,8 @@ const PUBLIC_OUTPUT_DIAGNOSTICS = new Set([
 ]);
 
 type Status = "ready" | "invalid" | "failed";
-type Adapter = { command: string; args: string[]; id: string; version: string; provider: string; model: string };
+export type HeadlessAdapter = { command: string; args: string[]; id: string; version: string; provider: string; model: string };
+type Adapter = HeadlessAdapter;
 
 export interface HeadlessRunOptions {
   input: string | Buffer;
@@ -40,16 +41,16 @@ export interface HeadlessRunResult {
   result: HeadlessInitDocument;
 }
 
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+export function canonicalHeadlessJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalHeadlessJson).join(",")}]`;
   if (value && typeof value === "object") {
     const record = value as Record<string, unknown>;
-    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalHeadlessJson(record[key])}`).join(",")}}`;
   }
   return JSON.stringify(value);
 }
 
-function configuredAdapter(environment: NodeJS.ProcessEnv): Adapter | undefined {
+export function configuredHeadlessAdapter(environment: NodeJS.ProcessEnv): Adapter | undefined {
   const command = environment.RB_HEADLESS_ADAPTER_COMMAND;
   const id = environment.RB_HEADLESS_ADAPTER_ID;
   const version = environment.RB_HEADLESS_ADAPTER_VERSION;
@@ -69,7 +70,7 @@ function configuredAdapter(environment: NodeJS.ProcessEnv): Adapter | undefined 
   return { command, args, id, version, provider, model };
 }
 
-function validAdapter(adapter: Adapter | undefined): adapter is Adapter {
+export function validHeadlessAdapter(adapter: Adapter | undefined): adapter is Adapter {
   return Boolean(adapter
     && adapter.command
     && Array.from(adapter.id).length <= 200 && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(adapter.id)
@@ -79,7 +80,7 @@ function validAdapter(adapter: Adapter | undefined): adapter is Adapter {
 }
 
 function safeAdapter(adapter: Adapter | undefined): Adapter {
-  return validAdapter(adapter)
+  return validHeadlessAdapter(adapter)
     ? adapter
     : { command: "", args: [], id: "unconfigured", version: "unknown", provider: "unconfigured", model: "unconfigured" };
 }
@@ -88,7 +89,7 @@ function redactPublicString(value: string, secretValues: string[], fallback: str
   return includesSecret(secretValues, value) ? fallback : value;
 }
 
-function publicAdapter(adapter: Adapter | undefined, secretValues: string[]): Adapter {
+export function publicHeadlessAdapter(adapter: Adapter | undefined, secretValues: string[]): Adapter {
   const safe = safeAdapter(adapter);
   return {
     command: "", args: [],
@@ -110,7 +111,7 @@ function result(
   files: Array<{ path: string; bytes: number; sha256: string; mediaType: string }> = [],
   secretValues: string[] = [],
 ): HeadlessInitDocument {
-  const safe = publicAdapter(adapter, secretValues);
+  const safe = publicHeadlessAdapter(adapter, secretValues);
   return {
     contract: "rb-headless-init/v1",
     kind: "result",
@@ -161,7 +162,11 @@ function outputDiagnostic(error: unknown): string {
   return PUBLIC_OUTPUT_DIAGNOSTICS.has(code) ? code : "output_invalid";
 }
 
-function allowlistedEnvironment(environment: NodeJS.ProcessEnv, adapter: Adapter, outputRoot: string, requestId: string): { env: NodeJS.ProcessEnv; secrets: string[] } {
+export function headlessAdapterEnvironment(
+  environment: NodeJS.ProcessEnv,
+  adapter: Adapter,
+  context: { requestId: string; mode: "generation" | "interview"; outputRoot?: string; interviewId?: string },
+): { env: NodeJS.ProcessEnv; secrets: string[] } {
   const allowed = new Set<string>(SAFE_BASE_ENV);
   const configured = environment.RB_HEADLESS_ENV_ALLOWLIST ?? "";
   for (const name of configured.split(",").map((entry) => entry.trim()).filter(Boolean)) {
@@ -181,19 +186,25 @@ function allowlistedEnvironment(environment: NodeJS.ProcessEnv, adapter: Adapter
     }
   }
   Object.assign(env, {
-    RB_HEADLESS_OUTPUT_ROOT: outputRoot,
-    RB_HEADLESS_REQUEST_ID: requestId,
+    RB_HEADLESS_REQUEST_ID: context.requestId,
+    RB_HEADLESS_MODE: context.mode,
     RB_HEADLESS_HARNESS_VERSION: HEADLESS_HARNESS_VERSION,
     RB_HEADLESS_ADAPTER_ID: adapter.id,
     RB_HEADLESS_ADAPTER_VERSION: adapter.version,
     RB_HEADLESS_ADAPTER_PROVIDER: adapter.provider,
     RB_HEADLESS_ADAPTER_MODEL: adapter.model,
   });
+  if (context.outputRoot) env.RB_HEADLESS_OUTPUT_ROOT = context.outputRoot;
+  if (context.interviewId) env.RB_HEADLESS_INTERVIEW_ID = context.interviewId;
   return { env, secrets };
 }
 
+function allowlistedEnvironment(environment: NodeJS.ProcessEnv, adapter: Adapter, outputRoot: string, requestId: string): { env: NodeJS.ProcessEnv; secrets: string[] } {
+  return headlessAdapterEnvironment(environment, adapter, { requestId, mode: "generation", outputRoot });
+}
+
 /** Return values explicitly permitted through the adapter environment. */
-function allowlistedSecretValues(environment: NodeJS.ProcessEnv): string[] {
+export function allowlistedHeadlessSecretValues(environment: NodeJS.ProcessEnv): string[] {
   const configured = environment.RB_HEADLESS_ENV_ALLOWLIST ?? "";
   const secrets: string[] = [];
   for (const name of configured.split(",").map((entry) => entry.trim()).filter(Boolean)) {
@@ -204,7 +215,7 @@ function allowlistedSecretValues(environment: NodeJS.ProcessEnv): string[] {
   return secrets;
 }
 
-async function verifyAttachments(request: HeadlessInitDocument, workspace: string): Promise<void> {
+export async function verifyHeadlessAttachments(request: HeadlessInitDocument, workspace: string): Promise<void> {
   const specifications = request.specifications as Array<Record<string, unknown>>;
   for (const specification of specifications) {
     for (const resource of specification.resources as Array<Record<string, unknown>>) {
@@ -370,8 +381,8 @@ export async function runHeadlessInit(options: HeadlessRunOptions): Promise<Head
   const startedAt = new Date().toISOString();
   const environment = options.environment ?? process.env;
   const workspace = resolve(options.workspace ?? process.cwd());
-  const adapter = options.adapter ?? configuredAdapter(environment);
-  const publicSecrets = allowlistedSecretValues(environment);
+  const adapter = options.adapter ?? configuredHeadlessAdapter(environment);
+  const publicSecrets = allowlistedHeadlessSecretValues(environment);
   const input = typeof options.input === "string"
     ? options.input
     : isUtf8(options.input) ? options.input.toString("utf8") : undefined;
@@ -380,12 +391,12 @@ export async function runHeadlessInit(options: HeadlessRunOptions): Promise<Head
     : validateHeadlessInitJson(input);
   const request = parsed.document;
   const requestId = typeof request?.requestId === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(request.requestId) ? request.requestId : "invalid-request";
-  const requestHash = sha256Text(parsed.valid && request ? canonicalJson(request) : input ?? options.input.toString("hex"));
+  const requestHash = sha256Text(parsed.valid && request ? canonicalHeadlessJson(request) : input ?? options.input.toString("hex"));
   if (!parsed.valid || !request) return nonReady(requestId, requestHash, adapter, "invalid", invalidRequestDiagnostic(parsed.issues), 2, startedAt, publicSecrets);
-  if (!validAdapter(adapter)) return nonReady(requestId, requestHash, adapter, "failed", "adapter_not_configured", 3, startedAt, publicSecrets);
+  if (!validHeadlessAdapter(adapter)) return nonReady(requestId, requestHash, adapter, "failed", "adapter_not_configured", 3, startedAt, publicSecrets);
 
   try {
-    await verifyAttachments(request, workspace);
+    await verifyHeadlessAttachments(request, workspace);
   } catch (error) {
     const code = error instanceof Error && error.message === "attachment_hash_mismatch" ? "attachment_hash_mismatch" : "attachment_invalid";
     return nonReady(requestId, requestHash, adapter, "invalid", code, 2, startedAt, publicSecrets);
@@ -424,7 +435,7 @@ export async function runHeadlessInit(options: HeadlessRunOptions): Promise<Head
     const files = await validateOutput(postAdapterOutputRoot, String((request.project as Record<string, unknown>).id), adapterEnvironment.secrets);
     const validations = VALIDATIONS.map((name) => ({ name, passed: true, exitCode: 0 }));
     const completed = result(requestId, requestHash, adapter, "ready", "", startedAt, validations, files);
-    if (includesSecret(adapterEnvironment.secrets, canonicalJson(completed))) throw new Error("secret_detected");
+    if (includesSecret(adapterEnvironment.secrets, canonicalHeadlessJson(completed))) throw new Error("secret_detected");
     if (!validateHeadlessInitValue(completed).valid) throw new Error("result_invalid");
     return { exitCode: 0, result: completed };
   } catch (error) {

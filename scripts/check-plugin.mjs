@@ -45,12 +45,19 @@ const required = [
   "skills/rb-review/references/responsive-evidence.md",
   "scripts/rb-harness.cjs",
   "scripts/rb-resolve.sh",
+  "contracts/rb-headless-init-v1.md",
+  "contracts/rb-headless-interview-v1.md",
 ];
 
 const pluginFiles = await filesUnder(plugin);
 const relativeFiles = new Set(pluginFiles.map((path) => path.slice(plugin.length + 1)));
 for (const path of required) assert(relativeFiles.has(path), `Missing plugin file: ${path}`);
-for (const path of ["contracts/rb-responsive-inventory-v1.md", "contracts/rb-responsive-inventory-v1.schema.json"]) {
+for (const path of [
+  "contracts/rb-responsive-inventory-v1.md",
+  "contracts/rb-responsive-inventory-v1.schema.json",
+  "contracts/rb-headless-interview-v1.md",
+  "contracts/rb-headless-interview-v1.schema.json",
+]) {
   await readFile(resolve(root, path), "utf8");
 }
 

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { runProvider } from "./harness-provider.js";
-import { loadWorkflowResources } from "./standalone-resources.js";
+import { loadWorkflowResources, requestNeedsHeadlessContracts } from "./standalone-resources.js";
 import type {
   ArtifactAudit,
   ArtifactAuditFinding,
@@ -139,7 +139,9 @@ export async function requestArtifactAudit(
   timeoutSeconds: number,
   firstOutputTimeoutSeconds: number,
 ): Promise<ArtifactAudit> {
-  const resources = await loadWorkflowResources(state.workflow);
+  const resources = await loadWorkflowResources(state.workflow, {
+    includeHeadlessContracts: requestNeedsHeadlessContracts(state.request),
+  });
   let repair: string | undefined;
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const result = await runProvider({

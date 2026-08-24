@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { runProvider } from "./harness-provider.js";
-import { loadWorkflowResources } from "./standalone-resources.js";
+import { loadWorkflowResources, requestNeedsHeadlessContracts } from "./standalone-resources.js";
 import type {
   HarnessRunState,
   InterviewAnalysis,
@@ -133,13 +133,13 @@ export async function recoverInterviewAnalysis(
   }
 }
 
-function rejectReusedQuestionIds(state: HarnessRunState, analysis: InterviewAnalysis): void {
+export function rejectReusedQuestionIds(state: HarnessRunState, analysis: InterviewAnalysis): void {
   const answeredIds = new Set(state.answers.map((answer) => answer.questionId));
   const reused = analysis.questions.find((question) => answeredIds.has(question.id));
   if (reused) throw new Error(`provider reused answered question ID ${reused.id}; a focused follow-up needs a new stable ID`);
 }
 
-function interviewPrompt(
+export function buildInterviewControllerPrompt(
   state: HarnessRunState,
   resources: string,
   pending: InterviewAnswer[],
@@ -186,7 +186,9 @@ export async function requestInterviewAnalysis(
   timeoutSeconds: number,
   firstOutputTimeoutSeconds: number,
 ): Promise<InterviewAnalysis> {
-  const resources = await loadWorkflowResources(state.workflow);
+  const resources = await loadWorkflowResources(state.workflow, {
+    includeHeadlessContracts: requestNeedsHeadlessContracts(state.request),
+  });
   const pending = state.answers.filter((answer) => answer.disposition === "PENDING");
   for (let attempt = 2; attempt >= 1; attempt -= 1) {
     const recovered = await recoverInterviewAnalysis(
@@ -209,7 +211,7 @@ export async function requestInterviewAnalysis(
       configuration: state.provider as ProviderConfiguration,
       mode: "interview",
       projectRoot: state.projectRoot,
-      prompt: interviewPrompt(state, resources, pending, repair, rejectedResponse),
+      prompt: buildInterviewControllerPrompt(state, resources, pending, repair, rejectedResponse),
       logPath: resolve(runRoot, `logs/interview-round-${round}-protocol-${attempt}.log`),
       timeoutSeconds,
       firstOutputTimeoutSeconds,

@@ -20,6 +20,11 @@ into every prompt:
 | Technical manager | Current phase and evidence paths | Actual diff, agent logs, validation log, and declared context |
 | Retry | Current work item, prior manager reason, and prior validation-log path | Existing attempt evidence and current working tree |
 
+For requests that explicitly integrate RB Harness, “workflow resources” also
+contains the public `rb-headless-interview/v1` and `rb-headless-init/v1`
+authorities. This is selective contract context, not repository-wide prompt
+expansion.
+
 Provider adapters use fresh, non-persistent invocations. This prevents an old
 chat history from silently outranking the current specification. It also means
 that every decision needed for implementation must exist in reviewed `.rb/`
@@ -32,6 +37,16 @@ their canonical fingerprints, private provider logs, and any prior artifact
 revision replaced by successful publication. `rb-harness resume`
 can restart an interrupted interview or generation without relying on a hidden
 provider session. This state is not part of the portable artifact contract.
+The `ready` interview checkpoint is itself a resumable boundary: with no
+pending answer, a resumed run starts at generation rather than paying for a
+redundant analysis round.
+
+Headless hosted interviews use a separate durable state root and
+`rb-headless-interview/v1`. Its cursor covers the semantic checkpoint, accepted
+and rejected answer state, adaptive round, sequence, and active question.
+Idempotency responses do not change the cursor. A provider process is still
+disposable: after restart the host resubmits the start/cursor or answer key and
+the Harness resumes from committed state without relying on chat history.
 
 ## Deterministic guards
 

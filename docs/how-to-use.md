@@ -129,6 +129,32 @@ loss or cancellation, resume continues the active round or presents remaining
 questions before making another provider call. Each fresh call also receives
 the prior validated checkpoint as navigation so settled repository discovery
 does not need to be repeated from scratch.
+If that checkpoint is already `ready` and contains no pending answer, resume
+does not open another interview round: it proceeds directly to generation.
+When a writer intentionally emits `BLOCKED.md` or a blocked plan instead of a
+ready output, the failure names that artifact path so an external dependency
+is distinguishable from malformed generation.
+
+For a web/service host, use the versioned headless machine instead of terminal
+text. `rb-harness headless interview run --state <absolute-root>` accepts one
+`interview_start` or `answer` JSON message and returns one response with ordered
+events. Persist the returned `interviewId`, `cursor`, sequence, and answer
+idempotency key. Re-submit the same start to recover a lost first response, or
+the same answer to recover a response committed immediately before a restart.
+Validate fixtures and discover the exact boundary with:
+
+```bash
+rb-harness headless interview version
+rb-harness headless interview validate < fixture.json
+```
+
+Never infer recommendations from labels: each returned option has an explicit
+`recommended` boolean. Only `interview_complete.acceptedAnswers` may be copied
+to `rb-headless-init/v1.interviewAnswers`.
+When the developer request names an RB Harness integration, the executable
+automatically supplies both public headless contract documents to its
+interview, writer, and auditor. A hosted-service plan must therefore describe
+the adaptive interview boundary separately from terminal artifact generation.
 
 ## Independent artifact quality gate
 

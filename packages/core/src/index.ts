@@ -6,6 +6,8 @@ export * from "./responsive-inventory.js";
 export * from "./manifest.js";
 export * from "./evidence.js";
 export * from "./headless-contract.js";
+export * from "./headless-interview-contract.js";
+export * from "./headless-interview-runner.js";
 export * from "./headless-prompt.js";
 export * from "./headless-runner.js";
 export * from "./project-package.js";

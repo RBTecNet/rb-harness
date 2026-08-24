@@ -28,6 +28,11 @@ try {
     "dist/resources/workflows/plan/instructions.md",
     "dist/resources/workflows/review/instructions.md",
     "dist/resources/workflows/evolve/instructions.md",
+    "dist/contracts/rb-headless-init-v1.md",
+    "dist/contracts/rb-headless-init-v1.schema.json",
+    "dist/contracts/rb-headless-interview-v1.md",
+    "dist/contracts/rb-headless-interview-v1.schema.json",
+    "dist/headless-interview-bundle.json",
   ]) {
     assert(packedFiles.has(path), `Packed standalone package is missing ${path}`);
   }

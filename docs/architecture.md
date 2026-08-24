@@ -8,7 +8,7 @@
 | Workflow resources | Provider-neutral generation rules and artifact shapes loaded by the executable |
 | Codex adapter | Legacy skills exposing the same workflows during migration |
 | Claude adapter | Legacy commands exposing the same workflows during migration |
-| Contract | Provider-neutral `PHASES.md` grammar and artifact manifest |
+| Contract | Provider-neutral execution, manifest, headless init, and durable headless interview boundaries |
 | RB Ralph | Optional Bash executor with manager review, deterministic gates, bounded provider waits, and isolated task parallelism |
 | RB Memory | Optional provider-neutral MCP, API, web, and SQLite continuity service; not an execution dependency |
 
@@ -52,6 +52,7 @@ format consumable by a pure Bash loop.
 | Execution discovery | `.rb/rb-manifest.json` |
 | Execution grammar | `rb-execution/v1` |
 | Harness generation state | `.rb-harness/runs/<run-id>/state.json` |
+| Hosted adaptive interview | `rb-headless-interview/v1` plus its cursor-hashed durable state root |
 | Active run state | `.rb/runs/<artifact-id>-<plan-sha12>/` |
 | Cross-session memory | Optional `rb-memory/v1` service, keyed by tenant plus manifest `project.id` |
 
@@ -99,6 +100,17 @@ RB Harness keeps generation responsibilities separated:
 The provider-specific Codex, Claude, OpenCode, or custom adapter is an
 invocation detail. It is not recorded as an execution dependency in generated
 project documentation.
+
+Hosted applications do not reproduce this controller. They call the separate
+`rb-headless-interview/v1` state machine, persist only its public IDs/cursor and
+render its typed events. The Harness keeps the prompt, acceptance policy,
+normalization, focused follow-up logic, adapter isolation, and final conversion
+to `rb-headless-init/v1` answers. The init contract remains terminal generation;
+the interview contract never publishes artifacts.
+When a developer request explicitly integrates RB Harness, both public
+headless contract documents are added to the interview, writer, and auditor
+contexts. They remain external authorities rather than prose reconstructed by
+the generated project documentation.
 
 ## Ralph execution layers
 
