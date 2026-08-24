@@ -1,5 +1,7 @@
 # RB Harness
 
+[English](README.md) · [Português do Brasil](README.pt-BR.md)
+
 RB Harness is a provider-neutral documentation harness for new and existing
 software projects. It turns project evidence and short developer interviews
 into grounded context, whole-product reviews, safe existing-feature evolutions,
@@ -26,7 +28,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.3.12 is an executable rather than a workflow that must run inside
+RB Harness 0.3.13 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -47,7 +49,7 @@ the current shell. Verify the exact installed build with:
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.3.12
+# Both print 0.3.13
 ```
 
 Run without arguments to start the wizard:
@@ -404,9 +406,54 @@ correction attempt; findings never trigger a writer/manager repair loop.
 `--deterministic-only` performs a token-free preflight. Reports use the
 `rb-harness-artifact-verification/v1` contract and are stored with mode `0600`
 under `.rb-harness/verifications/` unless `--report` selects another path.
+Every report contains SHA-256 fingerprints of the complete physical artifact
+tree (excluding live `.rb/runs` state) and its original request/interview
+authority. This binds later remediation to the exact bytes and accepted
+decisions that were audited.
 Exit `0` means Ralph-ready (possibly with minor warnings), `2` means material
 repairable findings, `3` means a real unresolved developer decision, and `1`
 means the verifier/provider itself failed.
+
+### Bounded verification remediation
+
+A failed verification report can drive one explicit remediation cycle without
+repeating its initial semantic audit:
+
+```bash
+# First call: read-only audit and durable report.
+rb-harness artifacts verify \
+  --project . --artifacts-dir .rb \
+  --against docs/original-request.md \
+  --provider codex --model gpt-5.6-sol --effort high
+
+# Second call: reuse the newest compatible failed report.
+rb-harness artifacts verify \
+  --project . --artifacts-dir .rb \
+  --against docs/original-request.md \
+  --provider codex --model gpt-5.6-sol --effort high \
+  --remediate --questions one-by-one --dashboard
+```
+
+Use `--from-report <path>` to select a specific report and `--answers <json>
+--non-interactive` for an automated interview. The selected report must carry
+the exact current artifact and source-authority fingerprints. If an artifact,
+original request, or accepted decision changed after the audit, remediation
+fails as stale and asks for a fresh read-only verification; it never applies
+old findings to new documentation.
+
+Remediation classifies technical gaps as writer work and asks only for missing
+product-observable decisions. After the adaptive interview reaches a valid
+checkpoint, Harness creates one isolated full-tree re-emission, validates it,
+atomically publishes it, and preserves the prior tree below that Harness run.
+It then executes one final deterministic and semantic verification. Remaining
+findings are reported with no second generation or manager loop. If the saved
+report already says Ralph-ready, no provider is started and no artifacts are
+changed.
+
+`--remediate` cannot be combined with `--deterministic-only` or `--json`.
+Machine consumers should read the persisted initial and final
+`rb-harness-artifact-verification/v1` reports instead of parsing interactive
+progress output.
 
 Version 0.1.1 strengthens generation and deterministic validation around the
 failure modes found in cross-model execution trials:
@@ -499,6 +546,8 @@ rb-harness tree resolve . --artifacts-dir .spec --format tsv
 rb-harness inspect .
 rb-harness artifacts verify --project . --artifacts-dir .rb --against request.md \
   --provider codex --model gpt-5.6-sol --effort high
+rb-harness artifacts verify --project . --artifacts-dir .rb --against request.md \
+  --provider codex --model gpt-5.6-sol --effort high --remediate
 rb-harness artifacts verify --project . --artifacts-dir .rb --deterministic-only --json
 ```
 

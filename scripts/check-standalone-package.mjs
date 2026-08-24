@@ -101,6 +101,8 @@ try {
   });
   const verificationReport = JSON.parse(verification);
   assert(verificationReport.contract === "rb-harness-artifact-verification/v1", "Packed verifier emitted an unexpected contract");
+  assert(/^[a-f0-9]{64}$/.test(verificationReport.artifactFingerprint), "Packed verifier omitted the artifact-tree fingerprint");
+  assert(/^[a-f0-9]{64}$/.test(verificationReport.authorityFingerprint), "Packed verifier omitted the source-authority fingerprint");
   assert(verificationReport.readyForRalph === true, "Packed verifier did not approve its valid generated fixture");
   console.log(`OK: packed standalone includes every workflow and runs through an installed bin symlink (${packResult[0].filename}).`);
 } finally {

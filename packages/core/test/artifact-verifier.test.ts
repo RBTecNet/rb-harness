@@ -2,10 +2,15 @@ import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { artifactVerificationExitCode, verifyArtifacts } from "../src/artifact-verifier.js";
+import {
+  artifactVerificationExitCode,
+  verifyAndRemediateArtifacts,
+  verifyArtifacts,
+} from "../src/artifact-verifier.js";
 import { initializeProject, syncManifest } from "../src/manifest.js";
 
 const fakeProvider = resolve(process.cwd(), "test/fixtures/standalone/fake-provider.mjs");
+const repairingProvider = resolve(process.cwd(), "test/fixtures/standalone/repairing-provider.mjs");
 
 function phases(): string {
   return `# RB Execution Plan: verification fixture
@@ -110,4 +115,63 @@ describe("artifact verifier", () => {
       delete process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE;
     }
   });
+
+  it("remediates from the saved compatible report once, preserves the old tree, and verifies the result", async () => {
+    const fixture = await project("# Request\n\nRF-001 is implemented and verified by T001.\n");
+    const repairDirectory = resolve(fixture.root, ".rb/features/audit-repair");
+    await mkdir(repairDirectory, { recursive: true });
+    await writeFile(
+      resolve(repairDirectory, "SPEC.md"),
+      "# Specification\n\n## RF-001\n\nDeterministically reject every phrase that implies work on an existing system.\n",
+      "utf8",
+    );
+    await syncManifest(fixture.root);
+    await chmod(repairingProvider, 0o755);
+    const providerModes = resolve(fixture.root, "provider-modes.log");
+    process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE = providerModes;
+    const options = {
+      projectRoot: fixture.root,
+      artifactDirectory: ".rb",
+      againstFile: fixture.authority,
+      provider: { provider: "custom" as const, model: "fixture", effort: "high", command: repairingProvider },
+      deterministicOnly: false,
+      timeoutSeconds: 30,
+      firstOutputTimeoutSeconds: 5,
+    };
+    try {
+      const initial = await verifyArtifacts(options);
+      expect(initial.readyForRalph).toBe(false);
+      expect(initial.artifactFingerprint).toMatch(/^[a-f0-9]{64}$/);
+      expect(initial.authorityFingerprint).toMatch(/^[a-f0-9]{64}$/);
+      expect(initial.findings.some((finding) => finding.id === "proofability.scope-authority")).toBe(true);
+
+      const result = await verifyAndRemediateArtifacts({
+        ...options,
+        questionMode: "one-by-one",
+        nonInteractive: true,
+      });
+      expect(result).toMatchObject({
+        contract: "rb-harness-artifact-remediation/v1",
+        remediated: true,
+        readyForRalph: true,
+        finalReport: { status: "pass", readyForRalph: true },
+      });
+      expect(result.remediationRun?.previousArtifacts).toBeTruthy();
+      expect(await readFile(resolve(fixture.root, ".rb/features/audit-repair/SPEC.md"), "utf8"))
+        .toContain("request.targetMode");
+      expect(await readFile(resolve(result.remediationRun!.previousArtifacts!, "features/audit-repair/SPEC.md"), "utf8"))
+        .toContain("every phrase");
+      expect((await readFile(providerModes, "utf8")).trim().split("\n"))
+        .toEqual(["audit", "interview", "generation", "audit"]);
+
+      await expect(verifyAndRemediateArtifacts({
+        ...options,
+        fromReportPath: initial.reportPath,
+        questionMode: "one-by-one",
+        nonInteractive: true,
+      })).rejects.toThrow("selected report is missing, invalid, or stale");
+    } finally {
+      delete process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE;
+    }
+  }, 30_000);
 });

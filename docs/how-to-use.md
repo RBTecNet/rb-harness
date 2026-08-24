@@ -205,6 +205,26 @@ rb-harness artifacts verify --project . --artifacts-dir .rb \
   --deterministic-only --json
 ```
 
+To repair a failed package, keep the first verification report and invoke the
+bounded remediation mode. It reuses the newest report whose artifact-tree and
+source-authority fingerprints still match, so the expensive initial audit is
+not repeated:
+
+```bash
+rb-harness artifacts verify --project . --artifacts-dir .rb \
+  --against docs/original-request.md \
+  --provider codex --model gpt-5.6-sol --effort high \
+  --remediate --questions one-by-one
+```
+
+`--from-report <path>` selects a particular report. A report becomes stale when
+the artifacts, original request, or accepted interview authority changes.
+The remediation interview asks only decisions absent from accepted authority;
+technical findings remain writer responsibilities. Harness performs one full
+isolated re-emission, preserves the old artifact tree, and runs one final
+verification. A failed final report ends the command without another repair
+cycle.
+
 Agentic generation transcripts are byte-counted and bounded at 128 MiB;
 interview responses remain bounded at 32 MiB. Exceeding
 a role limit or timeout stops the provider and every discovered descendant,

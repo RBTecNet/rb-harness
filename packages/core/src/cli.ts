@@ -15,7 +15,13 @@ import { finishHarnessDashboard, startHarnessDashboard } from "./harness-dashboa
 import { HARNESS_VERSION } from "./version.js";
 import { printProviderList, runProviderTestCommand } from "./provider-cli.js";
 import { listRunStates } from "./harness-state.js";
-import { artifactVerificationExitCode, formatArtifactVerification, verifyArtifacts } from "./artifact-verifier.js";
+import {
+  artifactVerificationExitCode,
+  formatArtifactRemediation,
+  formatArtifactVerification,
+  verifyAndRemediateArtifacts,
+  verifyArtifacts,
+} from "./artifact-verifier.js";
 import { runHarnessWizard } from "./harness-wizard.js";
 import {
   defaultRequestForWorkflow,
@@ -692,7 +698,9 @@ artifacts
 
 artifacts
   .command("verify")
-  .description("Run deterministic and one-pass semantic readiness checks without editing artifacts")
+  .description(
+    "Verify artifact readiness without edits, or consume a saved failed report with --remediate for one bounded repair",
+  )
   .option("--project <path>", "project root", ".")
   .option("--artifacts-dir <dir>", "physical artifact directory relative to the project", ".rb")
   .option("--against <path>", "authoritative original request file; a matching Harness run is used by default")
@@ -702,6 +710,11 @@ artifacts
   .option("--credential <id-or-label>", "saved credential selector for a direct API provider")
   .option("--adapter <path>", "custom headless adapter executable")
   .option("--deterministic-only", "skip the semantic provider audit")
+  .option("--remediate", "consume a compatible failed report, then run one bounded interview, re-emission, and final verification")
+  .option("--from-report <path>", "failed verification report to remediate; defaults to the newest compatible report")
+  .option("--answers <json>", "remediation interview answers keyed by question ID")
+  .option("--questions <mode>", "remediation questions: one-by-one or batch", "one-by-one")
+  .option("--non-interactive", "never wait for remediation interview answers")
   .option("--timeout <seconds>", "semantic provider wall timeout; 0 disables", "3600")
   .option("--first-output-timeout <seconds>", "semantic provider first-output timeout; 0 disables", "300")
   .option("--report <path>", "report path relative to the project; defaults under .rb-harness/verifications")
@@ -712,6 +725,11 @@ artifacts
     artifactsDir: string;
     against?: string;
     deterministicOnly?: boolean;
+    remediate?: boolean;
+    fromReport?: string;
+    answers?: string;
+    questions: string;
+    nonInteractive?: boolean;
     timeout: string;
     firstOutputTimeout: string;
     report?: string;
@@ -724,9 +742,18 @@ artifacts
     if (!Number.isInteger(firstOutputTimeoutSeconds) || firstOutputTimeoutSeconds < 0) {
       throw new Error("--first-output-timeout must be a non-negative integer");
     }
+    if (!(["one-by-one", "batch"] as string[]).includes(options.questions)) {
+      throw new Error("--questions must be one-by-one or batch");
+    }
+    if (options.remediate && options.deterministicOnly) {
+      throw new Error("--remediate cannot be combined with --deterministic-only");
+    }
+    if (options.remediate && options.json) {
+      throw new Error("--json cannot be combined with interactive --remediate; use the persisted initial and final reports");
+    }
     if (options.dashboard) startHarnessDashboard(HARNESS_VERSION);
     try {
-      const report = await verifyArtifacts({
+      const verificationOptions = {
         projectRoot: resolve(options.project),
         artifactDirectory: options.artifactsDir,
         againstFile: options.against,
@@ -735,9 +762,22 @@ artifacts
         timeoutSeconds,
         firstOutputTimeoutSeconds,
         reportPath: options.report,
-      });
-      process.stdout.write(options.json ? `${JSON.stringify(report, null, 2)}\n` : `${formatArtifactVerification(report)}\n`);
-      process.exitCode = artifactVerificationExitCode(report);
+      };
+      if (options.remediate) {
+        const result = await verifyAndRemediateArtifacts({
+          ...verificationOptions,
+          fromReportPath: options.fromReport,
+          answersFile: options.answers,
+          questionMode: options.questions as "one-by-one" | "batch",
+          nonInteractive: Boolean(options.nonInteractive),
+        });
+        process.stdout.write(`${formatArtifactRemediation(result)}\n`);
+        process.exitCode = artifactVerificationExitCode(result.finalReport);
+      } else {
+        const report = await verifyArtifacts(verificationOptions);
+        process.stdout.write(options.json ? `${JSON.stringify(report, null, 2)}\n` : `${formatArtifactVerification(report)}\n`);
+        process.exitCode = artifactVerificationExitCode(report);
+      }
     } finally {
       if (options.dashboard) finishHarnessDashboard();
     }
