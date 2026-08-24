@@ -16,7 +16,6 @@ import { writeRunState } from "../src/harness-state.js";
 const fakeProvider = resolve(process.cwd(), "test/fixtures/standalone/fake-provider.mjs");
 const failingProvider = resolve(process.cwd(), "test/fixtures/standalone/failing-provider.mjs");
 const noisyProvider = resolve(process.cwd(), "test/fixtures/standalone/noisy-provider.mjs");
-const repairingProvider = resolve(process.cwd(), "test/fixtures/standalone/repairing-provider.mjs");
 
 describe("standalone RB Harness", () => {
   it("continues durable and legacy interviews without reusing prior round logs", () => {
@@ -328,7 +327,7 @@ describe("standalone RB Harness", () => {
     expect(first.status).toBe("complete");
     expect(first.interviewRound).toBe(2);
     expect(first.activeInterviewRound).toBeUndefined();
-    expect(first.artifactAudits?.map((audit) => audit.status)).toEqual(["pass"]);
+    expect(first.artifactAudits).toBeUndefined();
     expect((await validateManifestTree(project, { artifactDirectory: ".spec" })).valid).toBe(true);
     expect(await readFile(resolve(project, ".spec/features/standalone-test/REQUEST.md"), "utf8")).toContain("isolated requested feature");
     await expect(readFile(resolve(project, ".spec/stale-from-other-root.md"), "utf8")).rejects.toThrow();
@@ -366,25 +365,34 @@ describe("standalone RB Harness", () => {
     )).rejects.toThrow("cannot use .git or .rb-harness");
   }, 30_000);
 
-  it("audits generated semantics in a fresh read-only pass and repairs the invariant before publication", async () => {
-    const project = await mkdtemp(resolve(tmpdir(), "rb-harness-audit-repair-"));
-    await writeFile(resolve(project, "package.json"), '{"name":"audit-repair-fixture"}\n', "utf8");
-    await chmod(repairingProvider, 0o755);
-    const state = await runStandaloneWorkflow({
-      workflow: "plan",
-      projectRoot: project,
-      artifactDirectory: ".rb",
-      request: "Plan a deterministic greenfield scope gate.",
-      provider: { provider: "custom", model: "repairing-fixture", effort: "high", command: repairingProvider },
-      questionMode: "one-by-one",
-      nonInteractive: true,
-      timeoutSeconds: 30,
-      firstOutputTimeoutSeconds: 5,
-    });
-    expect(state.status).toBe("complete");
-    expect(state.artifactAudits?.map((audit) => audit.status)).toEqual(["revise", "pass"]);
-    expect(await readFile(resolve(project, ".rb/features/audit-repair/SPEC.md"), "utf8")).toContain("request.targetMode");
-    await expect(readFile(resolve(project, ".rb/features/audit-repair/SPEC.md"), "utf8")).resolves.not.toContain("every phrase");
+  it("uses one artifact writer and no LLM documentation manager", async () => {
+    const project = await mkdtemp(resolve(tmpdir(), "rb-harness-single-writer-"));
+    await writeFile(resolve(project, "package.json"), '{"name":"single-writer-fixture"}\n', "utf8");
+    const answers = resolve(project, "answers.json");
+    const modes = resolve(project, "provider-modes.log");
+    await writeFile(answers, '{"scope-boundary":"Yes"}\n', "utf8");
+    await chmod(fakeProvider, 0o755);
+    process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE = modes;
+    try {
+      const state = await runStandaloneWorkflow({
+        workflow: "plan",
+        projectRoot: project,
+        artifactDirectory: ".rb",
+        request: "Plan one isolated version command.",
+        provider: { provider: "custom", model: "fixture-model", effort: "high", command: fakeProvider },
+        answersFile: answers,
+        questionMode: "one-by-one",
+        nonInteractive: true,
+        timeoutSeconds: 30,
+        firstOutputTimeoutSeconds: 5,
+      });
+      expect(state.status).toBe("complete");
+      expect(state.artifactAudits).toBeUndefined();
+      expect((await readFile(modes, "utf8")).trim().split("\n"))
+        .toEqual(["interview", "interview", "generation"]);
+    } finally {
+      delete process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE;
+    }
   }, 30_000);
 
   it("resumes a completed provider generation at deterministic validation without reinvoking the writer", async () => {
@@ -427,14 +435,14 @@ describe("standalone RB Harness", () => {
         firstOutputTimeoutSeconds: 5,
       });
       expect(resumed.status).toBe("complete");
-      expect((await readFile(modes, "utf8")).trim().split("\n")).toEqual(["audit"]);
+      await expect(readFile(modes, "utf8")).rejects.toThrow();
       expect(resumed.generationCheckpoint).toBeUndefined();
     } finally {
       delete process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE;
     }
   }, 30_000);
 
-  it("repairs a legacy decisionless audit block from its preserved staged workspace", async () => {
+  it("publishes a valid legacy audit-block workspace without another provider call", async () => {
     const project = await mkdtemp(resolve(tmpdir(), "rb-harness-audit-block-resume-"));
     await writeFile(resolve(project, "package.json"), '{"name":"audit-block-resume-fixture"}\n', "utf8");
     const answers = resolve(project, "answers.json");
@@ -492,7 +500,7 @@ describe("standalone RB Harness", () => {
         firstOutputTimeoutSeconds: 5,
       });
       expect(resumed.status).toBe("complete");
-      expect((await readFile(modes, "utf8")).trim().split("\n")).toEqual(["generation", "audit"]);
+      await expect(readFile(modes, "utf8")).rejects.toThrow();
       expect(await readFile(resolve(project, ".rb/features/standalone-test/preserved-pass-two.md"), "utf8"))
         .toBe("preserve this draft evidence\n");
     } finally {

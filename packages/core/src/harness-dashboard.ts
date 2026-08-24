@@ -48,7 +48,7 @@ function duration(seconds: number): string {
 }
 
 function stageState(status: HarnessRunState["status"] | undefined, stage: string): "done" | "run" | "wait" | "fail" {
-  const order = ["interview", "generating", "validating", "auditing", "publishing", "complete"];
+  const order = ["interview", "generating", "validating", "publishing", "complete"];
   if (!status) return "wait";
   if (status.endsWith("failed") || status === "blocked") {
     const failedStage = status.startsWith("interview") ? "interview" : "generating";
@@ -57,7 +57,7 @@ function stageState(status: HarnessRunState["status"] | undefined, stage: string
     if (targetIndex < failedIndex) return "done";
     return stage === failedStage ? "fail" : "wait";
   }
-  const normalized = status === "interview" ? "interview" : status;
+  const normalized = status === "auditing" ? "validating" : status;
   const current = order.indexOf(normalized);
   const target = order.indexOf(stage);
   if (status === "complete" || (current >= 0 && target < current)) return "done";
@@ -114,11 +114,11 @@ export function renderHarnessDashboard(view: ViewState, requestedWidth?: number)
   lines.push(border("PIPELINE", width));
   const stages: Array<[string, string]> = [
     ["interview", "Entrevista"], ["generating", "Geração"], ["validating", "Contrato"],
-    ["auditing", "Auditoria"], ["publishing", "Publicação"],
+    ["publishing", "Publicação"],
   ];
   lines.push(row(stages.map(([key, label]) => `${stageMark(stageState(state?.status, key))} ${label}`).join("    "), width));
-  const audit = state?.artifactAudits?.at(-1);
-  lines.push(row(`${C.cyan}status${C.reset} ${C.white}${clean(state?.status || "inicializando")}${C.reset}    ${C.cyan}respostas${C.reset} ${state?.answers.length ?? 0}    ${C.cyan}auditoria${C.reset} ${audit ? `passo ${audit.pass} · ${audit.status} · ${audit.findings.length} achado(s)` : "aguardando"}`, width));
+  const legacyAudits = state?.artifactAudits?.length ?? 0;
+  lines.push(row(`${C.cyan}status${C.reset} ${C.white}${clean(state?.status || "inicializando")}${C.reset}    ${C.cyan}respostas${C.reset} ${state?.answers.length ?? 0}    ${C.cyan}gate${C.reset} contrato determinístico${legacyAudits ? ` · ${legacyAudits} auditoria(s) legada(s)` : ""}`, width));
   lines.push(border("", width, true));
   lines.push("");
   lines.push(border("PROVIDER ATUAL", width));

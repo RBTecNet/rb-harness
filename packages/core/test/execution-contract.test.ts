@@ -45,6 +45,14 @@ describe("rb-execution/v1", () => {
     expect(result.issues.map((entry) => entry.code)).toContain("task.acceptance.empty");
   });
 
+  it("rejects prose-only and project-wide task scopes", async () => {
+    const source = await fixture("valid", "minimal");
+    const prose = validateExecutionMarkdown(source.replace("`src/`, `tests/`", "the affected feature"));
+    expect(prose.issues.map((entry) => entry.code)).toContain("task.scope.ambiguous");
+    const projectWide = validateExecutionMarkdown(source.replace("`src/`, `tests/`", "`**/*`"));
+    expect(projectWide.issues.map((entry) => entry.code)).toContain("task.scope.ambiguous");
+  });
+
   it("rejects acceptance criteria that delegate meaning to a requirement ID", async () => {
     const source = (await fixture("valid", "minimal")).replace(
       "Running the version command exits with code 0 and prints `0.1.0`.",

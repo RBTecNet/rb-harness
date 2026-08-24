@@ -87,21 +87,17 @@ RB Harness keeps generation responsibilities separated:
    isolated project copy.
 5. Manifest synchronization and workflow-specific deterministic gates validate
    the staged tree.
-6. A fresh read-only artifact auditor inspects the whole tree, returns one
-   structured batch grouped by invariant, and rejects ambiguous RIGID rules,
-   mechanism/requirement mismatches, contradictions, missing authority,
-   untraceable criteria, or over-broad tasks.
-7. A rejected draft receives the complete audit as a bounded repair handoff.
-   Canonical finding fingerprints stop an unchanged root-cause loop, and three
-   unsuccessful passes block publication. A `blocked` verdict is accepted only
-   with one explicit developer question and a finite set of incompatible
-   product alternatives; incomplete technical design is routed back to the
-   writer as `revise`.
-8. Only a structurally valid, independently audited tree is published
-   atomically; a failed generation never replaces the current artifact tree.
+6. Only a tree accepted by every deterministic workflow, manifest, execution,
+   operational, and tree validator is published atomically. A failed or
+   explicitly blocked generation never replaces the current artifact tree.
+
+There is deliberately no second LLM manager in this pipeline. Material product
+ambiguity belongs to the adaptive interview; artifact correctness belongs to
+one fresh writer plus deterministic contracts. Semantic implementation review
+remains the responsibility of RB Ralph after code exists.
 
 Provider supervision applies role-specific UTF-8 byte limits (128 MiB for the
-agentic writer, 32 MiB for interview and audit) and remembers descendant PIDs
+agentic writer and 32 MiB for interview) and remembers descendant PIDs
 before termination. It signals both the provider process group and descendants
 that created nested sessions, then escalates to `SIGKILL`; output overflow and
 timeouts therefore cannot leave sandboxed tools orphaned.
@@ -113,9 +109,10 @@ short paths still collide. Explicit execution-plan IDs remain authoritative
 and are never silently rewritten.
 
 After a writer exits successfully, the run records a durable generation
-checkpoint before deterministic validation. Validation or audit infrastructure
-failures can therefore resume from the staged `.rb` tree without invoking the
-writer again; a checkpoint is reused only for the matching logical pass.
+checkpoint before deterministic validation. Validation infrastructure failures
+can therefore resume from the staged `.rb` tree without invoking the writer
+again. Historical audit-stage runs reuse their staged tree and retain old audit
+records as non-gating metadata.
 
 The provider-specific Codex, Claude, OpenCode, or custom adapter is an
 invocation detail. It is not recorded as an execution dependency in generated
@@ -128,9 +125,9 @@ normalization, focused follow-up logic, adapter isolation, and final conversion
 to `rb-headless-init/v1` answers. The init contract remains terminal generation;
 the interview contract never publishes artifacts.
 When a developer request explicitly integrates RB Harness, both public
-headless contract documents are added to the interview, writer, and auditor
-contexts. They remain external authorities rather than prose reconstructed by
-the generated project documentation.
+headless contract documents are added to the interview and writer contexts.
+They remain external authorities rather than prose reconstructed by the
+generated project documentation.
 
 ## Ralph execution layers
 

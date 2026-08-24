@@ -92,6 +92,15 @@ function parseList(value: string): string[] {
     .filter(Boolean);
 }
 
+function ambiguousTaskScope(value: string): string | undefined {
+  const paths = [...value.matchAll(/`([^`]+)`/g)].map((match) => match[1]?.trim()).filter(Boolean);
+  if (paths.length === 0) return "must declare at least one project-relative file, directory, or bounded glob in backticks";
+  if (paths.some((path) => [".", "./", "/", "*", "**", "**/*"].includes(path!))) {
+    return "must not use an unbounded project-wide path; split the task into concrete owned paths";
+  }
+  return undefined;
+}
+
 function findMarker(lines: string[], name: string): { values: string[]; lines: number[] } {
   const pattern = new RegExp(`^<!--\\s*${name}:\\s*([^>]+?)\\s*-->$`);
   const values: string[] = [];
@@ -210,6 +219,8 @@ function parseTask(
   if (parallel !== "true" && parallel !== "false") {
     issue(issues, "task.parallel.invalid", `${id} Parallel safe must be true or false`, offset);
   }
+  const scopeAmbiguity = ambiguousTaskScope(values.get("Scope") ?? "");
+  if (scopeAmbiguity) issue(issues, "task.scope.ambiguous", `${id} Scope ${scopeAmbiguity}`, offset);
 
   return {
     id,

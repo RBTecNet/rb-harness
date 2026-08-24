@@ -26,7 +26,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.3.10 is an executable rather than a workflow that must run inside
+RB Harness 0.3.11 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -47,7 +47,7 @@ the current shell. Verify the exact installed build with:
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.3.10
+# Both print 0.3.11
 ```
 
 Run without arguments to start the wizard:
@@ -164,10 +164,10 @@ rb-harness plan --file change.md --provider openrouter \
 ```
 
 Direct APIs are models, not filesystem agents. The bundled runtime supplies a
-bounded local tool loop. Interview and audit calls are read-only. Generation
-runs inside the existing isolated snapshot and can write only `.rb/`; manifest
-sync, deterministic validation, independent audit, and atomic publication
-remain owned by the Harness. Direct providers require an explicit provider
+bounded local tool loop. Interview calls are read-only. Generation runs inside
+the existing isolated snapshot and can write only `.rb/`; manifest sync,
+deterministic validation, and atomic publication remain owned by the Harness.
+Direct providers require an explicit provider
 model ID, and unsupported effort values fail at the provider instead of being
 silently discarded.
 
@@ -175,12 +175,12 @@ silently discarded.
 
 Add `--dashboard` to a workflow or resume command. The dashboard uses the same
 terminal design language as Ralph while keeping Harness-specific stages:
-interview, generation, contract validation, independent audit, and atomic
+interview, one artifact generation, contract validation, and atomic
 publication. It shows the active role, model, elapsed time, first-output
-latency, observed bytes, audit pass/findings, recent events, and terminal
-diagnostic. It never includes the request, interview answers, provider output,
-or credentials. During an interactive question the panel yields the terminal
-and resumes after the answer.
+latency, observed bytes, recent events, and terminal diagnostic. It never
+includes the request, interview answers, provider output, or credentials.
+During an interactive question the panel yields the terminal and resumes after
+the answer.
 
 ```bash
 rb-harness evolve --project . --file change.md \
@@ -199,31 +199,29 @@ as `ACCEPTED`, `PARTIAL`, `AMBIGUOUS`, `DEFERRED`, or `CONTRADICTED`, and
 requires focused follow-up for material ambiguity before generation. Use
 `--questions batch` only to announce the whole round before answering it.
 
-Generation is not trusted on self-declaration. After structural validation, a
-fresh read-only invocation audits the complete artifact tree for source
-fidelity, contradictions, traceability, bounded tasks, and proofability. In
-particular, a RIGID rule cannot ask deterministic code to infer unlimited
-natural-language meaning unless the documentation names an exact grammar,
-typed authority, finite matrix, or an explicit classifier and failure
-contract. The auditor returns all material findings grouped by invariant; the
-writer receives the batch in a fresh repair pass. Publication is blocked when
-the same root-cause fingerprint repeats or three passes do not converge. An
-auditor may use `blocked` only when it names one concrete developer question,
-explains why accepted sources cannot answer it, and supplies two to five
-incompatible product alternatives. Missing commands, contracts, schemas,
-tests, task boundaries, and implementation choices are always repair work.
+Generation is not trusted on self-declaration, but the Harness does not use a
+second LLM as a documentation manager. The interview must resolve material
+product ambiguity before generation; then one fresh writer produces the whole
+tree. Manifest, workflow, execution, operational, and tree validators are the
+publication gates. A RIGID rule still cannot ask deterministic code to infer
+unlimited natural-language meaning unless the documentation names an exact
+grammar, typed authority, finite matrix, or explicit classifier and failure
+contract. If the writer emits `BLOCKED.md`, a blocked plan, stale hashes, an
+invalid contract, or no ready output for the selected workflow, publication
+fails with the exact deterministic diagnostic instead of starting a repair
+loop.
 
-Runs blocked by an older decisionless audit remain resumable. RB Harness keeps
-the staged draft and feeds the full finding batch to the next writer pass
-instead of discarding the draft or repeating a completed pass.
+Historical runs that stopped in the removed audit stage remain resumable. A
+complete staged workspace is revalidated and published without another
+provider call; old audit records remain historical metadata and no longer gate
+the result.
 
 Every generation uses an isolated source copy and a staging `.rb` tree. The
-writer and auditor cannot publish directly. RB Harness synchronizes and
-validates the manifest and contracts, requires the independent audit to pass,
-then atomically swaps the selected `--output` tree.
+writer cannot publish directly. RB Harness synchronizes and validates the
+manifest and contracts, then atomically swaps the selected `--output` tree.
 Provider output is bounded by role: generation allows up to 128 MiB because
 agentic CLIs may emit repository inspection and tool evidence, while interview
-and audit remain capped at 32 MiB. Limits are measured as UTF-8 bytes. Timeout
+remains capped at 32 MiB. Limits are measured as UTF-8 bytes. Timeout
 or output overflow terminates the complete descendant tree, including nested
 sandbox sessions, before the resumable failure is recorded.
 
@@ -243,9 +241,9 @@ rb-harness resume <run-id> --project .
 
 When a writer has already completed but deterministic manifest or contract
 validation fails, the private workspace remains checkpointed. Resume
-revalidates that exact staged tree and continues with the independent audit
-without paying for a second writer call. The workspace is regenerated only
-when no complete checkpoint can be proven.
+revalidates that exact staged tree and proceeds to publication without paying
+for a second writer call. The workspace is regenerated only when no complete
+checkpoint can be proven.
 
 On resume, the Harness also first revalidates any successful interview provider response that
 was already written to the private run log. If the current protocol accepts
@@ -258,7 +256,7 @@ reported by its artifact path instead of being collapsed into a generic
 missing-output error.
 Requests that integrate RB Harness itself receive the public
 `rb-headless-init/v1` and `rb-headless-interview/v1` authorities in the
-interview, writer, and independent-auditor contexts. Hosted products therefore
+interview and writer contexts. Hosted products therefore
 cannot silently document generation while omitting the adaptive question and
 answer boundary.
 Interview adapters may omit `options` for `text` and `confirm` questions; the
@@ -313,8 +311,10 @@ Codex, Claude, and OpenCode are built in. A custom adapter is an executable
 that receives the complete prompt on stdin, runs with the isolated project as
 its working directory, and reads `RB_HARNESS_MODE`, `RB_HARNESS_PROJECT_ROOT`,
 `RB_HARNESS_PROVIDER`, `RB_HARNESS_MODEL`, and `RB_HARNESS_EFFORT` from the
-environment. `RB_HARNESS_MODE` is `interview`, `generation`, or `audit`; only
-`generation` may write the isolated workspace:
+environment. New standalone runs use `RB_HARNESS_MODE=interview` and
+`RB_HARNESS_MODE=generation`; only generation may write the isolated workspace.
+The legacy `audit` mode remains parser-compatible for historical run state but
+is never invoked by the current workflow:
 
 ```bash
 rb-harness plan --file change.md --provider custom \

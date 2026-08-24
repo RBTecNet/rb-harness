@@ -4,7 +4,6 @@ import { basename, resolve } from "node:path";
 import { createInterface, type Interface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { inspectProjectInventory } from "./harness-inventory.js";
-import { artifactAuditFingerprint, requestArtifactAudit } from "./harness-audit.js";
 import { requestInterviewAnalysis } from "./harness-interview.js";
 import { runProvider } from "./harness-provider.js";
 import { loadWorkflowResources, requestNeedsHeadlessContracts } from "./standalone-resources.js";
@@ -26,7 +25,6 @@ import { slugify } from "./manifest.js";
 import { pauseHarnessDashboard, resumeHarnessDashboard } from "./harness-dashboard.js";
 import {
   STANDALONE_STATE_CONTRACT,
-  type ArtifactAuditRecord,
   type HarnessRunState,
   type InterviewAnswer,
   type InterviewQuestion,
@@ -236,7 +234,6 @@ async function interview(
 async function generationPrompt(
   state: HarnessRunState,
   workspace: string,
-  priorAudit?: ArtifactAuditRecord,
 ): Promise<string> {
   const resources = await loadWorkflowResources(state.workflow, {
     includeHeadlessContracts: requestNeedsHeadlessContracts(state.request),
@@ -252,11 +249,11 @@ async function generationPrompt(
     "Write exclusively under .rb/. Preserve compatible existing artifacts and confirmed manual edits unless this request supersedes them.",
     "Do not create provider-specific instructions, credentials, secrets, commits, branches, Ralph runtime state, or hidden chat-session dependencies.",
     "The standalone orchestrator owns manifest sync and deterministic validation after this call. You must still produce contract-correct artifacts.",
+    "This is the only artifact-generation call. There is no later LLM documentation manager or repair pass, so inspect the complete staged tree and resolve every engineering detail before returning.",
     "Do not ask questions in this call. If a material contradiction still prevents safe readiness, write BLOCKED documentation and do not pretend PHASES is ready.",
     "Before claiming readiness, verify that every RIGID natural-language rule has a finite implementation authority: typed data, an exact grammar/matrix, or an explicitly declared classifier and failure contract. Never turn examples or a growing keyword list into an allegedly exhaustive semantic validator.",
     "Keep independently failing concerns in independently verifiable tasks. Name one canonical source and the synchronization mechanism for any derived or distributable copy.",
-    priorAudit ? "An independent audit rejected the previous draft. Resolve every finding by its root invariant, not only the quoted reproduction. Preserve unrelated correct material." : "",
-    priorAudit ? `\nPrevious independent audit:\n${JSON.stringify(priorAudit)}` : "",
+    "In PHASES.md, declare every task Scope as concrete project-relative backtick paths or bounded globs and choose the smallest real validation command that proves the affected behavior. Do not duplicate tests for a future manager; RB Ralph owns command execution and consumes scopes for safe retry invalidation.",
     `\nWorkflow: ${state.workflow}`,
     `\nDeveloper request:\n${state.request}`,
     `\nNormalized interview checkpoint:\n${state.analysis?.summary ?? ""}`,
@@ -269,115 +266,58 @@ async function generationPrompt(
 }
 
 async function generate(state: HarnessRunState, runRoot: string, options: StandaloneRunOptions): Promise<void> {
-  const maximumPasses = 3;
-  let validation: Awaited<ReturnType<typeof validateGeneratedWorkspace>> | undefined;
-  let priorAudit = state.artifactAudits?.at(-1);
-  const nextPass = Math.min(maximumPasses, Math.max(1, (priorAudit?.pass ?? 0) + 1));
   const stagedWorkspace = resolve(runRoot, "workspace");
   const legacyValidationFailure = state.status === "generation-failed"
     && state.diagnostic?.startsWith("generated artifact tree is invalid:");
-  const legacyDecisionlessAuditBlock = state.status === "blocked"
-    && priorAudit?.status === "blocked"
-    && !priorAudit.decision;
+  const legacyAuditedWorkspace = (state.status === "auditing" || state.status === "blocked")
+    && Boolean(state.artifactAudits?.length);
   const checkpointMatches = state.generationCheckpoint?.contract === "rb-harness-generation-checkpoint/v1"
-    && state.generationCheckpoint.pass === nextPass;
+    && state.generationCheckpoint.pass >= 1;
   let reuseGeneratedWorkspace = false;
-  let reuseRepairWorkspace = false;
-  if (legacyValidationFailure || checkpointMatches || legacyDecisionlessAuditBlock) {
+  if (legacyValidationFailure || checkpointMatches || legacyAuditedWorkspace) {
     try {
       const workspaceInfo = await lstat(stagedWorkspace);
       const artifactInfo = await lstat(resolve(stagedWorkspace, ".rb"));
       const stagedWorkspaceAvailable = workspaceInfo.isDirectory() && !workspaceInfo.isSymbolicLink()
         && artifactInfo.isDirectory() && !artifactInfo.isSymbolicLink();
-      reuseGeneratedWorkspace = stagedWorkspaceAvailable && (legacyValidationFailure || checkpointMatches);
-      reuseRepairWorkspace = stagedWorkspaceAvailable && legacyDecisionlessAuditBlock;
+      reuseGeneratedWorkspace = stagedWorkspaceAvailable;
     } catch { /* an incomplete checkpoint is regenerated safely */ }
   }
-  const workspace = reuseGeneratedWorkspace || reuseRepairWorkspace
+  const workspace = reuseGeneratedWorkspace
     ? stagedWorkspace
     : await prepareGenerationWorkspace(state, runRoot);
-  if (reuseRepairWorkspace) {
-    process.stdout.write("[rb-harness] bloqueio legado sem decisão explícita reclassificado como revisão; preservando o workspace para a próxima geração.\n");
-  }
-  for (let pass = nextPass; pass <= maximumPasses; pass += 1) {
-    if (reuseGeneratedWorkspace) {
-      process.stdout.write(`[rb-harness] saída completa da geração ${pass}/${maximumPasses} recuperada; retomando da validação sem reinvocar o provider.\n`);
-      reuseGeneratedWorkspace = false;
-    } else {
-      state.status = "generating";
-      state.diagnostic = undefined;
-      state.generationCheckpoint = undefined;
-      await writeRunState(state);
-      process.stdout.write(`[rb-harness] workspace isolado pronto; geração ${pass}/${maximumPasses} com ${state.provider.provider}/${state.provider.model || "provider-default"}...\n`);
-      await runProvider({
-        configuration: state.provider,
-        mode: "generation",
-        projectRoot: workspace,
-        prompt: await generationPrompt(state, workspace, priorAudit),
-        logPath: resolve(runRoot, `logs/generation-pass-${pass}.log`),
-        timeoutSeconds: options.timeoutSeconds,
-        firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
-        streamOutput: true,
-      });
-      state.generationCheckpoint = {
-        contract: "rb-harness-generation-checkpoint/v1",
-        pass,
-        providerCompletedAt: new Date().toISOString(),
-      };
+  if (reuseGeneratedWorkspace) {
+    process.stdout.write("[rb-harness] saída completa recuperada; retomando da validação determinística sem reinvocar o provider.\n");
+    if (legacyAuditedWorkspace) {
+      process.stdout.write("[rb-harness] registro de auditoria legado preservado como histórico, mas não participa mais do gate de publicação.\n");
     }
-    state.status = "validating";
+  } else {
+    state.status = "generating";
     state.diagnostic = undefined;
-    await writeRunState(state);
-    validation = await validateGeneratedWorkspace(workspace, state.workflow);
-    process.stdout.write(`[rb-harness] validação estrutural verde: ${validation.artifacts} artefatos, ${validation.readyPlans} planos prontos.\n`);
-    state.status = "auditing";
-    await writeRunState(state);
-    process.stdout.write(`[rb-harness] auditoria documental independente ${pass}/${maximumPasses}...\n`);
-    const audit = await requestArtifactAudit(
-      state,
-      workspace,
-      runRoot,
-      pass,
-      options.timeoutSeconds,
-      options.firstOutputTimeoutSeconds,
-    );
-    const record = {
-      ...audit,
-      pass,
-      fingerprint: artifactAuditFingerprint(audit),
-      auditedAt: new Date().toISOString(),
-    };
-    state.artifactAudits ??= [];
-    state.artifactAudits.push(record);
-    await writeRunState(state);
-    if (audit.status === "pass") {
-      process.stdout.write(`[rb-harness] auditoria documental verde: ${audit.summary}\n`);
-      break;
-    }
-    const findingList = audit.findings.map((finding) => finding.id).join(", ");
-    if (audit.status === "blocked") {
-      state.status = "blocked";
-      state.diagnostic = `artifact audit requires a material developer decision: ${audit.decision?.question ?? findingList}`;
-      await writeRunState(state);
-      throw new Error(state.diagnostic);
-    }
-    if (priorAudit?.fingerprint === record.fingerprint) {
-      state.status = "blocked";
-      state.diagnostic = `artifact audit repeated the same root-cause batch after repair: ${findingList}`;
-      await writeRunState(state);
-      throw new Error(state.diagnostic);
-    }
-    if (pass === maximumPasses) {
-      state.status = "blocked";
-      state.diagnostic = `artifact audit did not converge after ${maximumPasses} passes: ${findingList}`;
-      await writeRunState(state);
-      throw new Error(state.diagnostic);
-    }
-    process.stdout.write(`[rb-harness] auditoria pediu revisão completa (${findingList}); iniciando nova geração em contexto fresco.\n`);
-    priorAudit = record;
     state.generationCheckpoint = undefined;
+    await writeRunState(state);
+    process.stdout.write(`[rb-harness] workspace isolado pronto; geração única com ${state.provider.provider}/${state.provider.model || "provider-default"}...\n`);
+    await runProvider({
+      configuration: state.provider,
+      mode: "generation",
+      projectRoot: workspace,
+      prompt: await generationPrompt(state, workspace),
+      logPath: resolve(runRoot, "logs/generation.log"),
+      timeoutSeconds: options.timeoutSeconds,
+      firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
+      streamOutput: true,
+    });
+    state.generationCheckpoint = {
+      contract: "rb-harness-generation-checkpoint/v1",
+      pass: 1,
+      providerCompletedAt: new Date().toISOString(),
+    };
   }
-  if (!validation) throw new Error("artifact generation produced no validated pass");
+  state.status = "validating";
+  state.diagnostic = undefined;
+  await writeRunState(state);
+  const validation = await validateGeneratedWorkspace(workspace, state.workflow);
+  process.stdout.write(`[rb-harness] validação estrutural verde: ${validation.artifacts} artefatos, ${validation.readyPlans} planos prontos.\n`);
   state.status = "publishing";
   await writeRunState(state);
   const previous = await publishGeneratedArtifacts(state, runRoot, workspace);

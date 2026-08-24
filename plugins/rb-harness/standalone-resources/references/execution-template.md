@@ -40,6 +40,23 @@ several gates in prose or append `|| true`, `; true`, or another construct that
 masks failure. An empty or absent test suite is acceptable only when the phase
 explicitly explains why no behavior requires tests yet.
 
+`Scope` is execution authority and validation-impact metadata. List only
+concrete project-relative files, directories, or bounded globs, each enclosed
+in backticks; do not use prose such as "the whole feature", "as needed", or an
+unbounded repository-wide claim. Include every source, test, configuration,
+migration, generated, and documentation path the task may change. If a shared
+path makes two tasks interfere, they are not parallel-safe. Ralph may reuse a
+previous successful command on retry only when every changed path is covered by
+these declared scopes; an ambiguous or uncovered path forces full validation.
+
+Prefer the smallest existing deterministic command that proves the task and
+its affected boundaries. Add a broader integration or project suite only when
+the focused command cannot prove cross-boundary behavior. It is valid for
+several tasks to name the same genuinely shared command—Ralph deduplicates
+identical commands and records all owning task IDs—but do not repeat a command
+merely to make both executor and manager run it. Ralph owns command execution;
+the manager consumes its canonical result.
+
 Use `manual: <inspection>` only for a precise observation the technical manager
 can make from repository or produced evidence. Use `human: <external evidence>`
 for a device, credentialed environment, subjective visual decision, or other

@@ -32,6 +32,12 @@ as a direct prompt for any capable coding LLM.
     require its clean-room result. That result is owned by the post-phase final
     operational audit, so using it to accept an earlier phase is an invalid
     forward dependency.
+13. `Scope` entries should be concrete project-relative files, directories, or
+    bounded globs enclosed in backticks. Consumers may conservatively run every
+    phase validation when scope cannot prove that all changed paths are covered.
+14. Identical command text declared by multiple tasks is one executable
+    validation with multiple task owners. A runner may deduplicate it while
+    preserving every owner in evidence.
 
 ## Execution neutrality
 

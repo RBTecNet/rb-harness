@@ -105,8 +105,8 @@ rb-harness plan --file change.md --provider openrouter \
 ```
 
 Native API providers require the exact provider model ID. They execute a local
-tool loop governed by the Harness: interview and audit tools are read-only;
-generation can write only inside the staged `.rb` artifact tree.
+tool loop governed by the Harness: interview tools are read-only; generation
+can write only inside the staged `.rb` artifact tree.
 
 ## Live dashboard
 
@@ -153,38 +153,33 @@ Never infer recommendations from labels: each returned option has an explicit
 to `rb-headless-init/v1.interviewAnswers`.
 When the developer request names an RB Harness integration, the executable
 automatically supplies both public headless contract documents to its
-interview, writer, and auditor. A hosted-service plan must therefore describe
+interview and writer. A hosted-service plan must therefore describe
 the adaptive interview boundary separately from terminal artifact generation.
 
-## Independent artifact quality gate
+## Artifact quality gate
 
-The writer does not approve its own documentation. After each structurally
-valid generation, RB Harness starts the selected provider again in a fresh,
-read-only audit context. The auditor checks the complete staged tree and must
-return one strict `rb-harness-artifact-audit/v1` result.
+RB Harness uses one artifact writer, not a writer/manager loop. Product choices
+and contradictions must be resolved by the adaptive interview before that
+writer starts. The writer receives the normalized answers and complete workflow
+authorities in a fresh context, then writes only to an isolated `.rb` staging
+tree.
 
-The audit rejects a RIGID requirement when its implementation mechanism cannot
-prove the requested behavior. For example, deterministic code cannot be told
-to recognize every natural-language phrase that implies a concept unless the
-documentation defines a finite grammar or typed authority. A keyword list or a
-set of examples is not treated as exhaustive. The same rule covers external
-standards, dialects, formats, source-of-truth ambiguity, derived bundle parity,
-and acceptance criteria without an observable owner.
+Publication is owned by deterministic gates: manifest hashes and identities,
+workflow-required outputs, `rb-execution/v1`, optional formal contracts,
+explicit `BLOCKED.md` state, and the complete artifact tree. A RIGID requirement
+cannot claim that deterministic code recognizes unlimited natural-language
+meaning unless the artifacts define a finite grammar, typed authority, finite
+matrix, or explicit classifier and failure contract. The generation prompt
+requires that proof boundary up front; malformed or unready output fails with a
+specific contract diagnostic instead of buying repeated LLM repair passes.
 
-`revise` sends the complete root-cause batch to a fresh writer pass. `blocked`
-is valid only for a product-observable choice absent from accepted sources; it
-must carry one direct developer question, the reason existing decisions are
-insufficient, and two to five distinct alternatives. Tooling gaps, incomplete
-contracts, schemas, task ownership, proof mechanisms, and other engineering
-details remain `revise`. `pass` permits atomic publication. A repeated
-canonical finding batch stops instead of consuming more model calls, and the
-generation is also blocked after three unsuccessful passes. Current artifacts
-remain untouched in every blocked or failed case. A legacy block without an
-explicit decision can be resumed from its staged draft and is treated as a
-technical repair handoff.
+Historical runs stopped by the retired `rb-harness-artifact-audit/v1` stage are
+still resumable. Their complete staged tree is revalidated by the current
+deterministic gates, old audit rows remain historical metadata, and no writer or
+auditor is called again.
 
 Agentic generation transcripts are byte-counted and bounded at 128 MiB;
-interview and independent-audit responses remain bounded at 32 MiB. Exceeding
+interview responses remain bounded at 32 MiB. Exceeding
 a role limit or timeout stops the provider and every discovered descendant,
 including tools that opened a separate process session. The run remains
 resumable and the failed provider log records the precise limit diagnostic.
@@ -192,8 +187,8 @@ resumable and the failed provider log records the precise limit diagnostic.
 If the writer completed and a later manifest/contract gate failed, run the
 normal `rb-harness resume <run-id> --project .` command. The Harness recognizes
 the complete generation checkpoint, revalidates deterministic indexes with the
-installed runtime, and proceeds to the independent audit without repeating the
-writer call. Long or normalization-colliding artifact paths receive stable
+installed runtime, and proceeds to publication without repeating the writer
+call. Long or normalization-colliding artifact paths receive stable
 hash-suffixed IDs during manifest sync.
 
 ## Start a new project

@@ -14,7 +14,6 @@ into every prompt:
 |---|---|---|
 | Harness interview controller | Request, existing artifact inventory, prior normalized answers, workflow resources | Implemented project evidence and existing artifacts |
 | Harness artifact writer | Accepted decisions, explicit assumptions, current artifact summary, workflow resources | Isolated project copy and compatible existing artifact tree |
-| Harness artifact auditor | Request, accepted decisions, assumptions, workflow resources | Complete staged artifact tree, excluding runtime runs |
 | Sequential implementation agent | Current validated phase | Declared context paths, code, tests, and prior validation evidence |
 | Parallel implementation agent | Its task and enclosing phase metadata | Only the files needed for that task |
 | Technical manager | Current phase and evidence paths | Actual diff, agent logs, validation log, and declared context |
@@ -32,9 +31,10 @@ artifacts, project evidence, or the current run logs.
 
 Harness generation state lives separately at `.rb-harness/runs/<run-id>/`.
 It records the request hash, selected provider/model/effort, raw answers,
-accepted normalized decisions, validation state, artifact-audit batches and
-their canonical fingerprints, private provider logs, and any prior artifact
-revision replaced by successful publication. `rb-harness resume`
+accepted normalized decisions, validation state, private provider logs, and any
+prior artifact revision replaced by successful publication. Historical state
+may also contain retired artifact-audit batches, which are preserved but no
+longer gate publication. `rb-harness resume`
 can restart an interrupted interview or generation without relying on a hidden
 provider session. This state is not part of the portable artifact contract.
 The `ready` interview checkpoint is itself a resumable boundary: with no
