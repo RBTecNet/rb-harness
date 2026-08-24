@@ -157,7 +157,7 @@ describe("rb-headless-interview/v1", () => {
   it("distributes discovery, validation, and execution through the bundled CLI", async () => {
     const run = await fixture();
     const version = await runBundled(["headless", "interview", "version"], "", run.workspace);
-    expect([version.exitCode, version.result.contract, version.result.version]).toEqual([0, "rb-headless-interview/v1", "0.3.9"]);
+    expect([version.exitCode, version.result.contract, version.result.version]).toEqual([0, "rb-headless-interview/v1", "0.3.10"]);
 
     const validation = await runBundled(["headless", "interview", "validate"], JSON.stringify(start()), run.workspace);
     expect([validation.exitCode, validation.result.valid]).toEqual([0, true]);

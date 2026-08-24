@@ -93,7 +93,10 @@ RB Harness keeps generation responsibilities separated:
    untraceable criteria, or over-broad tasks.
 7. A rejected draft receives the complete audit as a bounded repair handoff.
    Canonical finding fingerprints stop an unchanged root-cause loop, and three
-   unsuccessful passes block publication.
+   unsuccessful passes block publication. A `blocked` verdict is accepted only
+   with one explicit developer question and a finite set of incompatible
+   product alternatives; incomplete technical design is routed back to the
+   writer as `revise`.
 8. Only a structurally valid, independently audited tree is published
    atomically; a failed generation never replaces the current artifact tree.
 

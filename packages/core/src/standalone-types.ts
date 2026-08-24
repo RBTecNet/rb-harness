@@ -82,6 +82,11 @@ export interface ArtifactAudit {
   status: "pass" | "revise" | "blocked";
   summary: string;
   findings: ArtifactAuditFinding[];
+  decision?: {
+    question: string;
+    reason: string;
+    options: string[];
+  };
 }
 
 export interface ArtifactAuditRecord extends ArtifactAudit {

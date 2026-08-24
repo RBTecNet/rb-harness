@@ -172,10 +172,16 @@ standards, dialects, formats, source-of-truth ambiguity, derived bundle parity,
 and acceptance criteria without an observable owner.
 
 `revise` sends the complete root-cause batch to a fresh writer pass. `blocked`
-stops for a missing material developer decision. `pass` permits atomic
-publication. A repeated canonical finding batch stops instead of consuming
-more model calls, and the generation is also blocked after three unsuccessful
-passes. Current artifacts remain untouched in every blocked or failed case.
+is valid only for a product-observable choice absent from accepted sources; it
+must carry one direct developer question, the reason existing decisions are
+insufficient, and two to five distinct alternatives. Tooling gaps, incomplete
+contracts, schemas, task ownership, proof mechanisms, and other engineering
+details remain `revise`. `pass` permits atomic publication. A repeated
+canonical finding batch stops instead of consuming more model calls, and the
+generation is also blocked after three unsuccessful passes. Current artifacts
+remain untouched in every blocked or failed case. A legacy block without an
+explicit decision can be resumed from its staged draft and is treated as a
+technical repair handoff.
 
 Agentic generation transcripts are byte-counted and bounded at 128 MiB;
 interview and independent-audit responses remain bounded at 32 MiB. Exceeding

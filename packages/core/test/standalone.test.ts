@@ -198,6 +198,22 @@ describe("standalone RB Harness", () => {
     expect(() => parseArtifactAudit(source({
       contract: "rb-harness-artifact-audit/v1", status: "pass", summary: "Contradictory pass.", findings: [finding],
     }))).toThrow("must not contain findings");
+    expect(() => parseArtifactAudit(source({
+      contract: "rb-harness-artifact-audit/v1", status: "blocked", summary: "Decision allegedly required.", findings: [finding],
+    }))).toThrow("must declare one explicit developer decision");
+    const blocked = parseArtifactAudit(source({
+      contract: "rb-harness-artifact-audit/v1", status: "blocked", summary: "Two product outcomes remain valid.", findings: [finding],
+      decision: {
+        question: "Which externally visible retention policy should the product enforce?",
+        reason: "The accepted request requires retention but does not choose between incompatible durations.",
+        options: ["Retain for 30 days", "Retain for 90 days"],
+      },
+    }));
+    expect(blocked.decision?.options).toEqual(["Retain for 30 days", "Retain for 90 days"]);
+    expect(() => parseArtifactAudit(source({
+      contract: "rb-harness-artifact-audit/v1", status: "revise", summary: "Repairable.", findings: [finding],
+      decision: blocked.decision,
+    }))).toThrow("only a blocked artifact audit");
     expect(() => parseArtifactAudit(`${source({
       contract: "rb-harness-artifact-audit/v1", status: "pass", summary: "Pass.", findings: [],
     })}\nextra`)).toThrow("no surrounding text");
@@ -413,6 +429,72 @@ describe("standalone RB Harness", () => {
       expect(resumed.status).toBe("complete");
       expect((await readFile(modes, "utf8")).trim().split("\n")).toEqual(["audit"]);
       expect(resumed.generationCheckpoint).toBeUndefined();
+    } finally {
+      delete process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE;
+    }
+  }, 30_000);
+
+  it("repairs a legacy decisionless audit block from its preserved staged workspace", async () => {
+    const project = await mkdtemp(resolve(tmpdir(), "rb-harness-audit-block-resume-"));
+    await writeFile(resolve(project, "package.json"), '{"name":"audit-block-resume-fixture"}\n', "utf8");
+    const answers = resolve(project, "answers.json");
+    await writeFile(answers, '{"scope-boundary":"Yes"}\n', "utf8");
+    await chmod(fakeProvider, 0o755);
+    const completed = await runStandaloneWorkflow({
+      workflow: "plan",
+      projectRoot: project,
+      artifactDirectory: ".rb",
+      request: "Plan a resumable audit repair.",
+      provider: { provider: "custom", model: "fixture-model", effort: "high", command: fakeProvider },
+      answersFile: answers,
+      questionMode: "one-by-one",
+      nonInteractive: true,
+      timeoutSeconds: 30,
+      firstOutputTimeoutSeconds: 5,
+    });
+    const id = "legacy-audit-block-run";
+    const runRoot = resolve(project, ".rb-harness/runs", id);
+    const finding = {
+      id: "proofability.legacy-block",
+      category: "proofability" as const,
+      artifact: ".rb/features/standalone-test/SPEC.md",
+      criterion: "RF-001",
+      evidence: "A historical Harness accepted a blocked verdict without a concrete developer question.",
+      requiredChange: "Repair the technical invariant from the preserved draft.",
+    };
+    const recovery = {
+      ...completed,
+      id,
+      status: "blocked" as const,
+      artifactAudits: [{
+        contract: "rb-harness-artifact-audit/v1" as const,
+        status: "blocked" as const,
+        summary: "Legacy decisionless block.",
+        findings: [finding],
+        pass: 2,
+        fingerprint: "a".repeat(64),
+        auditedAt: new Date().toISOString(),
+      }],
+      generationCheckpoint: undefined,
+      previousArtifacts: undefined,
+      publishedAt: undefined,
+      diagnostic: "artifact audit requires a material developer decision: proofability.legacy-block",
+    };
+    await prepareGenerationWorkspace(recovery, runRoot);
+    const preserved = resolve(runRoot, "workspace/.rb/features/standalone-test/preserved-pass-two.md");
+    await writeFile(preserved, "preserve this draft evidence\n", "utf8");
+    await writeRunState(recovery);
+    const modes = resolve(project, "provider-modes.log");
+    process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE = modes;
+    try {
+      const resumed = await resumeStandaloneWorkflow(project, id, {
+        timeoutSeconds: 30,
+        firstOutputTimeoutSeconds: 5,
+      });
+      expect(resumed.status).toBe("complete");
+      expect((await readFile(modes, "utf8")).trim().split("\n")).toEqual(["generation", "audit"]);
+      expect(await readFile(resolve(project, ".rb/features/standalone-test/preserved-pass-two.md"), "utf8"))
+        .toBe("preserve this draft evidence\n");
     } finally {
       delete process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE;
     }

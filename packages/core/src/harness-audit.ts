@@ -65,7 +65,7 @@ export function parseArtifactAudit(output: string): ArtifactAudit {
   try { value = JSON.parse(source); } catch { throw new Error("provider returned malformed artifact audit JSON"); }
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("artifact audit must be an object");
   const audit = value as Record<string, unknown>;
-  const allowed = new Set(["contract", "status", "summary", "findings"]);
+  const allowed = new Set(["contract", "status", "summary", "findings", "decision"]);
   for (const key of Object.keys(audit)) if (!allowed.has(key)) throw new Error(`unsupported artifact audit field: ${key}`);
   if (audit.contract !== "rb-harness-artifact-audit/v1") throw new Error("provider returned an unsupported artifact audit contract");
   if (!(["pass", "revise", "blocked"] as unknown[]).includes(audit.status)) throw new Error("provider returned an invalid artifact audit status");
@@ -74,11 +74,37 @@ export function parseArtifactAudit(output: string): ArtifactAudit {
   if (new Set(findings.map((finding) => finding.id)).size !== findings.length) throw new Error("provider returned duplicate artifact audit finding IDs");
   if (audit.status === "pass" && findings.length > 0) throw new Error("passing artifact audit must not contain findings");
   if (audit.status !== "pass" && findings.length === 0) throw new Error("non-passing artifact audit must contain findings");
+  let decision: ArtifactAudit["decision"];
+  if (audit.status === "blocked") {
+    if (!audit.decision || typeof audit.decision !== "object" || Array.isArray(audit.decision)) {
+      throw new Error("blocked artifact audit must declare one explicit developer decision");
+    }
+    const source = audit.decision as Record<string, unknown>;
+    const decisionAllowed = new Set(["question", "reason", "options"]);
+    for (const key of Object.keys(source)) {
+      if (!decisionAllowed.has(key)) throw new Error(`unsupported artifact audit decision field: ${key}`);
+    }
+    if (!Array.isArray(source.options) || source.options.length < 2 || source.options.length > 5) {
+      throw new Error("blocked artifact audit decision must declare two to five options");
+    }
+    const options = source.options.map((option, index) => requiredString(option, `artifact audit decision option ${index + 1}`, 1_000));
+    if (new Set(options.map((option) => option.toLocaleLowerCase())).size !== options.length) {
+      throw new Error("blocked artifact audit decision options must be distinct");
+    }
+    decision = {
+      question: requiredString(source.question, "artifact audit decision question", 4_000),
+      reason: requiredString(source.reason, "artifact audit decision reason", 10_000),
+      options,
+    };
+  } else if (audit.decision !== undefined) {
+    throw new Error("only a blocked artifact audit may declare a developer decision");
+  }
   return {
     contract: "rb-harness-artifact-audit/v1",
     status: audit.status as ArtifactAudit["status"],
     summary: requiredString(audit.summary, "artifact audit summary"),
     findings,
+    ...(decision ? { decision } : {}),
   };
 }
 
@@ -104,7 +130,9 @@ function auditPrompt(state: HarnessRunState, resources: string, repair?: string)
     "A RIGID requirement or binary criterion is invalid when deterministic code would need to infer an unbounded natural-language meaning without an exact grammar, typed field, finite authority, or an explicitly declared classifier with a versioned decision/failure contract. Examples and keyword lists are not an exhaustive grammar unless the accepted decision explicitly makes them exhaustive.",
     "Check both directions: the declared mechanism must accept valid equivalence classes and reject invalid ones. Require a finite positive/negative matrix when deterministic classification is promised.",
     "Check that one canonical source and every derived/distribution copy are named when tasks require parity. Check that tasks do not mix independently failing concerns and that every acceptance criterion has an observable owner available in that task.",
-    "Use status revise only when the writer can repair the artifacts from accepted sources. Use blocked when repair needs a new material developer decision. Use pass only when no material finding remains.",
+    "Use status revise whenever the writer can repair the artifacts from accepted sources or select a safest compatible engineering detail. Missing commands, incomplete contracts, implementation mechanisms, schemas, task boundaries, tests, and other technical design work are revise findings, not developer blockers.",
+    "Use blocked only when the accepted request and decisions leave at least two incompatible product-observable outcomes and do not authorize choosing between them. A blocked result must ask one direct developer question, explain why existing sources cannot answer it, and provide two to five distinct alternatives. Never use blocked merely because the repair is large or because the current draft invented an unsupported mechanism.",
+    "Use pass only when no material finding remains.",
     "Finding IDs identify invariant root causes and must remain stable across a repair. requiredChange must describe the invariant to establish, not a patch for the quoted example.",
     `Return exactly ${BEGIN}, one JSON object, and ${END}. Do not use Markdown fences or surrounding prose.`,
     "The JSON shape is:",
@@ -120,6 +148,7 @@ function auditPrompt(state: HarnessRunState, resources: string, repair?: string)
         evidence: "precise conflicting or unsafe text and why it matters",
         requiredChange: "root invariant the writer must establish",
       }],
+      decision: "omit unless status is blocked; then { question, reason, options: [two to five alternatives] }",
     }),
     repair ? `A prior response violated this protocol. Correct this error: ${repair}` : "",
     `\nWorkflow: ${state.workflow}`,

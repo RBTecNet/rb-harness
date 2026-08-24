@@ -276,20 +276,29 @@ async function generate(state: HarnessRunState, runRoot: string, options: Standa
   const stagedWorkspace = resolve(runRoot, "workspace");
   const legacyValidationFailure = state.status === "generation-failed"
     && state.diagnostic?.startsWith("generated artifact tree is invalid:");
+  const legacyDecisionlessAuditBlock = state.status === "blocked"
+    && priorAudit?.status === "blocked"
+    && !priorAudit.decision;
   const checkpointMatches = state.generationCheckpoint?.contract === "rb-harness-generation-checkpoint/v1"
     && state.generationCheckpoint.pass === nextPass;
   let reuseGeneratedWorkspace = false;
-  if (legacyValidationFailure || checkpointMatches) {
+  let reuseRepairWorkspace = false;
+  if (legacyValidationFailure || checkpointMatches || legacyDecisionlessAuditBlock) {
     try {
       const workspaceInfo = await lstat(stagedWorkspace);
       const artifactInfo = await lstat(resolve(stagedWorkspace, ".rb"));
-      reuseGeneratedWorkspace = workspaceInfo.isDirectory() && !workspaceInfo.isSymbolicLink()
+      const stagedWorkspaceAvailable = workspaceInfo.isDirectory() && !workspaceInfo.isSymbolicLink()
         && artifactInfo.isDirectory() && !artifactInfo.isSymbolicLink();
+      reuseGeneratedWorkspace = stagedWorkspaceAvailable && (legacyValidationFailure || checkpointMatches);
+      reuseRepairWorkspace = stagedWorkspaceAvailable && legacyDecisionlessAuditBlock;
     } catch { /* an incomplete checkpoint is regenerated safely */ }
   }
-  const workspace = reuseGeneratedWorkspace
+  const workspace = reuseGeneratedWorkspace || reuseRepairWorkspace
     ? stagedWorkspace
     : await prepareGenerationWorkspace(state, runRoot);
+  if (reuseRepairWorkspace) {
+    process.stdout.write("[rb-harness] bloqueio legado sem decisão explícita reclassificado como revisão; preservando o workspace para a próxima geração.\n");
+  }
   for (let pass = nextPass; pass <= maximumPasses; pass += 1) {
     if (reuseGeneratedWorkspace) {
       process.stdout.write(`[rb-harness] saída completa da geração ${pass}/${maximumPasses} recuperada; retomando da validação sem reinvocar o provider.\n`);
@@ -348,7 +357,7 @@ async function generate(state: HarnessRunState, runRoot: string, options: Standa
     const findingList = audit.findings.map((finding) => finding.id).join(", ");
     if (audit.status === "blocked") {
       state.status = "blocked";
-      state.diagnostic = `artifact audit requires a material developer decision: ${findingList}`;
+      state.diagnostic = `artifact audit requires a material developer decision: ${audit.decision?.question ?? findingList}`;
       await writeRunState(state);
       throw new Error(state.diagnostic);
     }

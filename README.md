@@ -26,7 +26,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.3.9 is an executable rather than a workflow that must run inside
+RB Harness 0.3.10 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -47,7 +47,7 @@ the current shell. Verify the exact installed build with:
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.3.9
+# Both print 0.3.10
 ```
 
 Run without arguments to start the wizard:
@@ -207,7 +207,15 @@ natural-language meaning unless the documentation names an exact grammar,
 typed authority, finite matrix, or an explicit classifier and failure
 contract. The auditor returns all material findings grouped by invariant; the
 writer receives the batch in a fresh repair pass. Publication is blocked when
-the same root-cause fingerprint repeats or three passes do not converge.
+the same root-cause fingerprint repeats or three passes do not converge. An
+auditor may use `blocked` only when it names one concrete developer question,
+explains why accepted sources cannot answer it, and supplies two to five
+incompatible product alternatives. Missing commands, contracts, schemas,
+tests, task boundaries, and implementation choices are always repair work.
+
+Runs blocked by an older decisionless audit remain resumable. RB Harness keeps
+the staged draft and feeds the full finding batch to the next writer pass
+instead of discarding the draft or repeating a completed pass.
 
 Every generation uses an isolated source copy and a staging `.rb` tree. The
 writer and auditor cannot publish directly. RB Harness synchronizes and
