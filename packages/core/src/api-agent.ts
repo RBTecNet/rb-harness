@@ -13,11 +13,13 @@ import {
 } from "./api-agent-tools.js";
 import { HARNESS_BUDGET } from "./harness-budget.js";
 import { resolveCredential } from "./credential-store.js";
-import { directProvider, type DirectProviderId } from "./provider-registry.js";
+import { directProvider, reasoningRequestFields, type DirectProviderId } from "./provider-registry.js";
 import {
   ActivityReporter,
+  emptyComposition,
   readAnthropicStream,
   readOpenAiStream,
+  type StreamComposition,
 } from "./api-stream.js";
 
 export interface DirectApiAgentOptions {
@@ -44,6 +46,56 @@ interface UsageTotals {
   cacheCreationInputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  /**
+   * How the output was spent. Counts and sizes only: a run that produced
+   * nothing but reasoning must be visible in telemetry without a single byte
+   * of that reasoning being stored.
+   */
+  reasoningEvents: number;
+  contentEvents: number;
+  reasoningBytes: number;
+  contentBytes: number;
+}
+
+function addComposition(totals: UsageTotals, composition: StreamComposition): void {
+  totals.reasoningEvents += composition.reasoningEvents;
+  totals.contentEvents += composition.contentEvents;
+  totals.reasoningBytes += composition.reasoningBytes;
+  totals.contentBytes += composition.contentBytes;
+}
+
+/** Token figures exactly as the provider stated them, or an honest absence. */
+function describeUsage(usage: Record<string, unknown> | undefined): string {
+  if (!usage || !Object.keys(usage).length) return "usage not reported by the provider";
+  const input = number(usage.prompt_tokens ?? usage.input_tokens);
+  const output = number(usage.completion_tokens ?? usage.output_tokens);
+  const total = number(usage.total_tokens) || input + output;
+  return `usage input=${input} output=${output} total=${total}`;
+}
+
+/**
+ * Why a turn ended with no answer.
+ *
+ * A response that burns the whole output allowance on reasoning is not the
+ * same failure as a model that simply stopped, and calling both "stopped
+ * without a final response" hid a cost problem behind a generic message. The
+ * distinction is stated first, and the evidence for it follows.
+ */
+function missingFinalResponse(
+  label: "finish_reason" | "stop_reason",
+  reason: string,
+  composition: StreamComposition,
+  usage: Record<string, unknown> | undefined,
+): string {
+  const exhausted = reason === "length" || reason === "max_tokens";
+  const headline = !exhausted
+    ? "provider stopped without a final response"
+    : composition.reasoningEvents > 0 && composition.contentEvents === 0
+      ? "provider exhausted its output limit using reasoning without producing a final response"
+      : "provider exhausted its output limit without producing a final response";
+  return `${headline} (${label}=${reason || "unknown"}; `
+    + `reasoning events=${composition.reasoningEvents}; content events=${composition.contentEvents}; `
+    + `${describeUsage(usage)}; no partial response was published)`;
 }
 
 interface ToolCall {
@@ -102,6 +154,10 @@ async function writeHarnessUsage(usage: UsageTotals, toolCalls: number): Promise
     outputTokens: usage.outputTokens,
     totalTokens: usage.totalTokens,
     toolCalls,
+    reasoningEvents: usage.reasoningEvents,
+    contentEvents: usage.contentEvents,
+    reasoningBytes: usage.reasoningBytes,
+    contentBytes: usage.contentBytes,
   }).catch(() => undefined);
 }
 
@@ -277,6 +333,9 @@ export async function probeDirectProvider(options: DirectProviderProbeOptions): 
     throw new Error("provider connection test timeout must be an integer between 1 and 900 seconds");
   }
   const definition = directProvider(options.provider);
+  // The connection test buys the same reasoning the real run would, so it asks
+  // the registry the same question — and fails the same way before connecting.
+  const reasoning = reasoningRequestFields(definition, options.effort);
   const auth = await authorization({ provider: options.provider, credential: options.credential });
   const prompt = "PING. Reply with exactly PONG and nothing else.";
   const startedAt = Date.now();
@@ -287,7 +346,7 @@ export async function probeDirectProvider(options: DirectProviderProbeOptions): 
       max_tokens: 64,
       messages: [{ role: "user", content: prompt }],
     };
-    if (options.effort) body.output_config = { effort: options.effort };
+    Object.assign(body, definition.requestExtensions ?? {}, reasoning.fields);
     payload = await requestJson(definition.endpoint, {
       ...auth.headers,
       "anthropic-version": "2023-06-01",
@@ -298,7 +357,7 @@ export async function probeDirectProvider(options: DirectProviderProbeOptions): 
       messages: [{ role: "user", content: prompt }],
       stream: false,
     };
-    if (options.effort) body.reasoning_effort = options.effort;
+    Object.assign(body, definition.requestExtensions ?? {}, reasoning.fields);
     payload = await requestJson(definition.endpoint, {
       ...auth.headers,
       ...(definition.headers ?? {}),
@@ -414,6 +473,8 @@ async function runOpenAiDialect(
     // without it, which would risk paying for the same answer twice.
     throw new Error(`provider ${options.provider} does not support the streaming chat-completions protocol`);
   }
+  // Decided once from the declared capability, never from the provider's id.
+  const reasoning = reasoningRequestFields(definition, options.effort);
   for (let turn = 1; turn <= turns; turn += 1) {
     const body: Record<string, unknown> = {
       model: options.model,
@@ -423,8 +484,8 @@ async function runOpenAiDialect(
       stream: true,
       ...(definition.streaming.usageOption ? { stream_options: { include_usage: true } } : {}),
       ...(definition.requestExtensions ?? {}),
+      ...reasoning.fields,
     };
-    if (options.effort) body.reasoning_effort = options.effort;
     const stream = await requestStream(
       dialectEndpoint(options),
       { ...headers, ...(definition.headers ?? {}) },
@@ -435,6 +496,7 @@ async function runOpenAiDialect(
     // Exactly one usage accounting per response, whether or not the provider
     // reported figures: the request itself is always counted.
     addOpenAiUsage(usage, streamed.usage);
+    addComposition(usage, streamed.composition);
     const message = streamed.message;
     messages.push(message);
     const choice = { finish_reason: streamed.finishReason };
@@ -449,7 +511,14 @@ async function runOpenAiDialect(
     }).filter((call) => call.name);
     if (!calls.length) {
       const content = typeof message.content === "string" ? message.content : "";
-      if (!content.trim()) throw new Error(`provider stopped without a final response (finish_reason=${String(choice.finish_reason ?? "unknown")})`);
+      if (!content.trim()) {
+        throw new Error(missingFinalResponse(
+          "finish_reason",
+          String(choice.finish_reason ?? ""),
+          streamed.composition,
+          streamed.usage,
+        ));
+      }
       return content;
     }
     counters.toolCalls += calls.length;
@@ -477,6 +546,7 @@ async function runAnthropicDialect(
   if (!definition.streaming.supported) {
     throw new Error(`provider ${options.provider} does not support the streaming Messages protocol`);
   }
+  const reasoning = reasoningRequestFields(definition, options.effort);
   for (let turn = 1; turn <= turns; turn += 1) {
     const body: Record<string, unknown> = {
       model: options.model,
@@ -485,8 +555,9 @@ async function runAnthropicDialect(
       messages,
       tools,
       stream: true,
+      ...(definition.requestExtensions ?? {}),
+      ...reasoning.fields,
     };
-    if (options.effort) body.output_config = { effort: options.effort };
     const stream = await requestStream(dialectEndpoint(options), {
       ...headers,
       ...(definition.headers ?? {}),
@@ -494,6 +565,7 @@ async function runAnthropicDialect(
     }, body, signal);
     const streamed = await readAnthropicStream(stream, reporter, signal);
     addAnthropicUsage(usage, streamed.usage);
+    addComposition(usage, streamed.composition);
     const content = streamed.content;
     messages.push({ role: "assistant", content });
     const calls = content.filter((block) => block.type === "tool_use").map((block, index): ToolCall => ({
@@ -503,7 +575,9 @@ async function runAnthropicDialect(
     })).filter((call) => call.name);
     if (!calls.length) {
       const text = content.filter((block) => block.type === "text").map((block) => String(block.text ?? "")).join("\n");
-      if (!text.trim()) throw new Error(`Anthropic stopped without a final text response (stop_reason=${streamed.stopReason || "unknown"})`);
+      if (!text.trim()) {
+        throw new Error(missingFinalResponse("stop_reason", streamed.stopReason, streamed.composition, streamed.usage));
+      }
       return text;
     }
     counters.toolCalls += calls.length;
@@ -522,6 +596,9 @@ export async function runDirectApiAgent(options: DirectApiAgentOptions): Promise
   if (options.role === "ralph-agent" && options.permissionMode === "protected") {
     throw new Error("direct API executors do not provide an OS sandbox in protected mode; use --yolo or codex/claude/opencode");
   }
+  // Before a credential is read and before a socket is opened: an effort the
+  // provider does not accept must never be silently promoted or paid for.
+  reasoningRequestFields(directProvider(options.provider), options.effort);
   const projectRoot = resolve(options.projectRoot);
   const context: ApiAgentToolContext = {
     projectRoot,
@@ -538,7 +615,10 @@ export async function runDirectApiAgent(options: DirectApiAgentOptions): Promise
   // reasoning, tool arguments, or a fragment of the document envelope.
   const reporter = new ActivityReporter((line) => process.stderr.write(line));
   const signal = runSignal(options);
-  const usage: UsageTotals = { requests: 0, inputTokens: 0, cachedInputTokens: 0, cacheCreationInputTokens: 0, outputTokens: 0, totalTokens: 0 };
+  const usage: UsageTotals = {
+    requests: 0, inputTokens: 0, cachedInputTokens: 0, cacheCreationInputTokens: 0,
+    outputTokens: 0, totalTokens: 0, ...emptyComposition(),
+  };
   try {
     const definition = directProvider(options.provider);
     const result = definition.dialect === "anthropic-messages"

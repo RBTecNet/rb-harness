@@ -55,6 +55,17 @@ export interface ProviderUsage {
   outputTokens: number;
   totalTokens: number;
   toolCalls: number;
+  /**
+   * How the output was spent, counted apart. A call can report a large
+   * `outputTokens` and still have produced no answer, because every token went
+   * to reasoning; only these two counters make that visible. They hold sizes
+   * and counts — never reasoning text, artifact fragments, tool arguments,
+   * credentials, or prompts.
+   */
+  reasoningEvents: number;
+  contentEvents: number;
+  reasoningBytes: number;
+  contentBytes: number;
 }
 
 export interface ProviderCallRecord {
@@ -95,6 +106,10 @@ export function emptyUsage(): ProviderUsage {
     outputTokens: 0,
     totalTokens: 0,
     toolCalls: 0,
+    reasoningEvents: 0,
+    contentEvents: 0,
+    reasoningBytes: 0,
+    contentBytes: 0,
   };
 }
 
@@ -107,6 +122,10 @@ export function addUsage(target: ProviderUsage, source: ProviderUsage): Provider
   target.outputTokens += source.outputTokens;
   target.totalTokens += source.totalTokens;
   target.toolCalls += source.toolCalls;
+  target.reasoningEvents += source.reasoningEvents;
+  target.contentEvents += source.contentEvents;
+  target.reasoningBytes += source.reasoningBytes;
+  target.contentBytes += source.contentBytes;
   return target;
 }
 
@@ -205,6 +224,15 @@ export function formatTelemetryReport(report: HarnessTelemetryReport): string {
     );
   } else {
     lines.push("Tokens: não medidos por este provider (o adapter não informou usage).");
+  }
+  if (report.totals.reasoningEvents > 0 || report.totals.contentEvents > 0) {
+    // Reasoning and answer are reported apart: a call can consume its entire
+    // output limit reasoning and still deliver nothing.
+    lines.push(
+      `Saída: eventos de raciocínio=${report.totals.reasoningEvents}, `
+      + `eventos de conteúdo=${report.totals.contentEvents} `
+      + `(bytes: raciocínio=${report.totals.reasoningBytes}, conteúdo=${report.totals.contentBytes})`,
+    );
   }
   return lines.join("\n");
 }

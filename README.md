@@ -28,7 +28,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.4.2 is an executable rather than a workflow that must run inside
+RB Harness 0.4.3 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -49,7 +49,7 @@ the current shell. Verify the exact installed build with:
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.4.2
+# Both print 0.4.3
 ```
 
 Run without arguments to start the wizard:
@@ -171,9 +171,9 @@ relevant files, search text, and read a limited line range inside the target
 project. There is no shell, no test execution, no Git write, no subagent, and no
 application-code write. The call count, the accumulated tool output, and
 repeated identical calls are all bounded, and the tool catalog never changes
-between steps so the provider's prefix cache keeps hitting. Direct providers
-require an explicit provider model ID, and unsupported effort values fail at the
-provider instead of being silently discarded.
+between steps so the provider's prefix cache keeps hitting. Direct providers require an explicit provider model ID. An effort value a
+provider declares it does not accept fails before the request is built, never at
+the provider's expense; see *Reasoning is an explicit, declared mode* below.
 
 ### Live Harness dashboard
 
@@ -327,6 +327,71 @@ the same request without streaming, because that could pay for one answer twice.
 On timeout, `SIGINT`, or `SIGTERM` the fetch and the stream reader are aborted,
 no further tool runs, no partial answer is published, and usage the provider
 never delivered stays unknown rather than being recorded as zero.
+
+### Reasoning is an explicit, declared mode
+
+Reasoning is billed as output. A model that reasons and never answers still
+spends the whole allowance, and that is exactly what happened: a real generation
+consumed 65.536 output tokens producing 2.280 reasoning deltas, zero content
+deltas, and no document at all. The stream was healthy and the parser was
+correct — the Harness had simply forced `thinking: { type: "enabled" }` on every
+DeepSeek request, so a run that named no `--effort` inherited the provider's own
+high-intensity default without ever asking for it.
+
+Whether a provider reasons is now a capability declared in the provider
+registry, next to its streaming and authentication capabilities and independent
+of both. The runtime reads that declaration; there is no `provider === "..."`
+test at any call site, and adding a provider does not touch the request path.
+Only DeepSeek declares it today; every other provider keeps exactly the request
+it sent before.
+
+For a provider that declares the toggle:
+
+| `--effort` | Sent | Meaning |
+| --- | --- | --- |
+| *(omitted)* | `thinking: { type: "disabled" }` | The safe default: direct generation, no reasoning. |
+| `none` | `thinking: { type: "disabled" }` | The same, stated explicitly. No `reasoning_effort` is sent — the toggle owns the shutdown, and an intensity of "none" would be a second, contradictory statement of the same decision. |
+| `low` | `thinking: { type: "enabled" }` + `reasoning_effort: low` | Reasoning on, at its lowest intensity. |
+| `medium`, `high`, `xhigh`, `max` | `thinking: { type: "enabled" }` + the intensity | Deliberate and progressively more expensive. |
+| anything else | *nothing* | Refused before any connection is opened. |
+
+```bash
+# Direct generation, no reasoning — the default for DeepSeek.
+rb-harness init --project . --file docs/prd.md \
+  --provider deepseek --credential ds_oficial \
+  --model deepseek-v4-flash --effort none --output .rb
+
+# Reasoning enabled at its lowest intensity.
+rb-harness init --project . --file docs/prd.md \
+  --provider deepseek --credential ds_oficial \
+  --model deepseek-v4-flash --effort low --output .rb
+```
+
+An effort the provider does not accept fails before the request is built. The
+message names the provider, the value received, and the accepted values, and
+states that no request was started — it is never corrected silently, promoted to
+a higher intensity, or retried at a price.
+
+When a response does end with its output limit exhausted and no final answer,
+the diagnostic says so precisely instead of reporting a generic stop:
+
+```text
+provider exhausted its output limit using reasoning without producing a final
+response (finish_reason=length; reasoning events=2280; content events=0;
+usage input=9501 output=65536 total=75037; no partial response was published)
+```
+
+Token figures appear only when the provider reported them; otherwise the message
+says `usage not reported by the provider` rather than printing a zero. Reasoning
+and content are counted apart in the run log (`reasoning_events`,
+`content_events`, `reasoning_bytes`, `content_bytes`) and in the usage record, so
+a call that spent everything on reasoning is legible as such. Those counters hold
+sizes and counts only: no reasoning text, no artifact fragment, no tool argument,
+no credential, and no prompt is ever stored, and the stderr markers stay
+content-free. A response that ends by limit, truncation, cancellation, HTTP
+error, or without a final message publishes nothing — no partial stdout, no
+partial `.rb`, no reasoning promoted to an answer, and no automatic second paid
+call to finish it.
 
 Control and transport are separate columns because they are separate facts. A
 direct API provider runs through the bundled runtime, which owns the tool

@@ -112,7 +112,10 @@ describe("direct-API streaming transport", () => {
       expect(providerCapabilities(id).stdoutTransport).toBe("final-text");
     }
     // Provider-specific request shaping lives in the registry, not at call sites.
-    expect(directProvider("deepseek").requestExtensions).toEqual({ thinking: { type: "enabled" } });
+    // Reasoning is declared as a capability (see api-reasoning.test.ts); the
+    // unconditional `thinking: enabled` that burned an output limit is gone.
+    expect(directProvider("deepseek").requestExtensions).toBeUndefined();
+    expect(directProvider("deepseek").reasoning?.defaultMode).toBe("disabled");
     expect(directProvider("openrouter").headers?.["http-referer"]).toContain("rb-harness");
   });
 

@@ -27,12 +27,56 @@ export interface DirectProviderStreaming {
   usageOption: boolean;
 }
 
+/**
+ * How a provider is told whether to reason at all, and how hard.
+ *
+ * A provider that offers reasoning as a separate, billable mode needs two
+ * independent decisions: whether thinking happens, and — only if it does — at
+ * what intensity. Conflating them is what let RB Harness silently enable
+ * high-intensity reasoning: a run with no `--effort` inherited the provider's
+ * own default, and a model spent its entire output allowance on
+ * `reasoning_content` without ever emitting a document.
+ *
+ * The toggle and the intensity are therefore declared here, per provider, and
+ * the runtime asks the registry instead of testing an id at the call site.
+ */
+export type ReasoningProtocol = "thinking-toggle";
+
+export interface DirectProviderReasoning {
+  protocol: ReasoningProtocol;
+  /** What an omitted `--effort` means. The economical answer is `disabled`. */
+  defaultMode: "disabled" | "enabled";
+  /** The effort value that turns reasoning off; it carries no intensity. */
+  disabledEffort: string;
+  /** Efforts that turn reasoning on, in increasing intensity. */
+  supportedEfforts: readonly string[];
+  /** Intensity used when `defaultMode` is `enabled` and no effort is given. */
+  defaultEffort?: string;
+}
+
+/** The decision the registry makes for one request. */
+export interface ReasoningDecision {
+  /** Whether the provider was asked to reason. */
+  enabled: boolean;
+  /** The intensity actually sent, when one was. */
+  effort?: string;
+  /** Fields merged into the completion body. */
+  fields: Record<string, unknown>;
+  /** One honest sentence for the log and the help text. */
+  description: string;
+}
+
 export interface DirectProviderDefinition {
   id: DirectProviderId;
   label: string;
   dialect: ProviderDialect;
   endpoint: string;
   streaming: DirectProviderStreaming;
+  /**
+   * Whether the provider exposes reasoning as an explicit mode. Providers that
+   * declare nothing here keep their previous behaviour untouched.
+   */
+  reasoning?: DirectProviderReasoning;
   /** Provider-specific request fields merged into every completion body. */
   requestExtensions?: Record<string, unknown>;
   /** Provider-specific headers merged into every request. */
@@ -86,7 +130,15 @@ export const DIRECT_PROVIDERS: readonly DirectProviderDefinition[] = [
     dialect: "openai-chat",
     endpoint: "https://api.deepseek.com/chat/completions",
     streaming: { supported: true, usageOption: true },
-    requestExtensions: { thinking: { type: "enabled" } },
+    // DeepSeek Chat Completions gates reasoning behind an explicit toggle. The
+    // Harness defaults it off: reasoning is a deliberate, costlier choice, and
+    // an omitted `--effort` must never buy it silently.
+    reasoning: {
+      protocol: "thinking-toggle",
+      defaultMode: "disabled",
+      disabledEffort: "none",
+      supportedEfforts: ["low", "medium", "high", "xhigh", "max"],
+    },
     auth: [API_KEY],
   },
   {
@@ -133,3 +185,56 @@ export function directProvider(value: string): DirectProviderDefinition {
 }
 
 export const PROVIDER_HELP = [...CLI_PROVIDER_IDS, ...DIRECT_PROVIDER_IDS].join(", ");
+
+/**
+ * The reasoning fields for one request, decided from the declared capability.
+ *
+ * An unrecognised effort throws, and it throws here — before any credential is
+ * read and before any socket is opened — because a request that was going to be
+ * refused, or silently promoted to a more expensive mode, must not be paid for.
+ */
+export function reasoningRequestFields(
+  definition: DirectProviderDefinition,
+  effort: string | undefined,
+): ReasoningDecision {
+  const requested = (effort ?? "").trim();
+  const declared = definition.reasoning;
+  if (!declared) {
+    // No declared capability: the provider keeps exactly the request it got
+    // before this capability existed.
+    if (!requested) return { enabled: false, fields: {}, description: "provider default" };
+    return definition.dialect === "anthropic-messages"
+      ? { enabled: true, effort: requested, fields: { output_config: { effort: requested } }, description: `effort ${requested}` }
+      : { enabled: true, effort: requested, fields: { reasoning_effort: requested }, description: `effort ${requested}` };
+  }
+  const accepted = [declared.disabledEffort, ...declared.supportedEfforts];
+  const value = requested
+    || (declared.defaultMode === "disabled" ? declared.disabledEffort : declared.defaultEffort ?? "");
+  if (!accepted.includes(value)) {
+    throw new Error(
+      `provider ${definition.id} does not accept --effort "${requested}"; `
+      + `accepted values are ${accepted.join(", ")}. No request was started and nothing was charged.`,
+    );
+  }
+  if (value === declared.disabledEffort) {
+    // The toggle owns the shutdown. Sending an intensity of "none" alongside it
+    // would be a second, contradictory statement of the same decision.
+    return {
+      enabled: false,
+      fields: { thinking: { type: "disabled" } },
+      description: requested ? `reasoning disabled by --effort ${requested}` : "reasoning disabled by default",
+    };
+  }
+  return {
+    enabled: true,
+    effort: value,
+    fields: { thinking: { type: "enabled" }, reasoning_effort: value },
+    description: `reasoning enabled at ${value}`,
+  };
+}
+
+/** Efforts a provider accepts, for help text and error messages. */
+export function acceptedEfforts(definition: DirectProviderDefinition): readonly string[] | undefined {
+  const declared = definition.reasoning;
+  return declared ? [declared.disabledEffort, ...declared.supportedEfforts] : undefined;
+}

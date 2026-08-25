@@ -173,12 +173,32 @@ interface StreamedToolCall {
   arguments: string;
 }
 
+/**
+ * What a response was actually made of.
+ *
+ * Reasoning and content are counted apart because they are not
+ * interchangeable: a response can be entirely reasoning and still be empty as
+ * an answer, which is precisely how a paid generation was lost. Only sizes and
+ * counts are kept — never a byte of the text itself.
+ */
+export interface StreamComposition {
+  reasoningEvents: number;
+  contentEvents: number;
+  reasoningBytes: number;
+  contentBytes: number;
+}
+
+export function emptyComposition(): StreamComposition {
+  return { reasoningEvents: 0, contentEvents: 0, reasoningBytes: 0, contentBytes: 0 };
+}
+
 export interface StreamedOpenAiMessage {
   /** The assistant message, in the same shape the non-streaming API returns. */
   message: Record<string, unknown>;
   finishReason: string;
   /** Usage exactly as the provider reported it, or `undefined` when it did not. */
   usage?: Record<string, unknown>;
+  composition: StreamComposition;
 }
 
 /**
@@ -199,6 +219,7 @@ export async function readOpenAiStream(
   let reasoning = "";
   let finishReason = "";
   let usage: Record<string, unknown> | undefined;
+  const composition = emptyComposition();
   const toolCalls: StreamedToolCall[] = [];
 
   for await (const event of readSseEvents(body, signal)) {
@@ -222,11 +243,15 @@ export async function readOpenAiStream(
     const delta = record(choice.delta);
     if (typeof delta.content === "string" && delta.content) {
       content += delta.content;
+      composition.contentEvents += 1;
+      composition.contentBytes += Buffer.byteLength(delta.content);
       reporter.report("content-delta");
     }
     if (typeof delta.reasoning_content === "string" && delta.reasoning_content) {
       // Consumed for observability only: reasoning never joins the answer.
       reasoning += delta.reasoning_content;
+      composition.reasoningEvents += 1;
+      composition.reasoningBytes += Buffer.byteLength(delta.reasoning_content);
       reporter.report("reasoning-delta");
     }
     for (const raw of Array.isArray(delta.tool_calls) ? delta.tool_calls : []) {
@@ -258,13 +283,14 @@ export async function readOpenAiStream(
       function: { name: call.name, arguments: call.arguments },
     }));
   }
-  return { message, finishReason, ...(usage ? { usage } : {}) };
+  return { message, finishReason, composition, ...(usage ? { usage } : {}) };
 }
 
 export interface StreamedAnthropicMessage {
   content: Array<Record<string, unknown>>;
   stopReason: string;
   usage?: Record<string, unknown>;
+  composition: StreamComposition;
 }
 
 /**
@@ -283,6 +309,7 @@ export async function readAnthropicStream(
   let completed = false;
   let stopReason = "";
   const usage: Record<string, unknown> = {};
+  const composition = emptyComposition();
   const blocks: Array<Record<string, unknown>> = [];
   const partialJson = new Map<number, string>();
 
@@ -312,9 +339,13 @@ export async function readAnthropicStream(
       const block = blocks[index] ?? { type: "text", text: "" };
       if (delta.type === "text_delta" && typeof delta.text === "string") {
         block.text = `${String(block.text ?? "")}${delta.text}`;
+        composition.contentEvents += 1;
+        composition.contentBytes += Buffer.byteLength(delta.text);
         reporter.report("content-delta");
       } else if (delta.type === "thinking_delta" && typeof delta.thinking === "string") {
-        // Observed, never merged into the answer.
+        // Observed and measured, never merged into the answer.
+        composition.reasoningEvents += 1;
+        composition.reasoningBytes += Buffer.byteLength(delta.thinking);
         reporter.report("reasoning-delta");
       } else if (delta.type === "input_json_delta" && typeof delta.partial_json === "string") {
         partialJson.set(index, `${partialJson.get(index) ?? ""}${delta.partial_json}`);
@@ -361,6 +392,7 @@ export async function readAnthropicStream(
   return {
     content: blocks.filter(Boolean),
     stopReason,
+    composition,
     ...(Object.keys(usage).length ? { usage } : {}),
   };
 }

@@ -207,6 +207,7 @@ async function writeProviderLog(
   settlementRecord?: SettleOutcome,
   stdoutTransport?: StdoutTransport,
   activity?: { events: number; firstEventMilliseconds?: number },
+  usage?: ProviderUsage,
 ): Promise<void> {
   await writeFile(options.logPath, [
     `provider=${options.configuration.provider}`,
@@ -221,6 +222,16 @@ async function writeProviderLog(
       ? [
         `remote_events=${activity.events}`,
         `first_remote_event_ms=${activity.firstEventMilliseconds ?? "none"}`,
+      ]
+      : []),
+    ...(usage && usage.requests > 0
+      ? [
+        // Counted apart so a call that spent its whole allowance on reasoning
+        // is legible as such. Counts and sizes only; no reasoning text.
+        `reasoning_events=${usage.reasoningEvents}`,
+        `content_events=${usage.contentEvents}`,
+        `reasoning_bytes=${usage.reasoningBytes}`,
+        `content_bytes=${usage.contentBytes}`,
       ]
       : []),
     ...(stream
@@ -264,6 +275,10 @@ async function readUsageFile(path: string): Promise<ProviderUsage> {
     usage.outputTokens = number(parsed.outputTokens);
     usage.totalTokens = number(parsed.totalTokens);
     usage.toolCalls = number(parsed.toolCalls);
+    usage.reasoningEvents = number(parsed.reasoningEvents);
+    usage.contentEvents = number(parsed.contentEvents);
+    usage.reasoningBytes = number(parsed.reasoningBytes);
+    usage.contentBytes = number(parsed.contentBytes);
     usage.measured = usage.totalTokens > 0 || usage.requests > 0;
   } catch {
     // A CLI provider without usage reporting stays explicitly unmeasured.
@@ -557,6 +572,7 @@ export async function runProvider(options: ProviderRunOptions): Promise<Provider
       events: remoteEvents,
       ...(firstRemoteEventAt ? { firstEventMilliseconds: firstRemoteEventAt - started } : {}),
     },
+    usage,
   );
   emitHarnessDashboard({
     type: "provider-end",

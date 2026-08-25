@@ -15,7 +15,7 @@ autoria semântica acontece exatamente uma vez.
 
 ## Instalação do executável
 
-O RB Harness 0.4.2 exige Node.js 20 ou superior. No clone do repositório:
+O RB Harness 0.4.3 exige Node.js 20 ou superior. No clone do repositório:
 
 ```bash
 npm install
@@ -34,7 +34,7 @@ Confira a versão instalada:
 ```bash
 rb-harness --version
 rb-harness --ver
-# 0.4.2
+# 0.4.3
 ```
 
 Executar apenas `rb-harness` abre o assistente interativo. O splash com a
@@ -184,6 +184,73 @@ a mesma requisição sem streaming, porque isso poderia pagar duas vezes pela me
 resposta. Em timeout, `SIGINT` ou `SIGTERM`, o fetch e o leitor do stream são
 abortados, nenhuma tool nova é executada, nenhuma resposta parcial é publicada e
 o usage que o provider não entregou permanece desconhecido em vez de virar zero.
+
+### Reasoning é um modo explícito e declarado
+
+Reasoning é cobrado como saída. Um modelo que raciocina e nunca responde gasta a
+cota inteira do mesmo jeito, e foi exatamente o que aconteceu: uma geração real
+consumiu 65.536 tokens de saída produzindo 2.280 deltas de reasoning, zero deltas
+de conteúdo e nenhum documento. O stream estava saudável e o parser estava
+correto — o Harness simplesmente forçava `thinking: { type: "enabled" }` em toda
+requisição ao DeepSeek, então uma execução sem `--effort` herdava o padrão de
+alta intensidade do próprio provider sem nunca ter pedido por ele.
+
+Se um provider raciocina passou a ser uma capacidade declarada no registry, ao
+lado das capacidades de streaming e de autenticação e independente de ambas. O
+runtime lê essa declaração; não existe teste `provider === "..."` em nenhum ponto
+do código, e acrescentar um provider não toca o fluxo de requisição. Hoje só o
+DeepSeek a declara; todos os outros mantêm exatamente a requisição que já
+enviavam.
+
+Para um provider que declara o toggle:
+
+| `--effort` | Enviado | Significado |
+| --- | --- | --- |
+| *(omitido)* | `thinking: { type: "disabled" }` | O padrão seguro: geração direta, sem reasoning. |
+| `none` | `thinking: { type: "disabled" }` | O mesmo, dito explicitamente. Nenhum `reasoning_effort` é enviado — o desligamento pertence ao toggle, e uma intensidade "none" seria uma segunda afirmação contraditória da mesma decisão. |
+| `low` | `thinking: { type: "enabled" }` + `reasoning_effort: low` | Reasoning ligado, na menor intensidade. |
+| `medium`, `high`, `xhigh`, `max` | `thinking: { type: "enabled" }` + a intensidade | Uso deliberado e progressivamente mais caro. |
+| qualquer outro | *nada* | Recusado antes de abrir qualquer conexão. |
+
+```bash
+# Geração direta, sem reasoning — o padrão do DeepSeek.
+rb-harness init --project . --file docs/prd.md \
+  --provider deepseek --credential ds_oficial \
+  --model deepseek-v4-flash --effort none --output .rb
+
+# Thinking habilitado na menor intensidade.
+rb-harness init --project . --file docs/prd.md \
+  --provider deepseek --credential ds_oficial \
+  --model deepseek-v4-flash --effort low --output .rb
+```
+
+Um effort que o provider não aceita falha antes de a requisição ser montada. A
+mensagem informa o provider, o valor recebido e os valores aceitos, e diz que
+nenhuma requisição foi iniciada — nunca é corrigido em silêncio, promovido para
+uma intensidade maior nem repetido a preço de mercado.
+
+Quando uma resposta de fato termina com o limite de saída esgotado e sem resposta
+final, o diagnóstico diz isso com precisão em vez de reportar uma parada
+genérica:
+
+```text
+provider exhausted its output limit using reasoning without producing a final
+response (finish_reason=length; reasoning events=2280; content events=0;
+usage input=9501 output=65536 total=75037; no partial response was published)
+```
+
+Números de token só aparecem quando o provider os informou; caso contrário a
+mensagem diz `usage not reported by the provider` em vez de imprimir zero.
+Reasoning e conteúdo são contados separadamente no log da execução
+(`reasoning_events`, `content_events`, `reasoning_bytes`, `content_bytes`) e no
+registro de usage, de modo que uma chamada que gastou tudo em reasoning fica
+legível como tal. Esses contadores guardam apenas tamanhos e quantidades: nenhum
+texto de reasoning, fragmento de artefato, argumento de ferramenta, credencial ou
+prompt é armazenado, e os marcadores no stderr continuam sem conteúdo. Uma
+resposta que termina por limite, truncamento, cancelamento, erro HTTP ou sem
+mensagem final não publica nada — sem stdout parcial, sem `.rb` parcial, sem
+reasoning promovido a resposta e sem uma segunda chamada paga automática para
+terminar.
 
 Controle e transporte são colunas separadas porque são fatos separados. Um
 provider de API direta roda pelo runtime embutido, que é dono do catálogo de

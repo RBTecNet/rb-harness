@@ -102,7 +102,7 @@ export async function runHarnessWizard(version: string): Promise<void> {
     if (!isCliProvider(providerName) && !isDirectProvider(providerName)) throw new Error("provider inválido");
     const model = (await terminal.question("Modelo (vazio usa o padrão do provider): ")).trim();
     if (isDirectProvider(providerName) && !model) throw new Error("providers de API direta exigem o ID explícito do modelo");
-    const effort = (await terminal.question("Effort (vazio usa o padrão do provider): ")).trim();
+    const effort = (await terminal.question("Effort (vazio usa o padrão do provider; no DeepSeek direto o padrão é none, sem reasoning): ")).trim();
     let command: string | undefined;
     let credential: string | undefined;
     if (providerName === "custom") {
