@@ -22,11 +22,13 @@ Balanced is the default:
 
 - Present discoveries and the gap summary first.
 - Ask up to 5 related questions in round 1.
-- Ask up to 3 focused follow-ups when answers leave material ambiguity. A
-  follow-up is warranted even when generation could continue, if choosing the
-  wrong interpretation could change behavior, scope, contracts, security,
-  data, architecture, compatibility, or operational acceptance.
-- If more material decisions remain, summarize them and offer to save/resume.
+- Ask up to 3 focused follow-ups per later round whenever answers leave material
+  ambiguity. A follow-up is warranted even when generation could continue, if
+  choosing the wrong interpretation could change behavior, scope, contracts,
+  security, data, architecture, compatibility, or operational acceptance.
+- Keep running follow-up rounds while any material decision is open, including
+  one an answer just opened. The interview ends by converging, not by expiring.
+- Never re-ask a decision that was already answered and accepted.
 - Accept `use recommendations`, `not sure`, `defer`, and free-form corrections.
 - Persist answers under `.rb/handoffs/` before another round.
 
@@ -124,8 +126,11 @@ scenario.
 ## Stop condition
 
 Stop interviewing when remaining uncertainty is either FLEXIBLE or a low-risk
-explicit assumption. If a material answer remains unresolved after focused
-follow-up, record it as `UNKNOWN`, `CONFLICT`, or an open decision. Use `BLOCKED`
+explicit assumption — that is the only intended stopping point. The executable
+also enforces two declared safety ceilings (`HARNESS_BUDGET.interview.maxRounds`
+and `maxQuestions`) so the loop stays finite; reaching one is a failure to
+converge, not an acceptance. If a material answer remains unresolved after
+focused follow-up, record it as `UNKNOWN`, `CONFLICT`, or an open decision. Use `BLOCKED`
 when execution would otherwise be unsafe, contradictory, behaviorally
 ambiguous, or impossible to validate; otherwise keep the unresolved item out of
 RIGID claims and report the reduced readiness explicitly.

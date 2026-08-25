@@ -16,10 +16,14 @@ Read this file completely before producing artifacts:
 
 ## How your output is delivered
 
-You do not write files and you do not run commands. Return every document as a
-`path`/`content` pair in the document bundle envelope described in your prompt.
-The orchestrator materializes the files, derives the manifest, IDs, hashes, and
-statuses, runs every deterministic validator, and publishes atomically. The
+You do not write files and you do not run commands. During the planning call,
+return only the compact document plan requested by the stage prompt, without
+document content. During each later closed authoring call, return only the
+requested raw document segment. Never emit a complete document bundle unless
+the stage prompt explicitly requests the legacy compatibility form. The
+orchestrator checkpoints and assembles parts, materializes files, derives the
+manifest, IDs, hashes and statuses, runs deterministic validators, and publishes
+atomically. The
 exact output contract for this workflow — required documents, the
 `rb-execution/v1` grammar, the `rb-operational/v1` shape, and the conventions —
 is supplied in the prompt as `rb-harness-contract-digest/v1`.
@@ -45,6 +49,10 @@ is supplied in the prompt as `rb-harness-contract-digest/v1`.
    partial or ambiguous responses narrowly. Only low-risk unknowns may become
    explicit assumptions; blocking decisions yield `BLOCKED` rather than
    invented requirements.
+   The interview is adaptive: keep returning focused questions while any
+   material ambiguity remains, including one an earlier answer just opened,
+   and stop the moment nothing material is open. Never re-ask a decision that
+   was already answered and accepted.
 7. Run the pre-write ambiguity audit, then confirm 1 concise normalized request
    checkpoint that separates accepted decisions, assumptions, deferrals, and
    unresolved conflicts.
@@ -65,9 +73,14 @@ is supplied in the prompt as `rb-harness-contract-digest/v1`.
    commands separately, classify unavailable proof as external `human`
    evidence, and require exact standard/dialect matrices plus hostile
    schema/secret cases when relevant.
-10. Derive phases from a dependency DAG. `Parallel safe` is descriptive; no
+10. Derive phases from a dependency DAG. Decompose every capability down to
+    tasks a fresh, context-free executor can finish in one call: name the single
+    behavior each task makes observable, order them with `Depends on`, and never
+    write a task that implements a whole feature. The decomposition ceilings in
+    the contract digest are validated mechanically, so respect them while
+    writing. `Parallel safe` is descriptive; no
     executor or provider is required to parallelize.
-11. The orchestrator runs every deterministic validator after your call; produce documents that already satisfy them, and never claim to have run a command. They cover `rb-execution/v1`, `rb-operational/v1`, the
+11. The orchestrator runs every deterministic validator after assembly; produce document parts that assemble into compliant artifacts, and never claim to have run a command. They cover `rb-execution/v1`, `rb-operational/v1`, the
     manifest, and the whole tree.
 12. State readiness, requirements, tasks, and phases in the bundle summary.
     Never edit application code, run a command, or commit.

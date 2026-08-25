@@ -317,27 +317,93 @@ describe("CR-004 · ambiguity never becomes an accepted decision", () => {
       type: "text",
       options: [],
     }));
-    const analysis = parseInterviewAnalysis(
+    // Mid-interview the surplus is carried into the next round, never closed over.
+    const carried = parseInterviewAnalysis(
       envelope({ ...base, status: "ready", answerReviews: [], questions }),
       { pendingAnswers: [], round: 2 },
     );
-    expect(analysis.status).toBe("blocked");
-    expect(analysis.unresolved.length).toBeGreaterThan(0);
+    expect(carried.status).toBe("needs_input");
+    expect(carried.unresolved.join(" ")).toContain("Carried material decision");
+    // At the ceiling it can no longer be carried, so readiness is refused.
+    const exhausted = parseInterviewAnalysis(
+      envelope({ ...base, status: "ready", answerReviews: [], questions }),
+      { pendingAnswers: [], round: HARNESS_BUDGET.interview.maxRounds },
+    );
+    expect(exhausted.status).toBe("blocked");
+    expect(exhausted.unresolved.length).toBeGreaterThan(0);
   });
 
-  it("blocks on a material gap in the final round and keeps the two-round ceiling", () => {
+  it("keeps asking while a material gap remains and blocks only at the ceiling", () => {
+    const unresolvedAnswer = {
+      ...base,
+      status: "needs_input",
+      answerReviews: [{ questionId: "retention", disposition: "AMBIGUOUS", remainingUncertainty: "30 or 90 days" }],
+      questions: [],
+    };
+    // An ambiguous answer earns another focused round instead of ending the run.
+    const midway = parseInterviewAnalysis(
+      envelope(unresolvedAnswer),
+      { pendingAnswers: [pending("retention")], round: 2 },
+    );
+    expect(midway.status).toBe("needs_input");
+    expect(midway.questions).toHaveLength(1);
+    expect(midway.questions[0]?.answerFor).toBe("retention");
+    // Only the declared safety ceiling converts the open decision into BLOCKED.
+    const ceiling = parseInterviewAnalysis(
+      envelope(unresolvedAnswer),
+      { pendingAnswers: [pending("retention")], round: HARNESS_BUDGET.interview.maxRounds },
+    );
+    expect(ceiling.status).toBe("blocked");
+    expect(ceiling.unresolved.join(" ")).toContain("30 or 90 days");
+  });
+
+  it("still asks a round that exactly consumes the remaining question budget", () => {
+    const questions = Array.from({ length: 3 }, (_value, index) => ({
+      id: `tail-${index}`,
+      question: `Tail decision ${index}?`,
+      why: "It changes scope.",
+      type: "text",
+      options: [],
+    }));
+    const analysis = parseInterviewAnalysis(
+      envelope({ ...base, status: "needs_input", answerReviews: [], questions }),
+      { pendingAnswers: [], round: 3, askedQuestions: HARNESS_BUDGET.interview.maxQuestions - 3 },
+    );
+    expect(analysis.status).toBe("needs_input");
+    expect(analysis.questions).toHaveLength(3);
+  });
+
+  it("stops the run-wide question budget from being exceeded", () => {
+    const questions = Array.from({ length: 3 }, (_value, index) => ({
+      id: `late-${index}`,
+      question: `Late decision ${index}?`,
+      why: "It changes scope.",
+      type: "text",
+      options: [],
+    }));
+    const analysis = parseInterviewAnalysis(
+      envelope({ ...base, status: "needs_input", answerReviews: [], questions }),
+      { pendingAnswers: [], round: 3, askedQuestions: HARNESS_BUDGET.interview.maxQuestions },
+    );
+    expect(analysis.questions).toHaveLength(0);
+    expect(analysis.status).toBe("blocked");
+  });
+
+  it("never re-asks a decision the developer already answered", () => {
     const analysis = parseInterviewAnalysis(
       envelope({
         ...base,
         status: "needs_input",
-        answerReviews: [{ questionId: "retention", disposition: "AMBIGUOUS", remainingUncertainty: "30 or 90 days" }],
-        questions: [],
+        answerReviews: [],
+        questions: [
+          { id: "again", question: "How long is retention?", why: "It changes scope.", type: "text", options: [] },
+          { id: "fresh", question: "Which audit events are recorded?", why: "It changes scope.", type: "text", options: [] },
+        ],
       }),
-      { pendingAnswers: [pending("retention")], round: 2 },
+      { pendingAnswers: [], round: 3, answeredQuestions: ["How long is retention?"] },
     );
-    expect(analysis.status).toBe("blocked");
-    expect(analysis.unresolved.join(" ")).toContain("30 or 90 days");
-    expect(HARNESS_BUDGET.interview.maxRounds).toBe(2);
+    expect(analysis.questions.map((question) => question.id)).toEqual(["fresh"]);
+    expect(analysis.normalizations?.join(" ")).toContain("already-answered");
   });
 });
 

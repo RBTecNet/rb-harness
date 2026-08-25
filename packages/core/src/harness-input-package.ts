@@ -284,7 +284,10 @@ export async function buildInputPackage(options: InputPackageOptions): Promise<H
     .sort((left, right) => left.questionId.localeCompare(right.questionId));
   const decisionBudget = boundedSection(
     allDecisions,
-    HARNESS_BUDGET.interview.firstRoundQuestions + HARNESS_BUDGET.interview.followUpQuestions,
+    // An adaptive interview may accept a decision for every question the
+    // run-wide ceiling allows; the count ceiling must not be the old two-round
+    // arithmetic, or a converging interview would fail on its own answers.
+    HARNESS_BUDGET.interview.maxQuestions,
     HARNESS_BUDGET.prompt.maxDecisionBytes,
     (decision) => stableJson(decision),
   );

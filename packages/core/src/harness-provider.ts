@@ -48,6 +48,8 @@ export interface ProviderRunOptions {
   firstOutputTimeoutSeconds: number;
   streamOutput?: boolean;
   attempt?: number;
+  /** Closed authoring parts disable direct-provider tools and run from an empty root. */
+  toolsEnabled?: boolean;
   /** Test/embedding override. Standalone workflows use the bounded mode default. */
   maxOutputBytes?: number;
 }
@@ -127,6 +129,7 @@ export function providerInvocation(
   configuration: ProviderConfiguration,
   mode: ProviderMode,
   projectRoot: string,
+  toolsEnabled = true,
 ): { command: string; args: string[]; environment: NodeJS.ProcessEnv } {
   const model = safeToken(configuration.model, "model");
   const effort = safeToken(configuration.effort, "effort");
@@ -166,6 +169,7 @@ export function providerInvocation(
     ];
     if (effort) args.push("--effort", effort);
     if (configuration.credential) args.push("--credential", configuration.credential);
+    if (!toolsEnabled) args.push("--no-tools");
     return { command: process.execPath, args, environment };
   }
   // `run --format json` is documented by the installed OpenCode as "raw JSON
@@ -173,7 +177,10 @@ export function providerInvocation(
   // Harness consumes it and holds the run to the documentation event budget.
   const args = ["run", "--dir", projectRoot, "--format", "json"];
   if (model) args.push("--model", model);
-  if (effort) args.push("--variant", effort);
+  // OpenCode documents `minimal`, not `none`, for the provider-specific
+  // reasoning variant. Passing `none` through made the CLI fall back to a
+  // model default that spent 32k reasoning tokens and emitted no answer.
+  if (effort) args.push("--variant", effort === "none" ? "minimal" : effort);
   environment.OPENCODE_PERMISSION = '{"edit":"deny","bash":"deny","task":"deny","external_directory":"deny"}';
   return { command: process.env.RB_HARNESS_OPENCODE_BIN ?? "opencode", args, environment };
 }
@@ -232,6 +239,7 @@ async function writeProviderLog(
         `content_events=${usage.contentEvents}`,
         `reasoning_bytes=${usage.reasoningBytes}`,
         `content_bytes=${usage.contentBytes}`,
+        ...(usage.costUsd !== undefined ? [`cost_usd=${usage.costUsd}`] : []),
       ]
       : []),
     ...(stream
@@ -287,7 +295,7 @@ async function readUsageFile(path: string): Promise<ProviderUsage> {
 }
 
 export async function runProvider(options: ProviderRunOptions): Promise<ProviderRunResult> {
-  const invocation = providerInvocation(options.configuration, options.mode, options.projectRoot);
+  const invocation = providerInvocation(options.configuration, options.mode, options.projectRoot, options.toolsEnabled !== false);
   const telemetry = harnessTelemetry();
   const usagePath = isDirectProvider(options.configuration.provider)
     ? resolve(tmpdir(), `rb-harness-usage-${process.pid}-${randomBytes(6).toString("hex")}.json`)
@@ -328,13 +336,14 @@ export async function runProvider(options: ProviderRunOptions): Promise<Provider
     ? options.streamMode === "structured"
     : usesStructuredStdout(options.configuration.provider);
   const transport = structuredStdout ? "jsonl-events" : "final-text";
+  const observerDialect = options.streamDialect
+    ?? (providerCapabilities(options.configuration.provider).stdoutTransport === "jsonl-events"
+      && options.configuration.provider === "opencode"
+      ? "opencode"
+      : "generic");
   const observer = new ProviderStreamObserver({
     mode: structuredStdout ? "structured" : "opaque",
-    dialect: options.streamDialect
-      ?? (providerCapabilities(options.configuration.provider).stdoutTransport === "jsonl-events"
-        && options.configuration.provider === "opencode"
-        ? "opencode"
-        : "generic"),
+    dialect: observerDialect,
   });
   if (!harnessDashboardActive()) {
     process.stderr.write(`[rb-harness] adapter ${options.configuration.provider}: ${describeAdapterControl(options.configuration.provider)}.\n`);
@@ -513,6 +522,18 @@ export async function runProvider(options: ProviderRunOptions): Promise<Provider
   }
   const stream = observer.report();
   const usage = usagePath ? await readUsageFile(usagePath) : emptyUsage();
+  if (structuredStdout && observerDialect === "opencode" && (stream.requests ?? 0) > 0) {
+    usage.measured = true;
+    usage.requests = stream.requests ?? 0;
+    usage.cachedInputTokens = stream.cachedInputTokens ?? 0;
+    usage.inputTokens = (stream.inputTokens ?? 0) + usage.cachedInputTokens;
+    // OpenCode reports visible output and reasoning separately. ProviderUsage
+    // has one output counter, so both are charged while the stream accounting
+    // retains the split needed for diagnostics.
+    usage.outputTokens = (stream.outputTokens ?? 0) + (stream.reasoningTokens ?? 0);
+    usage.totalTokens = stream.totalTokens ?? (usage.inputTokens + usage.outputTokens);
+    if (stream.costUsd !== undefined) usage.costUsd = stream.costUsd;
+  }
   // Tool counts are only claimed where they were actually observed.
   // Stream-derived tool counts are only claimed when a structured stream was
   // actually parsed; a controlled adapter reports its own through the usage

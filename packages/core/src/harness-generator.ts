@@ -1,18 +1,19 @@
 /**
- * The single authoritative authoring call and its one localized repair
- * (RF-004 and RF-005).
+ * Provider-neutral incremental document generation.
  *
- * There is no manager, auditor, or second opinion. One session receives the
- * closed decision checkpoint and returns the complete document bundle; code
- * materializes it, derives every mechanical field, and validates. If — and
- * only if — deterministic validation finds repairable structural errors, one
- * bounded repair receives the ordered error list and the affected documents,
- * and must preserve everything else byte for byte. A second failure is
- * reported to the operator. There is no loop.
+ * The old writer had to return every artifact inside one JSON response. That
+ * tied correctness to a provider's output window and made a retry repeat the
+ * same impossible request. The writer now returns a compact plan followed by
+ * bounded document parts. Each completed part is checkpointed before the next
+ * provider process starts; the orchestrator still owns assembly, validation,
+ * and atomic publication.
  */
 
+import { chmod, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { HARNESS_BUDGET } from "./harness-budget.js";
+import { parseOrFormatControlOutput, successfulProviderLogStdout } from "./harness-control-formatter.js";
 import { generationContractDigest, repairContractDigest } from "./harness-contract-digest.js";
 import {
   DOCUMENT_BUNDLE_BEGIN,
@@ -23,24 +24,42 @@ import {
   parseDocumentBundle,
   type DocumentBundle,
 } from "./harness-documents.js";
+import {
+  DOCUMENT_PART_BEGIN,
+  DOCUMENT_PART_CONTRACT,
+  DOCUMENT_PART_END,
+  DOCUMENT_PLAN_BEGIN,
+  DOCUMENT_PLAN_CONTRACT,
+  DOCUMENT_PLAN_END,
+  assembleDocumentPlan,
+  parseDocumentPart,
+  parseDocumentPlan,
+  parsePlanOrLegacyBundle,
+  type DocumentPart,
+  type DocumentPlan,
+  type DocumentPlanPart,
+  type PlannedDocument,
+} from "./harness-incremental-documents.js";
 import { assertPromptWithinBudget, serializeInputPackage, type HarnessInputPackage } from "./harness-input-package.js";
 import { runProvider } from "./harness-provider.js";
+import { sha256Text } from "./hash.js";
 import { loadWorkflowResources, requestNeedsHeadlessContracts } from "./standalone-resources.js";
 import type { HarnessRunState, ProviderConfiguration } from "./standalone-types.js";
 
-const BUNDLE_SHAPE = JSON.stringify({
-  contract: DOCUMENT_BUNDLE_CONTRACT,
+const PLAN_SHAPE = JSON.stringify({
+  contract: DOCUMENT_PLAN_CONTRACT,
   status: "complete | blocked",
-  summary: "one sentence describing what was written",
-  documents: [{ path: ".rb/<directory>/<FILE>.md", content: "the complete UTF-8 file body" }],
+  summary: "one sentence describing the complete set",
+  coordination: "compact shared ID and traceability ledger used by every document",
+  documents: [{
+    path: ".rb/<directory>/<FILE>.md",
+    purpose: "what this document must prove",
+    parts: [{ id: "stable-part-id", purpose: "bounded contiguous section, at most 12 KiB" }],
+  }],
   blocked: ["only when status is blocked: the exact missing developer decision"],
 });
 
-/**
- * The invariant part of the generation prompt (CR-007): identical bytes across
- * every protocol retry of one authoring call. The repair pass is a separate
- * process with its own prompt and makes no cache claim.
- */
+/** Byte-stable authority prefix shared by the plan and every document part. */
 export function stableGenerationPrefix(
   state: HarnessRunState,
   inputPackage: HarnessInputPackage,
@@ -49,10 +68,8 @@ export function stableGenerationPrefix(
   return [
     "You are the RB Harness documentation writer. You write documentation only: never application code, never a commit, never a command execution.",
     "You have read-only access to the target project through your tools. Never inspect the RB Harness installation, its source, its tests, or its packaged resources; everything you need about the output contract is below.",
-    `Return the complete document set as exactly ${DOCUMENT_BUNDLE_BEGIN}, one JSON object, and ${DOCUMENT_BUNDLE_END}. Do not use Markdown fences around the envelope and do not add surrounding prose.`,
-    `The JSON shape is:\n${BUNDLE_SHAPE}`,
-    `Every \`content\` value is the full file body, not a diff and not a summary. At most ${HARNESS_BUDGET.documents.maxDocuments} documents and ${HARNESS_BUDGET.documents.maxDocumentBytes} bytes per document.`,
-    "This is the only authoring call. There is no later documentation manager and no editorial review pass, so resolve every engineering detail now. Do not ask questions here: the interview is closed.",
+    "RB Harness, not you, owns files, checkpoints, validation, manifests, and publication. Your response is data for one bounded authoring step.",
+    "There is no documentation manager or editorial review. Use the closed decisions exactly, preserve grounded existing behavior, and do not ask questions during authoring.",
     generationContractDigest(state.workflow),
     resources,
     `\n===== INPUT PACKAGE (${inputPackage.contract}) =====\n${serializeInputPackage(inputPackage)}`,
@@ -65,25 +82,353 @@ export function stableGenerationPrefix(
   ].join("\n");
 }
 
+/** The first, deliberately small response: paths, shared IDs, and part boundaries only. */
 export function buildGenerationPrompt(
   state: HarnessRunState,
   inputPackage: HarnessInputPackage,
   resources: string,
-  repair?: string,
+  protocolDefect?: string,
 ): string {
   const prompt = [
     stableGenerationPrefix(state, inputPackage, resources),
-    repair ? `\nA prior response could not be parsed. Correct only the protocol defect and keep the same documents: ${repair}` : "",
+    `Return exactly ${DOCUMENT_PLAN_BEGIN}, one JSON object, and ${DOCUMENT_PLAN_END}. Do not use Markdown fences or surrounding prose.`,
+    `The JSON shape is:\n${PLAN_SHAPE}`,
+    `Plan every required artifact, but do not write any document content yet. At most ${HARNESS_BUDGET.documents.maxPlannedDocuments} documents and ${HARNESS_BUDGET.documents.maxPlannedParts} total parts.`,
+    `Split every document into semantic, contiguous parts whose authored content will each be at most ${HARNESS_BUDGET.documents.maxPartBytes} UTF-8 bytes. A large PHASES.md must be divided by phase or another stable semantic boundary.`,
+    `Keep the entire plan below ${HARNESS_BUDGET.documents.maxPlanBytes} UTF-8 bytes and target 12 KiB. Be concise, but never try to count bytes in an individual prose field; RB Harness enforces the total response budget deterministically.`,
+    "The plan is a compact index, never documentation prose. Do not repeat the request, rationale, acceptance criteria, evidence, or decisions inside every purpose. Put shared decisions and stable IDs once in the coordination ledger; a part purpose names only its boundary, required sections, and referenced IDs.",
+    "Part writers receive the complete authority prefix, closed decision checkpoint, coordination ledger, and whole plan. They do not need duplicated facts in each purpose and cannot inspect the project again.",
+    "For PHASES.md, allocate the final globally unique T### sequence in the coordination ledger and every part purpose now. Never use phase-local task numbering, never restart T001 in a later phase, and never use P##-T### as a substitute ID.",
+    "A legacy adapter may return a complete rb-harness-documents/v1 bundle for backward compatibility, but a normal writer must return the plan.",
+    protocolDefect ? `A prior plan response was rejected. Do not repeat it: ${protocolDefect}` : "",
   ].filter(Boolean).join("\n");
-  assertPromptWithinBudget(prompt, HARNESS_BUDGET.prompt.maxGenerationPromptBytes, "generation");
+  assertPromptWithinBudget(prompt, HARNESS_BUDGET.prompt.maxGenerationPromptBytes, "generation plan");
   return prompt;
+}
+
+function buildDocumentPartPrompt(
+  prefix: string,
+  plan: DocumentPlan,
+  document: PlannedDocument,
+  part: DocumentPlanPart,
+  documentIndex: number,
+  partIndex: number,
+  previousPart?: DocumentPart,
+  repairContext?: string,
+): string {
+  const prompt = [
+    prefix,
+    `\n===== AUTHORING PLAN (${plan.contract}) =====\n${JSON.stringify(plan)}`,
+    repairContext ? `\n===== REPAIR AUTHORITY =====\n${repairContext}` : "",
+    `\n===== TARGET DOCUMENT PART =====\n${JSON.stringify({
+      path: document.path,
+      documentPurpose: document.purpose,
+      document: documentIndex + 1,
+      documents: plan.documents.length,
+      part: part.id,
+      partPurpose: part.purpose,
+      partNumber: partIndex + 1,
+      parts: document.parts.length,
+      maximumUtf8Bytes: HARNESS_BUDGET.documents.maxPartBytes,
+    })}`,
+    previousPart ? `\n===== IMMEDIATELY PREVIOUS CONTIGUOUS PART =====\n${JSON.stringify({
+      part: previousPart.part,
+      content: previousPart.content,
+    })}` : "",
+    "Return only the raw UTF-8 content of the requested document segment. Do not wrap it in JSON, protocol markers, commentary, or a Markdown code fence.",
+    "Write only the requested contiguous segment. The first part begins the file; every later part continues exactly after the previous segment; concatenation must produce one complete document without omitted or duplicated text.",
+    "This is a closed authoring step. Do not inspect files, call tools, rediscover evidence, or change the plan. All authority needed for this segment is in the plan, coordination ledger, target brief, and previous segment above.",
+    `The content must not exceed ${HARNESS_BUDGET.documents.maxPartBytes} UTF-8 bytes. If the plan assigned too much to this part, be concise while preserving every RIGID fact and contract requirement; never spill into another response.`,
+  ].filter(Boolean).join("\n");
+  assertPromptWithinBudget(prompt, repairContext ? HARNESS_BUDGET.prompt.maxRepairPromptBytes : HARNESS_BUDGET.prompt.maxGenerationPromptBytes, "document part");
+  return prompt;
+}
+
+interface IncrementalCheckpoint {
+  contract: "rb-harness-incremental-generation/v1";
+  authoritySha256: string;
+  plan: DocumentPlan;
+  parts: Array<DocumentPart & { sha256: string }>;
+}
+
+function checkpointPath(runRoot: string, name: string): string {
+  return resolve(runRoot, `${name}.json`);
+}
+
+async function saveCheckpoint(runRoot: string, name: string, checkpoint: IncrementalCheckpoint): Promise<void> {
+  await mkdir(runRoot, { recursive: true, mode: 0o700 });
+  const target = checkpointPath(runRoot, name);
+  const temporary = `${target}.tmp-${process.pid}`;
+  await writeFile(temporary, `${JSON.stringify(checkpoint, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  await rename(temporary, target);
+}
+
+function planEnvelope(plan: DocumentPlan): string {
+  return `${DOCUMENT_PLAN_BEGIN}\n${JSON.stringify(plan)}\n${DOCUMENT_PLAN_END}`;
+}
+
+function partEnvelope(part: DocumentPart): string {
+  return `${DOCUMENT_PART_BEGIN}\n${JSON.stringify(part)}\n${DOCUMENT_PART_END}`;
+}
+
+async function loadCheckpoint(runRoot: string, name: string, authoritySha256: string): Promise<IncrementalCheckpoint | undefined> {
+  let raw: string;
+  try { raw = await readFile(checkpointPath(runRoot, name), "utf8"); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); }
+  catch { throw new Error(`incremental checkpoint ${name} is malformed`); }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`incremental checkpoint ${name} is invalid`);
+  const value = parsed as Record<string, unknown>;
+  if (value.contract !== "rb-harness-incremental-generation/v1") throw new Error(`incremental checkpoint ${name} has an unsupported contract`);
+  if (value.authoritySha256 !== authoritySha256) throw new Error(`incremental checkpoint ${name} is stale for the current authoring authority`);
+  const plan = parseDocumentPlan(planEnvelope(value.plan as DocumentPlan));
+  if (!Array.isArray(value.parts)) throw new Error(`incremental checkpoint ${name} has no parts array`);
+  const expected = new Map<string, { path: string; part: string }>(plan.documents.flatMap((document) => document.parts.map((part) => [
+    `${document.path}\0${part.id}`,
+    { path: document.path, part: part.id },
+  ] as const)));
+  const seen = new Set<string>();
+  const parts = value.parts.map((rawPart): DocumentPart & { sha256: string } => {
+    if (!rawPart || typeof rawPart !== "object" || Array.isArray(rawPart)) throw new Error(`incremental checkpoint ${name} contains an invalid part`);
+    const record = rawPart as Record<string, unknown>;
+    const key = `${String(record.path ?? "")}\0${String(record.part ?? "")}`;
+    const target = expected.get(key);
+    if (!target || seen.has(key)) throw new Error(`incremental checkpoint ${name} contains an unexpected or duplicate part`);
+    seen.add(key);
+    const part = parseDocumentPart(partEnvelope({
+      contract: DOCUMENT_PART_CONTRACT,
+      path: record.path as string,
+      part: record.part as string,
+      content: record.content as string,
+    }), target);
+    const sha256 = typeof record.sha256 === "string" ? record.sha256 : "";
+    if (sha256 !== sha256Text(part.content)) throw new Error(`incremental checkpoint ${name} contains a stale part ${part.path}#${part.part}`);
+    return { ...part, sha256 };
+  });
+  return { contract: "rb-harness-incremental-generation/v1", authoritySha256, plan, parts };
+}
+
+function parsePartOrLegacyDocument(output: string, expected: { path: string; part: string }): DocumentPart {
+  if (output.includes(DOCUMENT_PART_BEGIN)) return parseDocumentPart(output, expected);
+  if (output.includes(DOCUMENT_BUNDLE_BEGIN)) {
+    const bundle = parseDocumentBundle(output);
+    if (bundle.status !== "complete" || bundle.documents.length !== 1 || bundle.documents[0]?.path !== expected.path) {
+      throw new Error(`provider did not return the requested bounded document part ${expected.path}#${expected.part}`);
+    }
+    return parseDocumentPart(partEnvelope({
+      contract: DOCUMENT_PART_CONTRACT,
+      path: expected.path,
+      part: expected.part,
+      content: bundle.documents[0].content,
+    }), expected);
+  }
+  // The target path and part ID are already owned by the checkpoint, so a CLI
+  // that returns plain Markdown cannot redirect a write. Accepting its bounded
+  // stdout removes a redundant JSON failure mode without weakening identity,
+  // size, checkpoint, assembly, or publication validation.
+  return parseDocumentPart(partEnvelope({
+    contract: DOCUMENT_PART_CONTRACT,
+    path: expected.path,
+    part: expected.part,
+    content: output,
+  }), expected);
+}
+
+function planFormattingContract(): string {
+  return [
+    `Return exactly ${DOCUMENT_PLAN_BEGIN}, one JSON object, and ${DOCUMENT_PLAN_END}.`,
+    `The exact JSON shape is ${PLAN_SHAPE}`,
+    "Allowed root fields: contract, status, summary, coordination, documents, blocked.",
+    "Allowed document fields: path, purpose, parts. Allowed part fields: id, purpose. No other field is permitted.",
+    "Keep every original path, purpose, part ID, decision, and blocker unchanged; remove presentation-only or explanatory keys instead of translating them into new authority.",
+  ].join("\n");
+}
+
+function partFormattingContract(expected: { path: string; part: string }): string {
+  return [
+    `Return exactly ${DOCUMENT_PART_BEGIN}, one JSON object, and ${DOCUMENT_PART_END}.`,
+    `The exact JSON shape is {"contract":"${DOCUMENT_PART_CONTRACT}","path":${JSON.stringify(expected.path)},"part":${JSON.stringify(expected.part)},"content":"<the original authored document segment>"}.`,
+    "Allowed fields are exactly contract, path, part, and content.",
+    "Recover the authored document segment from the raw semantic response without rewriting, summarizing, extending, or improving it. JSON-escape the content correctly.",
+  ].join("\n");
+}
+
+interface IncrementalAuthoringOptions {
+  state: HarnessRunState;
+  runRoot: string;
+  evidenceRoot: string;
+  timeoutSeconds: number;
+  firstOutputTimeoutSeconds: number;
+  streamOutput?: boolean;
+  mode: "generation" | "repair";
+  stage: "generation" | "structural-repair";
+  checkpointName: string;
+  logPrefix: string;
+  prefix: string;
+  planPrompt: string;
+  repairContext?: string;
+}
+
+async function authorIncrementally(options: IncrementalAuthoringOptions): Promise<DocumentBundle> {
+  const authoritySha256 = sha256Text(options.planPrompt);
+  let checkpoint = await loadCheckpoint(options.runRoot, options.checkpointName, authoritySha256);
+  if (!checkpoint) {
+    const planLogPath = resolve(options.runRoot, `logs/${options.logPrefix}-plan.log`);
+    let rawPlan = await successfulProviderLogStdout(planLogPath);
+    if (rawPlan !== undefined) {
+      process.stdout.write("[rb-harness] resposta bruta do plano recuperada do log; geração semântica não será reinvocada.\n");
+    }
+    // A repair receives the complete affected excerpts and deterministic error
+    // list in its prompt. Giving it discovery tools made it search the original
+    // project for staged artifacts that intentionally do not exist there,
+    // multiplying requests and inventing blockers. Generation planning still
+    // gets the bounded evidence projection; repair planning is closed.
+    const closedPlanRoot = rawPlan === undefined && options.mode === "repair"
+      ? await mkdtemp(resolve(tmpdir(), "rb-harness-closed-repair-plan-"))
+      : undefined;
+    if (closedPlanRoot) await chmod(closedPlanRoot, 0o555);
+    if (rawPlan === undefined) {
+      let result: Awaited<ReturnType<typeof runProvider>>;
+      try {
+        result = await runProvider({
+          configuration: options.state.provider as ProviderConfiguration,
+          mode: options.mode,
+          stage: options.stage,
+          projectRoot: closedPlanRoot ?? options.evidenceRoot,
+          prompt: options.planPrompt,
+          logPath: planLogPath,
+          timeoutSeconds: options.timeoutSeconds,
+          firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
+          streamOutput: options.streamOutput,
+          attempt: 1,
+          // A greenfield init already carries its complete request and closed
+          // decisions in the authority prefix. Re-reading the same PRD buys a
+          // second provider turn and input bill without discovering AS IS code.
+          toolsEnabled: options.mode !== "repair" && options.state.workflow !== "init",
+        });
+      } finally {
+        if (closedPlanRoot) {
+          await chmod(closedPlanRoot, 0o700).catch(() => undefined);
+          await rm(closedPlanRoot, { recursive: true, force: true });
+        }
+      }
+      rawPlan = result.stdout;
+    }
+    const planned = await parseOrFormatControlOutput({
+      configuration: options.state.provider as ProviderConfiguration,
+      mode: options.mode,
+      stage: options.stage,
+      runRoot: options.runRoot,
+      logPrefix: `${options.logPrefix}-plan-format`,
+      label: options.mode === "repair" ? "structural repair plan" : "document plan",
+      rawOutput: rawPlan,
+      contract: planFormattingContract(),
+      parse: parsePlanOrLegacyBundle,
+      timeoutSeconds: options.timeoutSeconds,
+      firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
+      streamOutput: options.streamOutput,
+    });
+    if (planned.kind === "bundle") return planned.bundle;
+    checkpoint = {
+      contract: "rb-harness-incremental-generation/v1",
+      authoritySha256,
+      plan: planned.plan,
+      parts: [],
+    };
+    await saveCheckpoint(options.runRoot, options.checkpointName, checkpoint);
+    const totalParts = checkpoint.plan.documents.reduce((sum, document) => sum + document.parts.length, 0);
+    process.stdout.write(`[rb-harness] plano incremental recebido: ${checkpoint.plan.documents.length} documento(s), ${totalParts} parte(s) limitada(s).\n`);
+  } else {
+    process.stdout.write(`[rb-harness] checkpoint incremental recuperado: ${checkpoint.parts.length} parte(s) já concluída(s).\n`);
+  }
+  if (checkpoint.plan.status === "blocked") return assembleDocumentPlan(checkpoint.plan, []);
+
+  const completed = new Map(checkpoint.parts.map((part) => [`${part.path}\0${part.part}`, part]));
+  const totalParts = checkpoint.plan.documents.reduce((sum, document) => sum + document.parts.length, 0);
+  const closedRoot = await mkdtemp(resolve(tmpdir(), "rb-harness-closed-authoring-"));
+  await chmod(closedRoot, 0o555);
+  try {
+    let ordinal = 0;
+    for (let documentIndex = 0; documentIndex < checkpoint.plan.documents.length; documentIndex += 1) {
+      const document = checkpoint.plan.documents[documentIndex]!;
+      for (let partIndex = 0; partIndex < document.parts.length; partIndex += 1) {
+        ordinal += 1;
+        const part = document.parts[partIndex]!;
+        const key = `${document.path}\0${part.id}`;
+        if (completed.has(key)) continue;
+        const previousPlanPart = partIndex > 0 ? document.parts[partIndex - 1] : undefined;
+        const previousPart = previousPlanPart ? completed.get(`${document.path}\0${previousPlanPart.id}`) : undefined;
+        const logPath = resolve(options.runRoot, `logs/${options.logPrefix}-document-${String(documentIndex + 1).padStart(3, "0")}-part-${String(partIndex + 1).padStart(3, "0")}.log`);
+        const expected = { path: document.path, part: part.id };
+        let rawPart = await successfulProviderLogStdout(logPath);
+        if (rawPart !== undefined) {
+          process.stdout.write(`[rb-harness] resposta bruta da parte recuperada do log: ${document.path} · ${part.id}; autoria semântica não será reinvocada.\n`);
+        } else {
+          process.stdout.write(`[rb-harness] escrevendo ${ordinal}/${totalParts}: ${document.path} · ${part.id}.\n`);
+          const result = await runProvider({
+            configuration: options.state.provider as ProviderConfiguration,
+            mode: options.mode,
+            stage: options.stage,
+            projectRoot: closedRoot,
+            prompt: buildDocumentPartPrompt(
+              options.prefix,
+              checkpoint.plan,
+              document,
+              part,
+              documentIndex,
+              partIndex,
+              previousPart,
+              options.repairContext,
+            ),
+            logPath,
+            timeoutSeconds: options.timeoutSeconds,
+            firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
+            streamOutput: options.streamOutput,
+            attempt: ordinal + 1,
+            toolsEnabled: false,
+          });
+          rawPart = result.stdout;
+        }
+        let authored: DocumentPart;
+        try {
+          authored = parsePartOrLegacyDocument(rawPart, expected);
+        } catch {
+          authored = await parseOrFormatControlOutput({
+            configuration: options.state.provider as ProviderConfiguration,
+            mode: options.mode,
+            stage: options.stage,
+            runRoot: options.runRoot,
+            logPrefix: `${options.logPrefix}-document-${String(documentIndex + 1).padStart(3, "0")}-part-${String(partIndex + 1).padStart(3, "0")}-format`,
+            label: `document part ${document.path}#${part.id}`,
+            rawOutput: rawPart,
+            contract: partFormattingContract(expected),
+            parse: (output) => parseDocumentPart(output, expected),
+            timeoutSeconds: options.timeoutSeconds,
+            firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
+            streamOutput: options.streamOutput,
+          });
+        }
+        const stored = { ...authored, sha256: sha256Text(authored.content) };
+        checkpoint.parts.push(stored);
+        completed.set(key, stored);
+        await saveCheckpoint(options.runRoot, options.checkpointName, checkpoint);
+      }
+    }
+  } finally {
+    await chmod(closedRoot, 0o700).catch(() => undefined);
+    await rm(closedRoot, { recursive: true, force: true });
+  }
+  return assembleDocumentPlan(checkpoint.plan, checkpoint.parts);
 }
 
 export interface GenerationRequestOptions {
   state: HarnessRunState;
   inputPackage: HarnessInputPackage;
   runRoot: string;
-  /** Read-only evidence projection the provider runs in (CR-005). */
   evidenceRoot: string;
   timeoutSeconds: number;
   firstOutputTimeoutSeconds: number;
@@ -91,41 +436,25 @@ export interface GenerationRequestOptions {
 }
 
 export async function requestDocumentBundle(options: GenerationRequestOptions): Promise<DocumentBundle> {
-  const { state, runRoot } = options;
-  const resources = await loadWorkflowResources(state.workflow, {
-    includeHeadlessContracts: requestNeedsHeadlessContracts(state.request),
+  const resources = await loadWorkflowResources(options.state.workflow, {
+    includeHeadlessContracts: requestNeedsHeadlessContracts(options.state.request),
     section: "generation",
   });
-  let repair: string | undefined;
-  for (let attempt = 1; attempt <= HARNESS_BUDGET.generation.protocolAttempts; attempt += 1) {
-    const result = await runProvider({
-      configuration: state.provider as ProviderConfiguration,
-      mode: "generation",
-      stage: "generation",
-      projectRoot: options.evidenceRoot,
-      prompt: buildGenerationPrompt(state, options.inputPackage, resources, repair),
-      logPath: resolve(runRoot, `logs/generation-protocol-${attempt}.log`),
-      timeoutSeconds: options.timeoutSeconds,
-      firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
-      streamOutput: options.streamOutput,
-      attempt,
-    });
-    try {
-      return parseDocumentBundle(result.stdout);
-    } catch (error) {
-      repair = error instanceof Error ? error.message : String(error);
-      if (attempt === HARNESS_BUDGET.generation.protocolAttempts) {
-        throw new Error(`provider could not satisfy the document bundle protocol: ${repair}`);
-      }
-    }
-  }
-  throw new Error("unreachable document bundle protocol state");
+  const prefix = stableGenerationPrefix(options.state, options.inputPackage, resources);
+  return authorIncrementally({
+    ...options,
+    mode: "generation",
+    stage: "generation",
+    checkpointName: "incremental-generation",
+    logPrefix: "generation",
+    prefix,
+    planPrompt: buildGenerationPrompt(options.state, options.inputPackage, resources),
+  });
 }
 
 export interface StructuralError {
   code: string;
   message: string;
-  /** Logical artifact path the error belongs to, when the validator knows it. */
   path?: string;
 }
 
@@ -134,23 +463,21 @@ export function buildRepairPrompt(
   bundle: DocumentBundle,
   errors: StructuralError[],
   affected: string[],
-  protocolRepair?: string,
+  protocolDefect?: string,
 ): string {
   const prompt = [
-    "You are the RB Harness structural repair pass. This is the only repair of this run.",
-    `Return exactly ${DOCUMENT_BUNDLE_BEGIN}, one JSON object, and ${DOCUMENT_BUNDLE_END} containing only the documents you changed plus any document an error requires you to add.`,
-    `The JSON shape is:\n${BUNDLE_SHAPE}`,
+    "You are the RB Harness structural repair writer. Repair only deterministic errors; never rewrite unrelated documents.",
+    "RB Harness owns files, validation, checkpoints, and publication. Return a compact plan before any replacement content.",
+    `Return exactly ${DOCUMENT_PLAN_BEGIN}, one JSON object, and ${DOCUMENT_PLAN_END}. Do not use Markdown fences or surrounding prose.`,
+    `The JSON shape is:\n${PLAN_SHAPE}`,
     repairContractDigest(state.workflow),
-    `\n===== DETERMINISTIC ERRORS (ordered, all of them) =====\n${JSON.stringify(
-      errors.map((error, index) => ({ order: index + 1, code: error.code, path: error.path, message: error.message })),
-    )}`,
+    `\n===== DETERMINISTIC ERRORS =====\n${JSON.stringify(errors.map((error, index) => ({ order: index + 1, ...error })))}`,
     `\n===== AFFECTED DOCUMENTS =====\n${JSON.stringify(documentExcerpts(bundle, affected))}`,
-    `\n===== DOCUMENTS THAT MUST NOT CHANGE =====\n${JSON.stringify(
-      bundle.documents.map((document) => document.path).filter((path) => !affected.includes(path)),
-    )}`,
-    protocolRepair ? `\nA prior response could not be parsed. Correct only the protocol defect: ${protocolRepair}` : "",
+    `\n===== DOCUMENTS THAT MUST NOT CHANGE =====\n${JSON.stringify(bundle.documents.map((document) => document.path).filter((path) => !affected.includes(path)))}`,
+    `Plan only replacements or additions required by those errors. Existing documents outside AFFECTED DOCUMENTS are forbidden. Split each document into parts of at most ${HARNESS_BUDGET.documents.maxPartBytes} UTF-8 bytes, and put the complete repair brief for each segment in its part purpose because the part writer cannot inspect files.`,
+    protocolDefect ? `A prior repair response was rejected. Do not repeat it: ${protocolDefect}` : "",
   ].filter(Boolean).join("\n");
-  assertPromptWithinBudget(prompt, HARNESS_BUDGET.prompt.maxRepairPromptBytes, "structural repair");
+  assertPromptWithinBudget(prompt, HARNESS_BUDGET.prompt.maxRepairPromptBytes, "structural repair plan");
   return prompt;
 }
 
@@ -159,7 +486,6 @@ export interface RepairRequestOptions {
   bundle: DocumentBundle;
   errors: StructuralError[];
   runRoot: string;
-  /** Read-only evidence projection the provider runs in (CR-005). */
   evidenceRoot: string;
   timeoutSeconds: number;
   firstOutputTimeoutSeconds: number;
@@ -167,32 +493,35 @@ export interface RepairRequestOptions {
 }
 
 export async function requestStructuralRepair(options: RepairRequestOptions): Promise<DocumentBundle> {
-  const { state, bundle, errors, runRoot } = options;
-  const known = new Set(bundle.documents.map((document) => document.path));
-  const affected = [...new Set(errors.map((error) => error.path).filter((path): path is string => Boolean(path && known.has(path))))]
+  const known = new Set(options.bundle.documents.map((document) => document.path));
+  const affected = [...new Set(options.errors.map((error) => error.path).filter((path): path is string => Boolean(path && known.has(path))))]
     .sort((left, right) => left.localeCompare(right));
-  let protocolRepair: string | undefined;
-  for (let attempt = 1; attempt <= HARNESS_BUDGET.generation.protocolAttempts; attempt += 1) {
-    const result = await runProvider({
-      configuration: state.provider as ProviderConfiguration,
-      mode: "repair",
-      stage: "structural-repair",
-      projectRoot: options.evidenceRoot,
-      prompt: buildRepairPrompt(state, bundle, errors, affected, protocolRepair),
-      logPath: resolve(runRoot, `logs/structural-repair-protocol-${attempt}.log`),
-      timeoutSeconds: options.timeoutSeconds,
-      firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
-      streamOutput: options.streamOutput,
-      attempt,
-    });
-    try {
-      return mergeDocumentBundles(bundle, parseDocumentBundle(result.stdout));
-    } catch (error) {
-      protocolRepair = error instanceof Error ? error.message : String(error);
-      if (attempt === HARNESS_BUDGET.generation.protocolAttempts) {
-        throw new Error(`structural repair could not satisfy the document bundle protocol: ${protocolRepair}`);
-      }
+  const planPrompt = buildRepairPrompt(options.state, options.bundle, options.errors, affected);
+  const repaired = await authorIncrementally({
+    state: options.state,
+    runRoot: options.runRoot,
+    evidenceRoot: options.evidenceRoot,
+    timeoutSeconds: options.timeoutSeconds,
+    firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
+    streamOutput: options.streamOutput,
+    mode: "repair",
+    stage: "structural-repair",
+    checkpointName: "incremental-structural-repair",
+    logPrefix: "structural-repair",
+    prefix: [
+      "You are the RB Harness structural repair writer. Write documentation only and change only the authorized affected documents.",
+      repairContractDigest(options.state.workflow),
+    ].join("\n"),
+    planPrompt,
+    repairContext: JSON.stringify({ errors: options.errors, affected: documentExcerpts(options.bundle, affected) }),
+  });
+  for (const document of repaired.documents) {
+    if (known.has(document.path) && !affected.includes(document.path)) {
+      throw new Error(`structural repair attempted to rewrite unaffected document ${document.path}`);
     }
   }
-  throw new Error("unreachable structural repair protocol state");
+  return mergeDocumentBundles(options.bundle, repaired);
 }
+
+// Retained exports keep the internal contract migration source-compatible.
+export { DOCUMENT_BUNDLE_BEGIN, DOCUMENT_BUNDLE_CONTRACT, DOCUMENT_BUNDLE_END };

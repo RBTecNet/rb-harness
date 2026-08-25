@@ -1,1 +1,1 @@
-export const HARNESS_VERSION = "0.4.3";
+export const HARNESS_VERSION = "0.5.8";

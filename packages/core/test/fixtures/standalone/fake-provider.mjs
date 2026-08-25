@@ -12,7 +12,12 @@ if (process.env.RB_HARNESS_TEST_PROMPT_FILE) {
 }
 
 if (process.env.RB_HARNESS_MODE === "interview") {
-  const pending = prompt.includes('"rawAnswer"');
+  if (process.env.RB_HARNESS_TEST_PROSE_INTERVIEW && !prompt.includes("===== EXACT OUTPUT CONTRACT =====")) {
+    process.stdout.write("I completed the substantive analysis and identified the material scope boundary. Let me now craft the required envelope.");
+    process.exit(0);
+  }
+  const pending = prompt.includes('"rawAnswer"')
+    || prompt.includes("answer scope-boundary was never classified");
   const result = pending ? {
     contract: "rb-harness-interview/v1",
     status: "ready",

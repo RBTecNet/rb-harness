@@ -175,7 +175,11 @@ async function executionMetadata(path: string): Promise<{
 }> {
   const source = await readFile(path, "utf8");
   const result = validateExecutionMarkdown(source);
-  if (!result.valid) return { status: "invalid", contract: "rb-execution/v1" };
+  // Identity and contract markers remain parseable metadata even when another
+  // field makes the document invalid. Dropping the ID here changed the
+  // manifest to its path fallback and emitted a false artifact.id.mismatch on
+  // top of the real validation error, misleading the bounded repair writer.
+  if (!result.valid) return { id: result.document?.artifactId, status: "invalid", contract: result.document?.contract ?? "rb-execution/v1" };
   if (/\[NEEDS DECISION\]|<!--\s*rb-readiness:\s*blocked\s*-->/.test(source)) {
     return { id: result.document?.artifactId, status: "blocked", contract: result.document?.contract };
   }

@@ -1,5 +1,5 @@
 /**
- * The document bundle produced by the single authoring call (RF-004).
+ * The document bundle assembled from bounded authoring parts (RF-004).
  *
  * The generator returns typed `path`/`content` pairs; the orchestrator — not
  * the model — creates directories, writes files, derives the manifest, and
@@ -31,7 +31,7 @@ export interface DocumentBundle {
 /** Paths the orchestrator owns; a bundle may never claim them. */
 const CODE_OWNED_PATHS = new Set([".rb/rb-manifest.json", ".rb/artifacts.tsv"]);
 
-function normalizeLogicalPath(value: unknown, index: number): string {
+export function normalizeGeneratedDocumentPath(value: unknown, index: number): string {
   if (typeof value !== "string" || !value.trim()) {
     throw new Error(`document ${index + 1} has no path`);
   }
@@ -54,7 +54,7 @@ function normalizeLogicalPath(value: unknown, index: number): string {
   return path;
 }
 
-function normalizeContent(value: unknown, path: string): string {
+export function normalizeGeneratedDocumentContent(value: unknown, path: string): string {
   if (typeof value !== "string") throw new Error(`document ${path} has no string content`);
   if (Buffer.byteLength(value) > HARNESS_BUDGET.documents.maxDocumentBytes) {
     throw new Error(`document ${path} exceeds ${HARNESS_BUDGET.documents.maxDocumentBytes} bytes`);
@@ -62,6 +62,11 @@ function normalizeContent(value: unknown, path: string): string {
   const normalized = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   if (!normalized.trim()) throw new Error(`document ${path} is empty`);
   return normalized.endsWith("\n") ? normalized : `${normalized}\n`;
+}
+
+export function normalizeGeneratedDocument(pathValue: unknown, contentValue: unknown, index: number): GeneratedDocument {
+  const path = normalizeGeneratedDocumentPath(pathValue, index);
+  return { path, content: normalizeGeneratedDocumentContent(contentValue, path) };
 }
 
 function stringArray(value: unknown, label: string): string[] {
@@ -90,8 +95,34 @@ export function extractEnvelope(output: string, begin: string, end: string, labe
   return source;
 }
 
+/**
+ * Prefer the declared envelope, but preserve a paid response that is already
+ * one valid JSON object and merely omitted the marker lines. Surrounding
+ * analysis without a JSON object is still rejected and enters the bounded
+ * provider-neutral formatting boundary.
+ */
+export function extractEnvelopeOrJson(output: string, begin: string, end: string, label: string): string {
+  if (output.includes(begin)) return extractEnvelope(output, begin, end, label);
+  const trimmed = output.trim();
+  const unfenced = trimmed.startsWith("```") && trimmed.endsWith("```")
+    ? trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim()
+    : trimmed;
+  const starts: number[] = [];
+  for (let index = unfenced.indexOf("{"); index >= 0; index = unfenced.indexOf("{", index + 1)) starts.push(index);
+  const last = unfenced.lastIndexOf("}");
+  for (const start of starts) {
+    if (last <= start) break;
+    const candidate = unfenced.slice(start, last + 1);
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return candidate;
+    } catch { /* try the next opening brace */ }
+  }
+  throw new Error(`provider output does not contain the ${label} envelope`);
+}
+
 export function parseDocumentBundle(output: string): DocumentBundle {
-  const source = extractEnvelope(output, DOCUMENT_BUNDLE_BEGIN, DOCUMENT_BUNDLE_END, "document bundle");
+  const source = extractEnvelopeOrJson(output, DOCUMENT_BUNDLE_BEGIN, DOCUMENT_BUNDLE_END, "document bundle");
   if (Buffer.byteLength(source) > HARNESS_BUDGET.documents.maxBundleBytes) {
     throw new Error(`document bundle exceeds ${HARNESS_BUDGET.documents.maxBundleBytes} bytes`);
   }
@@ -128,10 +159,10 @@ export function parseDocumentBundle(output: string): DocumentBundle {
     for (const key of Object.keys(record)) {
       if (key !== "path" && key !== "content") throw new Error(`unsupported document field: ${key}`);
     }
-    const path = normalizeLogicalPath(record.path, index);
+    const path = normalizeGeneratedDocumentPath(record.path, index);
     if (seen.has(path)) throw new Error(`document bundle declares ${path} twice`);
     seen.add(path);
-    documents.push({ path, content: normalizeContent(record.content, path) });
+    documents.push({ path, content: normalizeGeneratedDocumentContent(record.content, path) });
   });
   const blocked = stringArray(bundle.blocked, "document bundle blocked");
   if (bundle.status === "blocked" && !blocked.length) {
@@ -168,6 +199,87 @@ export function mergeDocumentBundles(base: DocumentBundle, repair: DocumentBundl
   };
 }
 
+function record(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Canonicalize the legacy nested HTTP assertion shape without weakening
+ * rb-operational/v1. The transformation is lossless and runs only when every
+ * nested field has one exact representation in the current probe contract.
+ */
+function normalizeOperationalProbe(value: unknown): boolean {
+  if (!record(value) || value.kind !== "http" || !record(value.expect)) return false;
+  const expectation = value.expect;
+  if (Object.keys(expectation).some((key) => key !== "statusCode" && key !== "bodyIncludes")) return false;
+  if (expectation.statusCode !== undefined) {
+    if (value.status !== undefined && value.status !== expectation.statusCode) return false;
+    value.status = expectation.statusCode;
+  }
+  if (expectation.bodyIncludes !== undefined) {
+    if (value.bodyIncludes !== undefined && JSON.stringify(value.bodyIncludes) !== JSON.stringify(expectation.bodyIncludes)) return false;
+    value.bodyIncludes = expectation.bodyIncludes;
+  }
+  delete value.expect;
+  return true;
+}
+
+function normalizeOperationalDocument(content: string): string {
+  let value: unknown;
+  try { value = JSON.parse(content); }
+  catch { return content; }
+  if (!record(value) || value.contract !== "rb-operational/v1" || !Array.isArray(value.scenarios)) return content;
+  let changed = false;
+  for (const scenario of value.scenarios) {
+    if (!record(scenario) || !Array.isArray(scenario.steps)) continue;
+    for (const step of scenario.steps) {
+      if (!record(step)) continue;
+      if (step.kind === "process") {
+        changed = normalizeOperationalProbe(step.ready) || changed;
+        if (Array.isArray(step.checks)) {
+          for (const check of step.checks) changed = normalizeOperationalProbe(check) || changed;
+        }
+      } else {
+        changed = normalizeOperationalProbe(step) || changed;
+      }
+    }
+  }
+  return changed ? `${JSON.stringify(value, null, 2)}\n` : content;
+}
+
+/** Remove only a task's redundant reference to an enclosing phase dependency. */
+function normalizeExecutionDependencies(content: string): string {
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  let phaseDependencies = new Set<string>();
+  let changed = false;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    if (/^## Phase [0-9]+:/.test(line)) {
+      phaseDependencies = new Set<string>();
+      continue;
+    }
+    const phase = line.match(/^\*\*Depends on:\*\*\s*(.+)$/);
+    if (phase?.[1]) {
+      phaseDependencies = new Set(phase[1].split(",").map((entry) => entry.trim()).filter((entry) => /^P[0-9]{2}$/.test(entry)));
+      continue;
+    }
+    const task = line.match(/^(  - \*\*Depends on:\*\*\s*)(.+)$/);
+    if (!task?.[1] || !task[2]) continue;
+    const dependencies = task[2].split(",").map((entry) => entry.trim()).filter(Boolean);
+    const retained = dependencies.filter((dependency) => !phaseDependencies.has(dependency));
+    if (retained.length === dependencies.length) continue;
+    lines[index] = `${task[1]}${retained.length ? retained.join(", ") : "none"}`;
+    changed = true;
+  }
+  return changed ? lines.join("\n") : content;
+}
+
+export function normalizeGeneratedArtifactContent(path: string, content: string): string {
+  if (path.endsWith("/OPERATIONS.json")) return normalizeOperationalDocument(content);
+  if (path.endsWith("/PHASES.md")) return normalizeExecutionDependencies(content);
+  return content;
+}
+
 /**
  * Write a bundle into the staging tree, whose artifact directory is `.rb`.
  */
@@ -182,7 +294,7 @@ export async function materializeDocuments(
     const relativePath = relative(root, target).split(sep).join("/");
     if (relativePath !== document.path) throw new Error(`document path escapes the staging root: ${document.path}`);
     await mkdir(dirname(target), { recursive: true, mode: 0o700 });
-    await writeFile(target, document.content, { encoding: "utf8", mode: 0o644, flag: "w" });
+    await writeFile(target, normalizeGeneratedArtifactContent(document.path, document.content), { encoding: "utf8", mode: 0o644, flag: "w" });
     written.push(document.path);
   }
   return written;

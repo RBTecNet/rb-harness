@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -16,8 +16,11 @@ import {
   DOCUMENT_BUNDLE_END,
   materializeDocuments,
   mergeDocumentBundles,
+  normalizeGeneratedArtifactContent,
   parseDocumentBundle,
 } from "../src/harness-documents.js";
+import { validateExecutionMarkdown } from "../src/execution-contract.js";
+import { validateOperationalJson } from "../src/operational-contract.js";
 import {
   buildInputPackage,
   serializeInputPackage,
@@ -44,11 +47,21 @@ function envelope(value: unknown): string {
 }
 
 describe("operational budget", () => {
-  it("keeps the interview finite at one batch plus one follow-up", () => {
-    expect(HARNESS_BUDGET.interview.maxRounds).toBe(2);
+  it("keeps the adaptive interview finite behind declared safety ceilings", () => {
+    // The interview converges rather than expiring, so the ceilings only have
+    // to keep the state machine finite — they are never the stopping point.
+    expect(HARNESS_BUDGET.interview.maxRounds).toBeGreaterThan(2);
+    expect(Number.isFinite(HARNESS_BUDGET.interview.maxRounds)).toBe(true);
+    expect(Number.isFinite(HARNESS_BUDGET.interview.maxQuestions)).toBe(true);
+    expect(HARNESS_BUDGET.interview.maxQuestions).toBeGreaterThanOrEqual(
+      HARNESS_BUDGET.interview.firstRoundQuestions
+      + (HARNESS_BUDGET.interview.maxRounds - 1) * HARNESS_BUDGET.interview.followUpQuestions,
+    );
     expect(interviewQuestionBudget(1)).toBe(5);
     expect(interviewQuestionBudget(2)).toBe(3);
-    expect(HARNESS_BUDGET.generation.authoringCalls).toBe(1);
+    expect(interviewQuestionBudget(HARNESS_BUDGET.interview.maxRounds)).toBe(3);
+    expect(HARNESS_BUDGET.formatting.maxAttempts).toBe(3);
+    expect(HARNESS_BUDGET.documents.maxPartBytes).toBeLessThanOrEqual(16 * 1024);
     expect(HARNESS_BUDGET.generation.structuralRepairs).toBe(1);
   });
 
@@ -60,6 +73,17 @@ describe("operational budget", () => {
 });
 
 describe("compact contract digest", () => {
+  it("never contradicts incremental planning with the retired complete-bundle instruction", async () => {
+    for (const workflow of WORKFLOWS) {
+      const resources = await loadWorkflowResources(workflow, { section: "generation" });
+      const normalized = resources.replace(/\s+/g, " ");
+      expect(normalized).toContain("return only the compact document plan");
+      expect(normalized).toContain("without document content");
+      expect(resources).not.toContain("Return every document as a");
+      expect(resources).not.toContain("after your call; produce documents");
+    }
+  });
+
   it("stays byte-stable and inside its declared ceiling for every workflow", () => {
     for (const workflow of WORKFLOWS) {
       const digest = generationContractDigest(workflow);
@@ -79,11 +103,26 @@ describe("compact contract digest", () => {
     expect(digest).toContain("Do not compute, restate");
   });
 
+  it("states the exact phase/task dependency split and HTTP probe assertion shape", () => {
+    const digest = generationContractDigest("init");
+    expect(digest).toContain("task `Depends on` field contains only earlier `T###` task IDs, never a `P##`");
+    expect(digest).toContain("Never restart at `T001` in a later phase");
+    expect(digest).toContain('"status": 200, "bodyIncludes": ["expected text"]');
+    expect(digest).toContain("Never put an `expect` object inside `ready`, `checks`, or another probe");
+    expect(digest).toContain("Never copy a vague source phrase such as `when applicable` or `quando aplicável` into acceptance");
+  });
+
   it("declares the remaining interview budget in each round", () => {
     expect(interviewRoundDirective(1)).toContain("at most 5 question(s)");
-    expect(interviewRoundDirective(1)).toContain("Exactly 1 follow-up round remains");
+    expect(interviewRoundDirective(1)).toContain("adaptive");
+    expect(interviewRoundDirective(1)).toContain("Safety ceilings, not a target");
     expect(interviewRoundDirective(2)).toContain("at most 3 question(s)");
-    expect(interviewRoundDirective(2)).toContain("final round");
+    expect(interviewRoundDirective(2)).not.toContain("final round");
+    // The ceiling still announces itself, so a converging model is never
+    // surprised by a round that turns out to be its last.
+    const last = interviewRoundDirective(HARNESS_BUDGET.interview.maxRounds);
+    expect(last).toContain("final round");
+    expect(interviewRoundDirective(3, HARNESS_BUDGET.interview.maxQuestions - 1)).toContain("final round");
     // The digest itself is round-independent so it can stay in the invariant
     // prompt prefix.
     expect(interviewContractDigest("plan")).toBe(interviewContractDigest("plan"));
@@ -253,6 +292,32 @@ describe("document bundle", () => {
     }));
     expect(bundle.documents[0]?.content).toBe("# Findings\n\nOne.\n");
     expect(await materializeDocuments(staging, bundle)).toEqual([".rb/reviews/2026-01/FINDINGS.md"]);
+  });
+
+  it("canonicalizes legacy probe assertions into strict rb-operational/v1", () => {
+    const source = JSON.stringify({
+      contract: "rb-operational/v1",
+      scenarios: [{ id: "serve", title: "serve", steps: [{
+        id: "process", kind: "process", command: { argv: ["npm", "start"] },
+        ready: { kind: "http", url: "http://127.0.0.1:3000/", expect: { statusCode: 200 } },
+        checks: [{ kind: "http", url: "http://127.0.0.1:3000/", expect: { statusCode: 200, bodyIncludes: ["Cron Facility"] } }],
+      }] }],
+    });
+    const normalized = normalizeGeneratedArtifactContent(".rb/init/OPERATIONS.json", source);
+    expect(validateOperationalJson(normalized).issues).toEqual([]);
+    expect(normalized).not.toContain('"expect"');
+    expect(normalized).toContain('"status": 200');
+    expect(normalized).toContain('"bodyIncludes"');
+  });
+
+  it("removes only redundant phase IDs from task dependencies and keeps rb-execution/v1 strict", async () => {
+    const source = await readFile(resolve(process.cwd(), "../../tests/fixtures/execution/valid/multiple/PHASES.md"), "utf8");
+    const invalid = source.replace("  - **Depends on:** T001", "  - **Depends on:** P01");
+    expect(validateExecutionMarkdown(invalid).issues.map((issue) => issue.code)).toContain("task.dependency.invalid");
+    const normalized = normalizeGeneratedArtifactContent(".rb/init/PHASES.md", invalid);
+    expect(validateExecutionMarkdown(normalized).issues).toEqual([]);
+    expect(normalized).toContain("**Depends on:** P01");
+    expect(normalized).toContain("  - **Depends on:** none");
   });
 });
 

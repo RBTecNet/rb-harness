@@ -87,32 +87,57 @@ stages are separated and finite:
    state, credentials, and temporary files are excluded, and no path into the
    Harness source, `dist`, tests, or installation is ever shipped.
 2. A read-only provider invocation returns a strict interview contract: one
-   batch of at most five material questions.
+   batch of at most five material questions. Valid raw JSON is accepted without
+   marker lines. An invalid control response is preserved and handed to a
+   closed, tool-free formatter for at most three attempts. The formatter sees
+   the exact contract, deterministic parser defect, immutable raw response, and
+   prior invalid formatting; discovery is never repeated solely to repair form.
 3. The executable presents them locally one at a time, persists the answers,
-   and runs at most one focused follow-up round of at most three questions. A
-   RIGID ambiguity that survives it produces `BLOCKED`, never another round.
-4. One authoring invocation receives the closed checkpoint and returns a typed
-   `path`/`content` document bundle on stdout. The provider is read-only and
-   runs in a bounded evidence projection — the admitted project files at their
-   real relative paths, with no `.rb-harness`, `.git`, `.rb/runs`, dependency
-   tree, build output, or credential in it. The orchestrator materializes the
-   returned files into a staging tree holding only `.rb`.
+   and runs focused follow-up rounds of at most three questions until the
+   analysis converges: an answer that opens a new material decision earns
+   another round, and a decision already settled is never re-asked. Two
+   declared safety ceilings — at most 12 rounds and 40 questions per run — keep
+   the loop finite. Reaching one is a failure to converge and produces
+   `BLOCKED` naming the open decision, never a silent acceptance.
+4. One writer role receives the closed checkpoint. A first invocation returns
+   a compact index while running in the bounded evidence projection. Shared
+   authority and IDs occur once in its coordination ledger; short part briefs
+   do not repeat documentation content. Greenfield `init` skips discovery tools
+   because the complete request is already in the authority package. Independent
+   invocations then return document parts capped at 12 KiB from closed briefs,
+   without re-exploration. Every accepted part is checkpointed. The same
+   bounded formatter can serialize a malformed legacy part envelope without
+   repeating part authorship. The
+   orchestrator assembles the typed `path`/`content` bundle and materializes it
+   into a staging tree holding only `.rb`.
 5. Manifest synchronization and workflow-specific deterministic gates validate
    the staged tree. Manifest, hashes, IDs, statuses, and the TSV projection are
-   derived by code, never asked of the model.
+   derived by code, never asked of the model. Every ready `rb-execution/v1`
+   plan additionally passes the decomposition gate: because RB Ralph runs one
+   ephemeral, context-free call per task, ceilings read from the document's own
+   declarations reject a task that carries a whole feature.
 6. Repairable structural errors allow exactly one localized repair, which
    receives the ordered error list and only the affected documents and must
-   preserve everything else byte for byte. A second failure is reported.
+   preserve everything else byte for byte. Its plan runs in a closed,
+   tool-free workspace so it cannot rediscover the repository or invent a
+   blocker for staged files. A second failure is reported.
 7. Only a tree accepted by every deterministic workflow, manifest, execution,
    operational, and tree validator is published atomically. A failed or
    explicitly blocked generation never replaces the current artifact tree.
 
-Apart from the single interview follow-up and the single structural repair —
-both counted and bounded — the state graph is acyclic and no stage can restart
-itself. There is deliberately no LLM manager and no semantic auditor: material
-product ambiguity belongs to the interview, artifact correctness belongs to one
-authoring pass plus deterministic contracts, and semantic implementation review
+Apart from the counted interview rounds and the single structural repair — both
+bounded by declared ceilings — the state graph is acyclic and no stage can
+restart itself. There is deliberately no LLM manager and no semantic auditor: material
+product ambiguity belongs to the interview, artifact correctness belongs to
+bounded incremental authoring plus deterministic contracts, and semantic implementation review
 remains the responsibility of RB Ralph after code exists.
+
+Materialization may canonicalize only representations that are provably
+equivalent under the current contracts: legacy nested HTTP probe assertions
+become the top-level `rb-operational/v1` fields, and a task dependency that
+merely repeats its enclosing phase dependency is removed. Semantic ambiguity
+is never canonicalized. The strict `rb-execution/v1`, `rb-operational/v1`, and
+manifest validators still decide readiness.
 
 Provider supervision applies role-specific UTF-8 byte limits (32 MiB for
 generation, 16 MiB for the repair, 8 MiB for the interview) and owns the whole

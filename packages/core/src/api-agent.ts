@@ -32,6 +32,8 @@ export interface DirectApiAgentOptions {
   credential?: string;
   artifactDirectory?: string;
   evidenceDirectory?: string;
+  /** Disable the tool catalog for a closed, independently authored response. */
+  toolsEnabled?: boolean;
   prompt: string;
   /** Test seam: point the dialect at a local server instead of the provider. */
   endpoint?: string;
@@ -181,7 +183,9 @@ async function writeTelemetry(options: DirectApiAgentOptions, usage: UsageTotals
 }
 
 function systemInstruction(options: DirectApiAgentOptions): string {
-  const permission = options.role === "ralph-agent"
+  const permission = options.toolsEnabled === false
+    ? "This is a closed authoring step. You have no tools and must use only the complete authority supplied in the user prompt."
+    : options.role === "ralph-agent"
     ? "You are the implementation executor. You may inspect, edit, and run commands through the provided local tools."
     : isDocumentationRole(options.role)
       ? "You are a read-only documentation analyst. You may list, search, and read bounded ranges of the target project; you cannot edit files, run commands, start subagents, or execute the project. Documents are delivered in your final answer envelope, never written to disk."
@@ -418,7 +422,8 @@ function anthropicTools(context: ApiAgentToolContext): unknown[] {
   return last ? [...tools.slice(0, -1), { ...last, cache_control: { type: "ephemeral" } }] : tools;
 }
 
-function maximumTurns(role: ApiAgentRole): number {
+function maximumTurns(role: ApiAgentRole, toolsEnabled = true): number {
+  if (!toolsEnabled) return 1;
   return isDocumentationRole(role) ? HARNESS_BUDGET.tools.maxCalls : 80;
 }
 
@@ -466,7 +471,7 @@ async function runOpenAiDialect(
     { role: "system", content: systemInstruction(options) },
     { role: "user", content: options.prompt },
   ];
-  const turns = maximumTurns(options.role);
+  const turns = maximumTurns(options.role, options.toolsEnabled !== false);
   if (!definition.streaming.supported) {
     // Declared per provider in the registry. A provider that cannot serve the
     // dialect's streaming protocol fails here rather than silently retrying
@@ -479,8 +484,7 @@ async function runOpenAiDialect(
     const body: Record<string, unknown> = {
       model: options.model,
       messages,
-      tools,
-      tool_choice: "auto",
+      ...(tools.length ? { tools, tool_choice: "auto" } : {}),
       stream: true,
       ...(definition.streaming.usageOption ? { stream_options: { include_usage: true } } : {}),
       ...(definition.requestExtensions ?? {}),
@@ -498,6 +502,12 @@ async function runOpenAiDialect(
     addOpenAiUsage(usage, streamed.usage);
     addComposition(usage, streamed.composition);
     const message = streamed.message;
+    // A non-empty prefix is still incomplete when the provider says `length`.
+    // Publishing it merely moves the failure into the envelope parser and used
+    // to trigger the same paid request a second time.
+    if (streamed.finishReason === "length") {
+      throw new Error(missingFinalResponse("finish_reason", streamed.finishReason, streamed.composition, streamed.usage));
+    }
     messages.push(message);
     const choice = { finish_reason: streamed.finishReason };
     const rawCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
@@ -541,7 +551,7 @@ async function runAnthropicDialect(
   const tools = anthropicTools(context);
   const system = [{ type: "text", text: systemInstruction(options), cache_control: { type: "ephemeral" } }];
   const messages: Array<Record<string, unknown>> = [{ role: "user", content: options.prompt }];
-  const turns = maximumTurns(options.role);
+  const turns = maximumTurns(options.role, options.toolsEnabled !== false);
   const definition = directProvider(options.provider);
   if (!definition.streaming.supported) {
     throw new Error(`provider ${options.provider} does not support the streaming Messages protocol`);
@@ -553,7 +563,7 @@ async function runAnthropicDialect(
       max_tokens: 32768,
       system,
       messages,
-      tools,
+      ...(tools.length ? { tools } : {}),
       stream: true,
       ...(definition.requestExtensions ?? {}),
       ...reasoning.fields,
@@ -566,6 +576,9 @@ async function runAnthropicDialect(
     const streamed = await readAnthropicStream(stream, reporter, signal);
     addAnthropicUsage(usage, streamed.usage);
     addComposition(usage, streamed.composition);
+    if (streamed.stopReason === "max_tokens") {
+      throw new Error(missingFinalResponse("stop_reason", streamed.stopReason, streamed.composition, streamed.usage));
+    }
     const content = streamed.content;
     messages.push({ role: "assistant", content });
     const calls = content.filter((block) => block.type === "tool_use").map((block, index): ToolCall => ({
@@ -606,6 +619,7 @@ export async function runDirectApiAgent(options: DirectApiAgentOptions): Promise
     permissionMode: options.permissionMode,
     artifactDirectory: options.artifactDirectory,
     evidenceDirectory: options.evidenceDirectory,
+    toolsEnabled: options.toolsEnabled !== false,
     ...(isDocumentationRole(options.role) ? { governor: createToolGovernor() } : {}),
   };
   const auth = await authorization(options);

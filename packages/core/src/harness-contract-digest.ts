@@ -99,14 +99,30 @@ Mechanical rules enforced by the validator:
 
 - Phase headings are \`## Phase <n>: <title>\` and \`Phase ID\` must be \`P\` + two digits matching \`<n>\`.
 - Every phase declares Goal, \`Depends on\` (\`none\` or a comma list), at least one Context line, and at least one task.
-- Task headings are \`- [ ] T### — <title>\`; task IDs are unique and ordered across the document.
+- Task headings are \`- [ ] T### — <title>\`; task IDs form one global, unique, increasing sequence across the whole document. Never restart at \`T001\` in a later phase and never substitute composite IDs such as \`P02-T001\`.
 - Every task declares Scope, Change, Covers, Depends on, Parallel safe (\`true\`/\`false\`), Acceptance criteria, Validation, Expected evidence.
-- Acceptance criteria are \`AC-<taskId>-NN: <criterion>\` and must state an observable result. A criterion that only says a task "satisfies RF-001" is rejected as circular, and vague words (appropriate, adequate, correctly, fast, as needed, when possible, where valid, etc.) are rejected.
+- A phase \`Depends on\` field contains only earlier \`P##\` phase IDs. A task \`Depends on\` field contains only earlier \`T###\` task IDs, never a \`P##\` phase ID. Do not repeat the enclosing phase dependency on its tasks; use \`none\` when a task has no earlier task dependency.
+- Acceptance criteria are \`AC-<taskId>-NN: <criterion>\` and must state an observable result. A criterion that only says a task "satisfies RF-001" is rejected as circular, and vague words (appropriate, adequate, correctly, fast, as needed, when applicable, when possible, where valid, etc.) are rejected.
+- Never copy a vague source phrase such as \`when applicable\` or \`quando aplicável\` into acceptance. If the uncertainty is FLEXIBLE, keep it in the decision/specification documents and omit it from task acceptance. Otherwise replace it with the finite conditions and observable outcomes already fixed by the closed decisions; never invent a condition during authoring.
 - Validation entries are a backtick command, \`manual: <manager-observable inspection>\`, or \`human: <external evidence>\`. \`manual: run ...\` is rejected — declare the real command. Never append \`|| true\` or \`; exit 0\`.
 - Scope lists concrete project-relative paths or bounded globs in backticks. \`.\`, \`/\`, \`*\`, \`**\`, \`**/*\` are rejected; shared paths between tasks make them not parallel-safe.
 - Phase context paths that start with \`.rb/\` must name a document you actually publish in this bundle.
 - A phase must be self-contained for a cold context: goal, context paths, tasks, criteria, and validations only. Never depend on chat history, this conversation, the Harness installation, or an undeclared external file.
-- Every clean-room operational scenario belongs to the post-phase audit; a normal task may require that \`OPERATIONS.json\` exists and validates, never that it passed.`;
+- Every clean-room operational scenario belongs to the post-phase audit; a normal task may require that \`OPERATIONS.json\` exists and validates, never that it passed.
+
+## Task granularity — enforced deterministically
+
+The consumer runs **one ephemeral, context-free call per task**: the executor sees the validated task extract and the repository, never this conversation, the other tasks' reasoning, or the documents you are writing now. A task that carries a whole feature must be re-derived from nothing inside one window, which is exactly where an executor forgets a requirement or invents one.
+
+So decompose every capability into the smallest steps that are each independently observable:
+
+- A task covers at most ${HARNESS_BUDGET.decomposition.maxCoveredRequirements} requirement IDs in \`Covers\`, declares at most ${HARNESS_BUDGET.decomposition.maxAcceptanceCriteria} acceptance criteria, and lists at most ${HARNESS_BUDGET.decomposition.maxScopePaths} scope paths.
+- A phase holds at most ${HARNESS_BUDGET.decomposition.maxTasksPerPhase} tasks, and a phase whose single task covers more than ${HARNESS_BUDGET.decomposition.maxSingleTaskPhaseRequirements} requirements is a feature that was never decomposed.
+- Never write a task such as "implement the X feature", "build the module", or "wire everything together". Name the one behavior it makes observable — a data shape, an operation, a boundary, one error path, one regression proof.
+- Split along boundaries the code already has: contract before use, storage before behavior, behavior before interface, happy path before each error path. Order them with \`Depends on\` instead of merging them.
+- More small tasks is the correct outcome. A plan with many bounded tasks is cheaper and safer to execute than a plan with a few large ones, and it never costs a completeness claim: every requirement must still be covered by some task.
+
+These ceilings are validated mechanically. A plan that breaks one is rejected before publication, so decompose while you write instead of repairing afterwards.`;
 
 const OPERATIONAL_GRAMMAR = `## rb-operational/v1 — OPERATIONS.json shape
 
@@ -130,6 +146,7 @@ const OPERATIONAL_GRAMMAR = `## rb-operational/v1 — OPERATIONS.json shape
 - Root keys: \`contract\`, optional \`cleanRoom\`, optional \`environment\`, required non-empty \`scenarios\`.
 - Scenario keys: \`id\`, \`title\`, optional \`platforms\` (\`linux\`/\`darwin\`/\`win32\`), non-empty \`steps\`. IDs are unique.
 - Step kinds: \`command\`, \`process\` (with \`ready\` probe and optional \`checks\`), \`http\`, \`tcp\`, \`file\`. \`stdout\` exists only as a process probe.
+- An HTTP probe puts assertions directly on the probe: \`{ "kind": "http", "url": "http://127.0.0.1:3000/", "status": 200, "bodyIncludes": ["expected text"] }\`. Never put an \`expect\` object inside \`ready\`, \`checks\`, or another probe; \`expect\` exists only on a \`command\` step.
 - Commands are \`argv\` arrays; never a shell string, never an invented executable, path, port, or route.
 - Never write a secret value. Inherit only the named non-secret variables the scenario needs.
 - Identify the real product form (desktop, mobile, CLI, service, library, plugin, job, firmware, mixed). Never default to web. Omit the file entirely rather than inventing a scenario.`;
@@ -151,7 +168,7 @@ Mark \`status: "complete"\` only when the required ready output for this workflo
 
 If a material contradiction still prevents safe readiness, return \`status: "blocked"\` with the missing decision in \`blocked\`. Do not publish a plan that claims readiness it does not have.`;
 
-/** Compact contract handed to the single authoring call. */
+/** Compact contract handed to the plan and bounded authoring calls. */
 export function generationContractDigest(workflow: HarnessWorkflow): string {
   const outputs = WORKFLOW_OUTPUTS[workflow];
   const sections = [
@@ -205,22 +222,34 @@ Classify every pending answer exactly once, with one of these five words spelled
 An omitted or unsupported disposition is a protocol failure, not a shortcut to acceptance: the orchestrator will treat that answer as unresolved. PARTIAL, AMBIGUOUS, and CONTRADICTED require \`remainingUncertainty\`, and — while a follow-up round remains — one focused follow-up question whose \`answerFor\` names the original question ID. Never add precision the answer did not supply: no invented numbers, defaults, actors, platforms, or exceptions. "use recommendations" accepts what was shown; "not sure" and "defer" stay DEFERRED.`,
     `## Stop condition
 
-Return \`ready\` when every remaining uncertainty is FLEXIBLE or an explicit low-risk assumption. Return \`blocked\` only when a RIGID decision is still materially unresolved and no round remains; name the missing decision in \`unresolved\`. Never return \`needs_input\` without questions or \`ready\` with questions.`,
+The interview is adaptive, not a fixed number of rounds. It ends when it converges: return \`ready\` only when every remaining uncertainty is FLEXIBLE or an explicit low-risk assumption, and no material ambiguity, gap, or contradiction is left in the request.
+
+While a material decision is still open — including one an earlier answer just opened — return \`needs_input\` with the questions that close it. Never trade a material decision for an invented assumption to finish sooner, and never keep asking once nothing material is open.
+
+Return \`blocked\` only when a RIGID decision is still materially unresolved and no round remains; name the missing decision in \`unresolved\`. Never return \`needs_input\` without questions or \`ready\` with questions.`,
   ].join("\n\n");
 }
 
 /** Volatile per-round budget, appended after the invariant prefix. */
-export function interviewRoundDirective(round: number): string {
+export function interviewRoundDirective(round: number, askedQuestions = 0): string {
   const budget = interviewQuestionBudget(round);
-  const remaining = HARNESS_BUDGET.interview.maxRounds - round;
+  const remainingRounds = HARNESS_BUDGET.interview.maxRounds - round;
+  const remainingQuestions = HARNESS_BUDGET.interview.maxQuestions - askedQuestions;
+  const final = remainingRounds <= 0 || remainingQuestions <= budget;
   return [
-    `## Round ${round} of ${HARNESS_BUDGET.interview.maxRounds}`,
+    `## Round ${round}`,
     `- Return at most ${budget} question(s) in this round.`,
-    remaining > 0
-      ? `- Exactly ${remaining} follow-up round remains after this one. There is no third round.`
-      : "- This is the final round. After it there is no further question opportunity: return ready or blocked.",
-    `- A question beyond the ${budget}-question budget is not asked; it is recorded as a deferred open decision and prevents a ready result. Return only the most material ones.`,
-  ].join("\n");
+    final
+      ? "- This is the final round the safety ceiling allows. After it there is no further question opportunity: return ready, or blocked naming the decision that is still open."
+      : "- The interview is adaptive: it continues for as many focused rounds as convergence needs. Ask what this round can actually resolve, not everything at once — a new material decision that an answer opens earns another round.",
+    final
+      ? ""
+      : `- Safety ceilings, not a target: at most ${HARNESS_BUDGET.interview.maxRounds} rounds and ${HARNESS_BUDGET.interview.maxQuestions} questions per run; ${remainingRounds} round(s) and ${remainingQuestions} question(s) remain. Converging earlier is the goal; stretching the interview to fill them is not.`,
+    final
+      ? `- A question beyond the ${budget}-question budget is not asked at all; it is recorded as a deferred open decision and blocks the run. Return the most material ones first.`
+      : `- A question beyond the ${budget}-question budget is not asked in this round; it is carried into the next one and prevents a ready result. Return the most material ones first.`,
+    "- Never re-ask a decision the developer already answered and you classified ACCEPTED. Ask only what is still materially open.",
+  ].filter(Boolean).join("\n");
 }
 
 /** Compact contract handed to the single localized structural repair. */

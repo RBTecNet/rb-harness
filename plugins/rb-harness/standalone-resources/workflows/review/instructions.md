@@ -17,10 +17,14 @@ Read this file completely before producing artifacts:
 
 ## How your output is delivered
 
-You do not write files and you do not run commands. Return every document as a
-`path`/`content` pair in the document bundle envelope described in your prompt.
-The orchestrator materializes the files, derives the manifest, IDs, hashes, and
-statuses, runs every deterministic validator, and publishes atomically. The
+You do not write files and you do not run commands. During the planning call,
+return only the compact document plan requested by the stage prompt, without
+document content. During each later closed authoring call, return only the
+requested raw document segment. Never emit a complete document bundle unless
+the stage prompt explicitly requests the legacy compatibility form. The
+orchestrator checkpoints and assembles parts, materializes files, derives the
+manifest, IDs, hashes and statuses, runs deterministic validators, and publishes
+atomically. The
 exact output contract for this workflow — required documents, the
 `rb-execution/v1` grammar, the `rb-operational/v1` shape, and the conventions —
 is supplied in the prompt as `rb-harness-contract-digest/v1`.
@@ -90,7 +94,7 @@ depth, not cross-boundary evidence needed to understand a critical journey.
 9. Apply the shared ambiguity audit. Deduplicate by root cause, preserve
    independent impact paths, and compare with the baseline as new, changed,
    regressed, unchanged, or resolved.
-10. Return the conditional artifacts from `artifact-shapes.md`. The orchestrator runs every deterministic validator after your call; produce documents that already satisfy them, and never claim to have run a command. They
+10. Plan and incrementally author the conditional artifacts from `artifact-shapes.md`. The orchestrator runs every deterministic validator after assembly; produce document parts that assemble into compliant artifacts, and never claim to have run a command. They
     cover `rb-responsive-inventory/v1`, the manifest, and the whole tree. For UI
     targets, do not return findings until every high-risk responsive candidate
     has an individual structured disposition and file/candidate totals
@@ -112,7 +116,8 @@ depth, not cross-boundary evidence needed to understand a critical journey.
    automatic policy resolves to zero IDs, report that result and stop without
    creating `SELECTION.md`, `PLAN.md`, `PHASES.md`, or `OPERATIONS.json`.
 2. Group by dependency and shared root cause, not merely severity. Keep each task
-   bounded enough for a fresh executor context.
+   bounded enough for a fresh, context-free executor call; the decomposition
+   ceilings in the contract digest are validated mechanically.
 3. Preserve unrelated behavior and design-system authority. Every task traces to
    finding IDs, owns binary criteria and focused validation, and names regression
    boundaries.

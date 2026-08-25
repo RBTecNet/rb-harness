@@ -45,6 +45,28 @@ describe("artifact manifest", () => {
     );
   });
 
+  it("preserves an invalid execution plan's declared identity instead of adding a false ID mismatch", async () => {
+    const root = await project();
+    const phasesPath = resolve(root, ".rb/init/PHASES.md");
+    const source = await readFile(phasesPath, "utf8");
+    await writeFile(
+      phasesPath,
+      source.replace("AC-T001-01:", "AC-T001-01: quando aplicável "),
+      "utf8",
+    );
+
+    const manifest = await syncManifest(root);
+    expect(manifest.artifacts).toEqual(expect.arrayContaining([expect.objectContaining({
+      id: "init-minimal-execution",
+      path: ".rb/init/PHASES.md",
+      status: "invalid",
+      contract: "rb-execution/v1",
+    })]));
+    const validation = await validateManifestTree(root);
+    expect(validation.issues.map((issue) => issue.code)).toContain("task.acceptance.ambiguous");
+    expect(validation.issues.map((issue) => issue.code)).not.toContain("artifact.id.mismatch");
+  });
+
   it("resolves ready execution plans without scanning conventions", async () => {
     const root = await project();
     const resolved = await resolveArtifacts(root, { kind: "execution-plan", status: "ready" });

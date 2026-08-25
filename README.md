@@ -28,7 +28,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.4.3 is an executable rather than a workflow that must run inside
+RB Harness 0.5.8 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -49,7 +49,7 @@ the current shell. Verify the exact installed build with:
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.4.3
+# Both print 0.5.8
 ```
 
 Run without arguments to start the wizard:
@@ -210,46 +210,91 @@ excluded, and no path into the RB Harness source, `dist`, tests, or installation
 ever reaches the model. Everything else must be fetched through the confined
 documentation tools, inside the target project.
 
-The interview is finite. One batch of at most five material questions, at most
-one focused follow-up with at most three, and then a decision. `--questions
-one-by-one` controls only local presentation and never costs an extra provider
-call; `--questions batch` announces the whole round before answering it. Every
-answer is classified `ACCEPTED`, `PARTIAL`, `AMBIGUOUS`, `DEFERRED`, or
-`CONTRADICTED`. Facts discovered in the project never become questions, a
-FLEXIBLE choice becomes an explicit assumption instead of a blocker, and a RIGID
-ambiguity that survives the follow-up produces `BLOCKED` naming the missing
-decision — never another round.
+The interview is adaptive and it converges rather than expiring. An opening
+batch of at most five material questions is followed by as many focused rounds
+of at most three as convergence needs: an answer that opens a new material
+decision earns another round, and the interview ends only when no material
+ambiguity is left. `--questions one-by-one` controls only local presentation and
+never costs an extra provider call; `--questions batch` announces the whole
+round before answering it. Every answer is classified `ACCEPTED`, `PARTIAL`,
+`AMBIGUOUS`, `DEFERRED`, or `CONTRADICTED`. Facts discovered in the project
+never become questions, a FLEXIBLE choice becomes an explicit assumption instead
+of a blocker, and a decision the developer already settled is never re-asked.
+
+Two declared safety ceilings keep the state machine finite — at most 12 rounds
+and 40 questions in one run. They are not the intended stopping point: reaching
+either one is a failure to converge and produces `BLOCKED` naming the decision
+that is still open, never a silent acceptance.
 
 Only *form* is repaired automatically: a malformed question ID, an inferable
 question type, an empty option list. A disposition that is missing, unknown, or
 misspelled is a semantic defect, never an acceptance — the answer is carried as
-unresolved, the provider gets the one protocol correction the bounded flow
-already allows, and if it persists the answer earns a focused follow-up or
+unresolved, the provider gets the bounded formatter retries the flow allows,
+and if it persists the answer earns a focused follow-up or
 blocks the run. `ACCEPTED` requires an explicit disposition and a single
 normalized decision; the raw answer stands in for that decision only under an
 explicit `ACCEPTED`. Questions above the round budget are never dropped either:
-they become declared deferred decisions in `unresolved`, and their existence
-prevents a `ready` result.
+they are carried into the next round as declared open decisions in
+`unresolved`, and their existence prevents a `ready` result. Only at the safety
+ceiling, where there is no next round, do they become deferred and block.
 
-Then exactly one authoring session receives the closed decision checkpoint and
-returns the complete document set as a typed `path`/`content` bundle. The
-Harness materializes the files, derives every mechanical field — manifest,
+If a provider reaches substantive conclusions but does not satisfy an interview,
+document-plan, or legacy document-part envelope, the Harness preserves that raw
+semantic response and starts a provider-neutral formatter. The formatter runs
+without tools or project access, receives the exact contract and deterministic
+parser defect, and may retry at most three times. Every retry sees the immutable
+raw response and the preceding invalid formatting attempt. It may change only
+representation; the strict parser remains the acceptance authority. The costly
+discovery or authoring call is never repeated merely to repair serialization,
+and completed raw responses are recovered from private logs after interruption.
+
+Then one documentation-writer role receives the closed decision checkpoint.
+It first returns a compact document plan with shared IDs and a closed brief for
+each part. The Harness requests each part independently, caps its content at
+12 KiB, checkpoints it immediately, assembles the typed `path`/`content`
+bundle, materializes the files, derives every mechanical field — manifest,
 hashes, IDs, statuses, the TSV projection — and validates. There is no
 documentation manager, no semantic auditor, and no second opinion.
+
+An `rb-execution/v1` plan is also validated for decomposition, not only for
+grammar. RB Ralph runs one ephemeral, context-free call per task, so a task
+carrying a whole feature has to be re-derived from nothing inside a single
+window. Ceilings are read from what the document itself declares — a task
+covers at most 3 requirement IDs, declares at most 6 acceptance criteria and 8
+scope paths; a phase holds at most 12 tasks, and a single-task phase covering
+more than 2 requirements never decomposed its feature at all. A plan that breaks
+one is a repairable structural error before publication and a blocker in
+`rb-harness artifacts verify`, never a surprise discovered by a stalled
+executor.
+
+Only the plan call may explore evidence. Every part starts with fresh context,
+has no direct-API tool catalog, and runs from an empty temporary directory for
+every adapter. A crash, timeout, truncation, or power loss therefore resumes at
+the first missing part instead of repurchasing completed output. `.rb` is still
+published only after the complete assembled tree passes validation. Legacy
+adapters that return one complete `rb-harness-documents/v1` bundle remain
+compatible, and the Harness never automatically repeats the same truncated
+request. Part calls return raw document content by default: path and ID already
+belong to the validated checkpoint, so a redundant JSON envelope adds no write
+authority. Correct legacy part envelopes remain accepted for compatibility.
 
 If deterministic validation finds repairable structural errors, exactly one
 localized repair runs. It receives the ordered, machine-generated error list and
 only the affected documents, and must preserve everything else byte for byte. It
 cannot reopen the interview, re-explore the repository, or re-emit the tree. A
 second failure is reported with its diagnostic; there is no loop. Apart from
-that single repair and the single interview follow-up — both counted and
-bounded — the state graph is acyclic, and no stage can restart itself.
+that single repair and the counted interview rounds — both bounded by declared
+ceilings — the state graph is acyclic, and no stage can restart itself.
 
 Providers are read-only in every documentation role. Codex runs with
 `--sandbox read-only`, Claude with `--permission-mode plan`, OpenCode with edit,
 shell, task, and external-directory permissions denied. Provider transcripts are
 bounded as UTF-8 bytes — 32 MiB for generation, 16 MiB for the repair, 8 MiB for
 the interview.
+
+For OpenCode, `--effort none` maps to the CLI-documented `minimal` variant.
+Passing a literal `--variant none` allowed a silent fallback to the model's
+default; one measured run spent 32k reasoning tokens and emitted no answer.
 
 A provider never runs in the project itself. It runs in a bounded, read-only
 *evidence projection*: the target project's files that the inventory policy
@@ -283,7 +328,7 @@ states plainly what it can and cannot account for:
 | Adapter | Internal control | Turn/tool budget | Usage metrics | Read confinement | stdout transport |
 |---|---|---|---|---|---|
 | direct APIs | enforced locally | enforced | reported when the provider returns `usage` | enforced in process | final text (streamed internally) |
-| `opencode` | consumed via `run --format json` | enforced | not reported by the CLI — unmeasured | none | JSONL events |
+| `opencode` | consumed via `run --format json` | enforced | tokens/cache/cost measured when its terminal event reports them | none | JSONL events |
 | `codex` | `exec --json` advertised, not consumed | not claimed | unmeasured | none | final text |
 | `claude` | `--output-format stream-json` advertised, not consumed | not claimed | unmeasured | none | final text |
 | `custom` | none declared | not claimed | unmeasured | none | final text |
@@ -548,7 +593,8 @@ that receives the complete prompt on stdin, runs with the target project as its
 working directory, and reads `RB_HARNESS_MODE`, `RB_HARNESS_PROJECT_ROOT`,
 `RB_HARNESS_PROVIDER`, `RB_HARNESS_MODEL`, and `RB_HARNESS_EFFORT` from the
 environment. `RB_HARNESS_MODE` is `interview`, `generation`, or `repair`; all
-three are read-only and answer with their declared JSON envelope on stdout.
+three are read-only. Interview, plan, and repair responses use their declared
+JSON envelopes; bounded document-part responses use raw content by default.
 Orchestrator-private variables — the resource root, dashboard, telemetry, and
 Ralph run variables — are removed from the adapter environment, so an adapter is
 never told where the Harness installation lives:
@@ -671,21 +717,91 @@ US$ 1.84 here without publishing anything.
   source, `dist`, tests, or installation;
 - the mechanical output formats are a compact, versioned, code-owned digest
   instead of four reference documents copied into every prompt;
-- the interview is one batch of at most five questions plus at most one
-  follow-up of at most three, then ready or BLOCKED;
-- one authoring call returns a typed document bundle that the Harness
-  materializes, and at most one localized structural repair may follow;
+- the interview is adaptive: one batch of at most five questions plus focused
+  rounds of at most three until it converges, bounded by declared safety
+  ceilings that report a failure to converge as BLOCKED;
+- one writer role returns a compact plan followed by independently bounded,
+  checkpointed document parts that the Harness assembles and materializes;
+  at most one localized structural repair may follow;
 - the LLM manager, the semantic auditor, and audit-driven remediation are gone;
 - providers are read-only in every documentation role and their whole process
   tree is torn down and confirmed quiescent on cancellation, timeout, overflow,
   failure, or host exit;
 - the dashboard, the log, and `telemetry.json` report documentation stages,
   provider calls, and real token/cache usage — never invented cost;
-- checkpoints separate interview, received bundle, materialization, validation,
-  and publication, so a resume never pays twice for completed work.
+- checkpoints separate interview, document plan, every accepted part, assembled
+  bundle, materialization, validation, and publication, so a resume never pays
+  twice for completed work.
 
 The public CLI, the wizard, the dashboard, the splash, and the capybara are
 unchanged.
+
+Version 0.5.1 closes a provider-format failure without weakening the contracts:
+prose-only interview conclusions receive one tool-free conversion, raw valid
+JSON is preserved without a paid retry, and the full evidence-discovery request
+is never repeated merely because marker lines were omitted.
+
+Version 0.5.2 makes document-part output raw content by default, so Markdown is
+never forced through a JSON string. Correct legacy envelopes remain compatible;
+literal control characters inside their content string are normalized without
+changing path or part identity. A successful paid part found in its provider log
+is checkpointed on resume before any new provider process is started.
+
+Version 0.5.3 keeps the Ralph boundary strict while preventing the exact
+contract defects observed in the Cron2 trial. The writer receives the precise
+phase-versus-task dependency grammar, the current HTTP probe assertion shape,
+and an explicit prohibition on vague acceptance phrases such as `when
+applicable`. Before validation, code performs only lossless canonicalization:
+legacy nested HTTP assertions are moved to their exact `rb-operational/v1`
+fields and a task's redundant reference to its enclosing phase dependency is
+removed. Invalid plans retain their declared artifact ID in the manifest, so a
+real content error cannot create a false `artifact.id.mismatch`. The single
+repair plan is closed and tool-free; every validator and the requirement for a
+ready `rb-execution/v1` plan remain unchanged.
+
+Version 0.5.4 introduced successful plan-log recovery. Version 0.5.5 removes
+the provider-specific `prefix` parser exception and replaces it with the single
+formatting boundary described above. The same rule now covers interview
+responses, document plans, and malformed legacy part envelopes for direct APIs,
+CLI adapters, and custom adapters: one semantic response, then zero to three
+closed formatting attempts. Unknown authority fields still fail the strict
+contract; the formatter cannot grant them meaning.
+
+Version 0.5.6 removes a contradictory retired instruction that still told every
+workflow to emit the complete document bundle during the compact planning call.
+The plan is now explicitly an index with bounded summaries, coordination,
+document purposes, and part briefs; shared facts live once in the coordination
+ledger instead of being repeated in every part. Greenfield `init` planning also
+uses the complete request already present in its authority package and does not
+buy a second tool turn to reread that same source file.
+
+Version 0.5.7 keeps the document plan bounded as a whole while removing
+arbitrary byte ceilings from individual prose fields. Models are no longer
+asked to count UTF-8 bytes in a part purpose, and a semantically valid compact
+plan is never sent through three paid formatter attempts merely because one
+brief crossed such an advisory threshold. Paths, IDs, schema, document/part
+counts, total plan size, part body size, and final Ralph validators remain
+strict.
+
+Version 0.5.8 changes two behaviors that a consumer can observe:
+
+- the interview converges instead of expiring. It was a fixed batch plus one
+  follow-up, so an answer that opened a new material decision earned no round
+  at all and the run ended BLOCKED with the decision still open. It now runs
+  focused rounds until nothing material remains, carries a round's surplus
+  questions into the next one instead of deferring them, never re-asks a
+  settled decision, and reports reaching either declared safety ceiling — 12
+  rounds, 40 questions — as a failure to converge rather than an acceptance;
+- a generated `rb-execution/v1` plan is validated for decomposition, not only
+  for grammar. Because RB Ralph runs one ephemeral, context-free call per task,
+  ceilings read from the document's own declarations reject a task that carries
+  a whole feature, as a repairable structural error before publication and a
+  blocker in `rb-harness artifacts verify`.
+
+The interview's own accepted decisions also fit its budgets now: the decision
+count ceiling follows the run-wide question ceiling, and the input package and
+interview prompt budgets grew with it, so a fully converged interview can never
+fail on the answers the developer already gave.
 
 The readiness pass that followed added, without changing that public surface:
 

@@ -8,14 +8,15 @@ somente sobre decisões materiais ausentes, inspeciona o projeto quando o fluxo
 exige conhecimento do estado atual e publica artefatos versionados sem
 implementar o código da aplicação.
 
-A geração normal usa um único escritor de documentação. Não existe gerente LLM,
-auditor semântico nem remediação iterativa. A qualidade estrutural pertence a
-validadores determinísticos, as decisões de produto pertencem à entrevista, e a
-autoria semântica acontece exatamente uma vez.
+A geração normal usa um único papel de escritor de documentação. Não existe
+gerente LLM, auditor semântico nem remediação iterativa. A qualidade estrutural
+pertence a validadores determinísticos, as decisões de produto pertencem à
+entrevista, e a autoria é dividida em respostas pequenas, independentes e
+retomáveis em vez de exigir um pacote monolítico do modelo.
 
 ## Instalação do executável
 
-O RB Harness 0.4.3 exige Node.js 20 ou superior. No clone do repositório:
+O RB Harness 0.5.8 exige Node.js 20 ou superior. No clone do repositório:
 
 ```bash
 npm install
@@ -34,7 +35,7 @@ Confira a versão instalada:
 ```bash
 rb-harness --version
 rb-harness --ver
-# 0.4.3
+# 0.5.8
 ```
 
 Executar apenas `rb-harness` abre o assistente interativo. O splash com a
@@ -92,20 +93,142 @@ arquivos temporários. Nenhum caminho para o source, o `dist`, os testes ou a
 instalação do próprio RB Harness chega ao modelo; qualquer conteúdo adicional
 só vem das ferramentas documentais confinadas ao projeto-alvo.
 
-O fluxo é: inventário → análise de lacunas (1 lote e no máximo 1 follow-up) →
-checkpoint fechado de decisões → uma geração autoritativa → materialização →
+O fluxo é: inventário → análise adaptativa de lacunas (1 lote e quantas rodadas
+focadas a convergência exigir) → checkpoint fechado de decisões → plano
+documental compacto → partes de no máximo 12 KiB → montagem → materialização →
 validação determinística → no máximo uma correção estrutural localizada →
-publicação atômica. Fora dessas duas permissões contadas, o grafo é acíclico e
-nenhuma etapa pode se reiniciar sozinha.
+publicação atômica. Fora dessas permissões contadas, o grafo é acíclico e
+nenhuma etapa pode se reiniciar
+sozinha.
+
+O plano contém caminhos, IDs compartilhados e um brief fechado para cada
+parte. Somente essa primeira chamada pode descobrir evidências. Cada parte roda
+com contexto novo, sem catálogo de ferramentas no runtime de API direta e em
+um diretório temporário vazio para qualquer adapter. Assim, um escritor não
+reexplora o projeto para cada arquivo e uma janela pequena de saída não precisa
+carregar toda a documentação. Cada parte aceita é gravada imediatamente em um
+checkpoint privado; uma falha ou falta de energia retoma apenas a parte ausente,
+sem comprar novamente o trabalho concluído. A árvore `.rb` só é publicada após
+montagem e validação completas.
+
+Adapters antigos que já devolvem um pacote `rb-harness-documents/v1` completo
+continuam aceitos na primeira chamada. Não existe repetição automática da mesma
+requisição truncada: `length`, `max_tokens`, envelope incompleto ou parte acima
+do limite falham com diagnóstico e preservam o checkpoint para `resume`.
+Chamadas de parte devolvem conteúdo documental puro por padrão: caminho e ID já
+pertencem ao plano validado, então exigir outro envelope JSON não acrescenta
+segurança. Envelopes antigos corretos continuam aceitos por compatibilidade.
+
+Se a resposta semântica da entrevista, do plano ou de uma parte legada não
+cumprir o contrato, o Harness preserva a saída bruta e aciona um formatador
+agnóstico de provider. Ele roda sem ferramentas e sem acesso ao projeto, recebe
+o contrato exato e o defeito determinístico do parser e pode tentar no máximo
+três vezes. Cada tentativa recebe novamente a saída bruta imutável e a tentativa
+de formatação anterior. Somente a representação pode mudar: descoberta,
+decisões e autoria não são refeitas para corrigir JSON, marcadores ou campos de
+apresentação. Respostas brutas concluídas são recuperadas dos logs privados
+após interrupções.
 
 A correção estrutural recebe apenas a lista ordenada de erros mecânicos e os
 trechos afetados, e precisa preservar byte a byte todo conteúdo não relacionado.
 Ela não reabre a entrevista, não reexplora o repositório e não reemite a árvore.
 Uma segunda falha é reportada ao operador com o diagnóstico exato; não há loop.
 
+## Decomposição verificada do plano
+
+Um plano `rb-execution/v1` também é validado quanto à decomposição, não apenas
+quanto à gramática. O RB Ralph executa uma chamada efêmera e sem contexto por
+task, então uma task que carrega uma feature inteira precisa ser rederivada do
+zero dentro de uma única janela — exatamente onde um executor esquece um
+requisito ou inventa outro.
+
+Os tetos são lidos do que o próprio documento declara: uma task cobre no máximo
+3 IDs de requisito, declara no máximo 6 critérios de aceitação e 8 caminhos de
+escopo; uma fase tem no máximo 12 tasks, e uma fase de task única cobrindo mais
+de 2 requisitos simplesmente não decompôs a feature. Um plano que viola qualquer
+teto é erro estrutural reparável antes da publicação e blocker em
+`rb-harness artifacts verify` — nunca uma surpresa descoberta por um executor
+travado.
+
+A versão 0.5.1 fecha a falha de formato observada em providers que terminavam a
+análise dizendo que iriam escrever o envelope, mas encerravam antes dele: a
+conclusão em prosa recebe uma única conversão sem ferramentas, JSON válido sem
+marcadores é preservado e a descoberta completa não é repetida por causa de
+formatação.
+
+A versão 0.5.2 passa a solicitar conteúdo puro nas partes documentais, sem
+forçar Markdown dentro de uma string JSON. Envelopes antigos corretos continuam
+compatíveis; caracteres de controle literais no conteúdo são normalizados sem
+alterar caminho nem ID da parte. No `resume`, uma parte paga e completa presente
+no log é gravada no checkpoint antes de qualquer nova chamada ao provider.
+
+A versão 0.5.3 mantém estrita a fronteira com o Ralph e evita os defeitos de
+contrato observados no ensaio do Cron2. O escritor recebe a gramática exata das
+dependências de fase e de task, o formato atual das asserções de probes HTTP e
+a proibição explícita de critérios vagos como `quando aplicável`. Antes da
+validação, o código faz somente normalizações sem perda: move asserções HTTP do
+formato legado para os campos exatos de `rb-operational/v1` e remove da task a
+referência redundante à dependência da fase que a contém. Um plano inválido
+preserva seu ID declarado no manifesto, impedindo que um erro real gere também
+um falso `artifact.id.mismatch`. O plano da única correção estrutural roda
+fechado e sem ferramentas; todos os validadores e a exigência de um plano
+`rb-execution/v1` pronto permanecem inalterados.
+
+A versão 0.5.4 introduziu a recuperação do plano concluído pelo log. A versão
+0.5.5 remove a exceção específica para o campo `prefix` e aplica uma única
+fronteira de formatação à entrevista, ao plano e a envelopes legados de partes
+malformados, seja por API direta, CLI ou adapter customizado: uma resposta
+semântica e de zero a três tentativas fechadas de formatação. Campos de
+autoridade desconhecidos continuam rejeitados pelo contrato estrito; o
+formatador não pode atribuir significado a eles.
+
+A versão 0.5.6 remove uma instrução aposentada e contraditória que ainda mandava
+todos os workflows emitirem o pacote documental completo durante a chamada do
+plano compacto. O plano agora é explicitamente apenas um índice, com resumo,
+coordenação, propósitos de documentos e briefs de partes limitados; fatos
+compartilhados aparecem uma vez no ledger de coordenação, sem repetição em cada
+parte. No `init` greenfield, o planejamento usa a solicitação completa já
+presente no pacote de autoridade e não compra outro turno de ferramenta para
+reler a mesma origem.
+
+A versão 0.5.7 mantém o plano documental limitado como um todo, mas remove
+tetos arbitrários de bytes dos campos individuais de prosa. O modelo não precisa
+mais contar bytes UTF-8 na descrição de uma parte, e um plano compacto e
+semanticamente válido não passa por três tentativas pagas do formatador somente
+porque um brief ultrapassou um limite consultivo. Caminhos, IDs, esquema,
+quantidades de documentos/partes, tamanho total do plano, tamanho do conteúdo e
+validadores finais compatíveis com o Ralph continuam estritos.
+
+A versão 0.5.8 muda dois comportamentos observáveis por um consumidor:
+
+- a entrevista converge em vez de expirar. Antes era um lote fixo mais um
+  follow-up, então uma resposta que abrisse uma nova decisão material não
+  ganhava rodada nenhuma e a execução terminava em `BLOCKED` com a decisão
+  ainda aberta. Agora ela roda rodadas focadas até não restar nada material,
+  carrega as perguntas excedentes de uma rodada para a seguinte em vez de
+  adiá-las, nunca repergunta uma decisão já resolvida e trata atingir qualquer
+  teto de segurança declarado — 12 rodadas, 40 perguntas — como falha de
+  convergência, não como aceite;
+- um plano `rb-execution/v1` gerado passa a ser validado quanto à decomposição,
+  não apenas quanto à gramática. Como o RB Ralph executa uma chamada efêmera e
+  sem contexto por task, tetos lidos das próprias declarações do documento
+  rejeitam uma task que carrega uma feature inteira — erro estrutural reparável
+  antes da publicação e blocker em `rb-harness artifacts verify`.
+
+As decisões aceitas pela própria entrevista também cabem nos orçamentos agora:
+o teto de quantidade de decisões acompanha o teto de perguntas por execução, e
+os orçamentos do pacote de entrada e do prompt de entrevista cresceram junto.
+Uma entrevista totalmente convergida nunca falha sobre as respostas que o
+desenvolvedor já deu.
+
 Em todos os papéis documentais o provider é somente leitura: o Codex roda com
 `--sandbox read-only`, o Claude com `--permission-mode plan` e o OpenCode com
 edição, shell, task e diretório externo negados.
+
+No adapter OpenCode, `--effort none` é traduzido para a variante `minimal` que
+a própria CLI documenta. Repassar literalmente `--variant none` permitia um
+fallback silencioso para o padrão do modelo; em uma execução real isso consumiu
+32 mil tokens de reasoning e produziu zero texto.
 
 O provider nunca roda dentro do projeto. Ele roda em uma **projeção de
 evidências** somente leitura e limitada: os arquivos do projeto-alvo admitidos
@@ -140,7 +263,7 @@ Harness declara explicitamente o que consegue ou não medir:
 | Adapter | Controle interno | Orçamento de turns/tools | Métricas de uso | Confinamento de leitura | Transporte do stdout |
 |---|---|---|---|---|---|
 | APIs diretas | aplicado localmente | aplicado | reportado quando o provider devolve `usage` | aplicado em processo | texto final (streaming interno) |
-| `opencode` | consumido via `run --format json` | aplicado | não reportado pela CLI — não medido | nenhum | eventos JSONL |
+| `opencode` | consumido via `run --format json` | aplicado | tokens/cache/custo medidos quando o evento terminal os informa | nenhum | eventos JSONL |
 | `codex` | `exec --json` anunciado, não consumido | não alegado | não medido | nenhum | texto final |
 | `claude` | `--output-format stream-json` anunciado, não consumido | não alegado | não medido | nenhum | texto final |
 | `custom` | nada declarado | não alegado | não medido | nenhum | texto final |
@@ -280,13 +403,23 @@ estado avança `pending → running → completed`. Contar esses eventos reporta
 uma invocação três vezes, então as invocações são contadas pelo `callID` do
 próprio provider, e uma part `step-start` conta como turn do modelo.
 
-## Entrevista finita
+## Entrevista adaptativa
 
-A entrevista tem um lote inicial de no máximo 5 perguntas materiais, no máximo
-1 follow-up com até 3 perguntas e então uma decisão. Fatos descobertos no
-projeto não viram perguntas. Uma escolha FLEXIBLE vira suposição explícita e não
-bloqueia. Uma ambiguidade RIGID que sobrevive ao follow-up produz `BLOCKED` com
-a decisão faltante — nunca uma nova rodada.
+A entrevista termina quando converge, não quando expira. Há um lote inicial de
+no máximo 5 perguntas materiais e, depois dele, quantas rodadas focadas de até 3
+perguntas a convergência exigir: uma resposta que abre uma nova decisão material
+ganha outra rodada, e a entrevista só encerra quando não resta ambiguidade
+material. As perguntas são apresentadas uma a uma; `--questions batch` apenas
+anuncia a rodada inteira antes de respondê-la.
+
+Fatos descobertos no projeto não viram perguntas. Uma escolha FLEXIBLE vira
+suposição explícita e não bloqueia. Uma decisão que o desenvolvedor já respondeu
+nunca é perguntada de novo.
+
+Dois tetos de segurança declarados mantêm a máquina de estados finita — no
+máximo 12 rodadas e 40 perguntas por execução. Eles não são o ponto de parada
+pretendido: atingir qualquer um deles é falha de convergência e produz `BLOCKED`
+nomeando a decisão ainda em aberto, nunca um aceite silencioso.
 
 Cada resposta é classificada como `ACCEPTED`, `PARTIAL`, `AMBIGUOUS`, `DEFERRED`
 ou `CONTRADICTED`. Respostas parciais, contraditórias ou ambíguas produzem uma
@@ -295,12 +428,21 @@ pergunta focada com novo ID enquanto houver rodada disponível.
 Apenas a **forma** é reparada automaticamente: ID de pergunta malformado, tipo
 inferível, lista de opções vazia. Disposição ausente, desconhecida ou escrita
 incorretamente é falha semântica, nunca um aceite — a resposta segue como não
-resolvida, o provider recebe a única correção de protocolo já prevista pelo fluxo
-limitado e, se persistir, a resposta gera follow-up focado ou bloqueia a execução.
+resolvida, o provider recebe as tentativas limitadas do formatador e, se o
+defeito persistir, a resposta gera follow-up focado ou bloqueia a execução.
 `ACCEPTED` exige disposição explícita e uma decisão única normalizada; o texto
 bruto só substitui essa decisão sob um `ACCEPTED` explícito. Perguntas acima do
-orçamento da rodada também não somem: viram decisões adiadas declaradas em
-`unresolved`, e a existência delas impede um resultado `ready`.
+orçamento da rodada também não somem: são carregadas para a rodada seguinte como
+decisões abertas declaradas em `unresolved`, e a existência delas impede um
+resultado `ready`. Só no teto de segurança, onde não há próxima rodada, elas
+viram decisões adiadas e bloqueiam.
+
+Se o provider chegar às conclusões substantivas mas omitir ou quebrar o
+envelope da entrevista, o Harness preserva a saída bruta e abre no máximo três
+tentativas de formatação fechadas, sem ferramentas nem acesso ao projeto. Um
+objeto JSON válido também é aceito sem as linhas decorativas de marcação. Se a
+terceira formatação ainda for inválida, a execução falha explicitamente; a
+descoberta paga nunca é repetida para reparar somente a representação.
 
 Por padrão as perguntas aparecem uma por vez:
 
@@ -502,12 +644,13 @@ o log registra exatamente os bytes que o provider escreveu. Um envelope válido
 quando foi gravado continua recuperável no resume, mesmo que a execução que o
 produziu tenha falhado depois.
 
-Os checkpoints duráveis separam entrevista concluída, pacote documental
-recebido, materialização, validação e publicação. Uma resposta completa do
-provider que já está preservada nunca é solicitada de novo: uma execução que
-falhou apenas na validação retoma a partir do pacote persistido. Publicações
-interrompidas restauram a revisão anterior, e um lock residual sem processo vivo
-é recuperado automaticamente com mensagem explícita.
+Os checkpoints duráveis separam entrevista concluída, plano documental, cada
+parte aceita, pacote montado, materialização, validação e publicação. Uma parte
+completa já preservada nunca é solicitada de novo; uma execução interrompida
+continua na primeira parte ausente. Uma execução que falhou apenas na validação
+retoma a partir do pacote montado. Publicações interrompidas restauram a revisão
+anterior, e um lock residual sem processo vivo é recuperado automaticamente com
+mensagem explícita.
 
 Quando uma nova árvore é publicada, a anterior é movida para
 `.rb-harness/runs/<run-id>/previous-artifacts`. O Harness nunca apaga

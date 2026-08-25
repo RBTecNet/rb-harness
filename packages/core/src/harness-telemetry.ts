@@ -66,6 +66,8 @@ export interface ProviderUsage {
   contentEvents: number;
   reasoningBytes: number;
   contentBytes: number;
+  /** Provider-reported USD cost; absent when the adapter does not expose it. */
+  costUsd?: number;
 }
 
 export interface ProviderCallRecord {
@@ -126,6 +128,7 @@ export function addUsage(target: ProviderUsage, source: ProviderUsage): Provider
   target.contentEvents += source.contentEvents;
   target.reasoningBytes += source.reasoningBytes;
   target.contentBytes += source.contentBytes;
+  if (source.costUsd !== undefined) target.costUsd = (target.costUsd ?? 0) + source.costUsd;
   return target;
 }
 
@@ -222,6 +225,9 @@ export function formatTelemetryReport(report: HarnessTelemetryReport): string {
       + `criação de cache=${report.totals.cacheCreationInputTokens}, saída=${report.totals.outputTokens}, `
       + `total=${report.totals.totalTokens} · requisições=${report.totals.requests}`,
     );
+    if (report.totals.costUsd !== undefined) {
+      lines.push(`Custo reportado pelo provider: US$ ${report.totals.costUsd.toFixed(6)}`);
+    }
   } else {
     lines.push("Tokens: não medidos por este provider (o adapter não informou usage).");
   }

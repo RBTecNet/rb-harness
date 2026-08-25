@@ -2,6 +2,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { HARNESS_BUDGET } from "../src/harness-budget.js";
 import { parseInterviewAnalysis, recoverInterviewAnalysis } from "../src/harness-interview.js";
 import { providerInvocation, providerOutputLimit, runProvider } from "../src/harness-provider.js";
 import { inspectProjectInventory } from "../src/harness-inventory.js";
@@ -23,6 +24,7 @@ import {
 import { materializeDocuments, parseDocumentBundle } from "../src/harness-documents.js";
 import { validateManifestTree } from "../src/manifest.js";
 import { writeRunState } from "../src/harness-state.js";
+import { isExecutable } from "./support/process-liveness.js";
 
 const fixtures = resolve(process.cwd(), "test/fixtures/standalone");
 const fakeProvider = resolve(fixtures, "fake-provider.mjs");
@@ -211,6 +213,14 @@ describe("standalone RB Harness", () => {
     expect(analysis.semanticDefects?.join(" ")).toContain("never classified");
   });
 
+  it("accepts a valid raw interview JSON object without decorative marker lines", () => {
+    const raw = JSON.stringify({
+      contract: "rb-harness-interview/v1", status: "ready", summary: "ready",
+      discoveries: [], assumptions: [], unresolved: [], answerReviews: [], questions: [],
+    });
+    expect(parseInterviewAnalysis(raw, []).status).toBe("ready");
+  });
+
   it("truncates a round to its question budget and blocks after the final round", () => {
     const question = (index: number) => ({
       id: `q-${index}`, question: `Decision ${index}?`, why: "It changes scope.", type: "text", options: [],
@@ -226,9 +236,14 @@ describe("standalone RB Harness", () => {
       { pendingAnswers: [], round },
     );
     expect(source(1, 9).questions).toHaveLength(5);
-    expect(source(2, 9).status).toBe("blocked");
-    expect(source(2, 9).questions).toHaveLength(0);
-    expect(source(2, 9).unresolved.length).toBeGreaterThan(0);
+    // A follow-up round truncates to its own budget and carries the surplus.
+    expect(source(2, 9).status).toBe("needs_input");
+    expect(source(2, 9).questions).toHaveLength(3);
+    // The declared ceiling — not an early round — ends the interview.
+    const ceiling = source(HARNESS_BUDGET.interview.maxRounds, 9);
+    expect(ceiling.status).toBe("blocked");
+    expect(ceiling.questions).toHaveLength(0);
+    expect(ceiling.unresolved.length).toBeGreaterThan(0);
   });
 
   it("derives one focused follow-up from a declared unresolved answer", () => {
@@ -312,9 +327,7 @@ describe("standalone RB Harness", () => {
         maxOutputBytes: 4 * 1024,
       })).rejects.toThrow("provider output exceeded 4096 bytes");
       const detachedPid = Number(await readFile(pidFile, "utf8"));
-      let alive = true;
-      try { process.kill(detachedPid, 0); } catch { alive = false; }
-      expect(alive).toBe(false);
+      expect(isExecutable(detachedPid)).toBe(false);
     } finally {
       delete process.env.RB_HARNESS_TEST_CHILD_PID_FILE;
     }
@@ -394,7 +407,7 @@ describe("standalone RB Harness", () => {
     )).rejects.toThrow("cannot use .git or .rb-harness");
   }, 60_000);
 
-  it("uses exactly one authoring call and no manager, auditor, or repair", async () => {
+  it("accepts one legacy complete-bundle call and uses no manager, auditor, or repair", async () => {
     const { project, answers } = await fixtureProject("rb-harness-single-writer-");
     const modes = resolve(project, "provider-modes.log");
     process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE = modes;
@@ -407,6 +420,26 @@ describe("standalone RB Harness", () => {
         .toEqual(["interview", "interview", "generation"]);
     } finally {
       delete process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE;
+    }
+  }, 60_000);
+
+  it("formats prose-only CLI interviews in closed passes instead of repeating discovery", async () => {
+    const { project, answers } = await fixtureProject("rb-harness-closed-interview-");
+    const prompts = resolve(project, "protocol-prompts.log");
+    process.env.RB_HARNESS_TEST_PROSE_INTERVIEW = "1";
+    process.env.RB_HARNESS_TEST_PROMPT_FILE = prompts;
+    try {
+      const state = await runStandaloneWorkflow(baseOptions(project, answers));
+      expect(state.status).toBe("complete");
+      const recorded = await readFile(prompts, "utf8");
+      // One formatter call in round one and two in round two: the second
+      // round's first representation omitted the pending answer disposition,
+      // so the deterministic defect drives one bounded formatting retry.
+      expect(recorded.match(/===== EXACT OUTPUT CONTRACT =====/g)).toHaveLength(3);
+      expect(recorded).toContain("Let me now craft the required envelope");
+    } finally {
+      delete process.env.RB_HARNESS_TEST_PROSE_INTERVIEW;
+      delete process.env.RB_HARNESS_TEST_PROMPT_FILE;
     }
   }, 60_000);
 
@@ -434,7 +467,9 @@ describe("standalone RB Harness", () => {
     await writeFile(answers, "{}\n", "utf8");
     await chmod(repairingProvider, 0o755);
     const modes = resolve(project, "provider-modes.log");
+    const workingDirectories = resolve(project, "provider-working-directories.jsonl");
     process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE = modes;
+    process.env.RB_HARNESS_TEST_PROVIDER_CWD_FILE = workingDirectories;
     try {
       const state = await runStandaloneWorkflow({
         ...baseOptions(project, answers, repairingProvider),
@@ -444,6 +479,11 @@ describe("standalone RB Harness", () => {
       expect(state.repairsUsed).toBe(1);
       expect((await readFile(modes, "utf8")).trim().split("\n"))
         .toEqual(["interview", "generation", "repair"]);
+      const invocations = (await readFile(workingDirectories, "utf8")).trim().split("\n")
+        .map((line) => JSON.parse(line) as { mode: string; cwd: string; entries: string[] });
+      const repair = invocations.find((invocation) => invocation.mode === "repair");
+      expect(repair?.cwd).not.toBe(project);
+      expect(repair?.entries).toEqual([]);
       expect(await readFile(resolve(project, ".rb/features/structural-repair/PHASES.md"), "utf8"))
         .toContain("finite accepted and rejected values");
       // A document the repair did not touch must survive byte for byte.
@@ -451,6 +491,7 @@ describe("standalone RB Harness", () => {
         .toContain("request.targetMode");
     } finally {
       delete process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE;
+      delete process.env.RB_HARNESS_TEST_PROVIDER_CWD_FILE;
     }
   }, 60_000);
 

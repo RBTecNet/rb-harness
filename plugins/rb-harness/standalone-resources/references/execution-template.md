@@ -106,6 +106,28 @@ operational audit (`RBF`) and therefore cannot be an acceptance dependency of a
 preceding task. This prevents a forward dependency where a phase can only pass
 after a gate that cannot start until that phase passes.
 
+## Task granularity
+
+The consumer runs one ephemeral, context-free call per task: the executor sees
+the validated task extract and the repository, never the planning conversation
+or the other tasks' reasoning. A task carrying a whole feature therefore has to
+be re-derived from nothing inside a single window, which is where an executor
+drops a requirement or invents one.
+
+Decompose every capability into the smallest independently observable steps, and
+split along boundaries the code already has — contract before use, storage
+before behavior, behavior before interface, happy path before each error path —
+ordering them with `Depends on` instead of merging them. Never write a task such
+as "implement the X feature" or "wire everything together". More small tasks is
+the correct outcome; it costs no completeness, because every requirement must
+still be covered by some task.
+
+`packages/core/src/harness-granularity.ts` enforces this deterministically from
+what the document itself declares — covered requirement IDs, acceptance
+criteria, scope tokens, and task counts per phase — against the ceilings in
+`HARNESS_BUDGET.decomposition`. A violation is a repairable structural error
+before publication and a blocker in `rb-harness artifacts verify`.
+
 `Parallel safe: true` means the task has no dependency on another pending task
 and owns disjoint paths, interfaces, migrations, generated artifacts, shared
 state, and validation surfaces. If independence cannot be demonstrated, write

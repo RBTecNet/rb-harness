@@ -13,6 +13,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, extname, relative, resolve, sep } from "node:path";
 import { walkFiles } from "./fs-utils.js";
 import { sha256File } from "./hash.js";
+import { assessDecomposition } from "./harness-granularity.js";
 import { inspectProjectInventory } from "./harness-inventory.js";
 import { listRunStates } from "./harness-state.js";
 import { loadManifest, validateManifestTree } from "./manifest.js";
@@ -83,6 +84,7 @@ const DETERMINISTIC_CHECKS = [
   "task-reference-integrity",
   "requirement-coverage",
   "portable-paths",
+  "task-decomposition",
 ];
 
 function logicalPhysicalPath(projectRoot: string, artifactDirectory: string, logicalPath: string): string {
@@ -240,6 +242,34 @@ function missingContextFindings(manifest: ArtifactManifest, plans: Array<{ artif
   return findings;
 }
 
+/**
+ * Decomposition ceilings, reported per plan.
+ *
+ * RB Ralph gives each task one ephemeral, context-free call. A plan that packs
+ * a whole feature into one task is contract-valid and still unsafe to execute,
+ * so it is a blocker here: the operator learns it before spending a provider
+ * call, not from a stalled run.
+ */
+function decompositionFindings(plans: Array<{ artifact: ArtifactRecord; document: ExecutionDocument }>): ArtifactVerificationFinding[] {
+  const findings: ArtifactVerificationFinding[] = [];
+  for (const { artifact, document } of plans) {
+    for (const issue of assessDecomposition(document)) {
+      const identity = createHash("sha256").update(`${artifact.path}\0${issue.line ?? 0}\0${issue.code}`).digest("hex").slice(0, 10);
+      findings.push({
+        id: `decomposition.${issue.code}.${identity}`.toLowerCase().replace(/[^a-z0-9.-]+/g, "-"),
+        severity: "blocker",
+        source: "deterministic",
+        category: "decomposition",
+        artifact: artifact.path,
+        criterion: issue.code,
+        evidence: issue.line ? `${issue.message} (line ${issue.line})` : issue.message,
+        requiredChange: "Split the oversized unit into bounded tasks a context-free executor can complete in one call.",
+      });
+    }
+  }
+  return findings;
+}
+
 async function deterministicVerification(
   projectRoot: string,
   artifactDirectory: string,
@@ -287,6 +317,7 @@ async function deterministicVerification(
     }
   }
   findings.push(...missingContextFindings(manifest, parsedPlans));
+  findings.push(...decompositionFindings(parsedPlans));
   findings.push(...await coverageAndReferenceFindings(projectRoot, artifactDirectory, manifest));
   return {
     manifest,

@@ -1,10 +1,16 @@
 /**
- * Finite interview (RF-003).
+ * Adaptive interview (RF-003).
  *
- * One batch of at most five material questions, at most one focused follow-up
- * with at most three, and then a decision: ready, or BLOCKED naming the
- * missing decision. `one-by-one` is a local presentation mode and never costs
+ * An opening batch of at most five material questions, then as many focused
+ * follow-up rounds as convergence needs: an answer that opens a new material
+ * decision earns another round, and the interview ends only when no material
+ * ambiguity remains. `one-by-one` is a local presentation mode and never costs
  * an extra provider call.
+ *
+ * Convergence is not assumed. Two safety ceilings keep the state machine
+ * finite — `interview.maxRounds` and `interview.maxQuestions` — and reaching
+ * either one is a declared failure to converge, reported as BLOCKED with the
+ * decision that is still open. Neither ceiling ever accepts an open decision.
  *
  * The parser normalizes superficial protocol deviations — question IDs, types,
  * option arrays, missing classifications — instead of discarding a complete,
@@ -16,8 +22,9 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { runProvider } from "./harness-provider.js";
 import { HARNESS_BUDGET, interviewQuestionBudget } from "./harness-budget.js";
+import { parseOrFormatControlOutput, successfulProviderLogStdout } from "./harness-control-formatter.js";
 import { interviewContractDigest, interviewRoundDirective } from "./harness-contract-digest.js";
-import { extractEnvelope } from "./harness-documents.js";
+import { extractEnvelopeOrJson } from "./harness-documents.js";
 import { assertPromptWithinBudget, serializeInputPackage, type HarnessInputPackage } from "./harness-input-package.js";
 import { loadWorkflowResources, requestNeedsHeadlessContracts } from "./standalone-resources.js";
 import type {
@@ -199,6 +206,22 @@ export interface InterviewParseOptions {
    * must not inherit the internal Harness interview budget.
    */
   maxQuestions?: number;
+  /**
+   * Questions already asked in this run. The adaptive interview keeps running
+   * until it converges, so the run-wide ceiling — not the round — is what
+   * finally bounds it.
+   */
+  askedQuestions?: number;
+  /**
+   * Questions already answered in this run, verbatim. A round that re-asks a
+   * settled decision is not progress; it is the loop this ceiling prevents.
+   */
+  answeredQuestions?: Iterable<string>;
+}
+
+/** Comparable form of a question: the decision, not its punctuation. */
+function questionFingerprint(question: string): string {
+  return question.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 export function parseInterviewAnalysis(
@@ -208,7 +231,7 @@ export function parseInterviewAnalysis(
   const options: InterviewParseOptions = Array.isArray(pendingAnswersOrOptions)
     ? { pendingAnswers: pendingAnswersOrOptions, round: 1 }
     : pendingAnswersOrOptions;
-  const source = extractEnvelope(output, BEGIN, END, "interview");
+  const source = extractEnvelopeOrJson(output, BEGIN, END, "interview");
   let value: unknown;
   try {
     value = JSON.parse(source);
@@ -222,26 +245,53 @@ export function parseInterviewAnalysis(
   const normalizations: string[] = [];
   const semanticDefects: string[] = [];
   const claimed = new Set<string>(options.usedQuestionIds ?? []);
-  const budget = options.maxQuestions ?? interviewQuestionBudget(options.round);
+  const adaptive = options.maxQuestions === undefined;
+  const asked = options.askedQuestions ?? 0;
+  // The run-wide ceiling, not the round, is what finally bounds an adaptive
+  // interview. A round may not ask past it even when its own budget allows.
+  const remainingRunBudget = adaptive
+    ? Math.max(0, HARNESS_BUDGET.interview.maxQuestions - asked)
+    : Number.POSITIVE_INFINITY;
+  const budget = Math.min(options.maxQuestions ?? interviewQuestionBudget(options.round), remainingRunBudget);
   const rawQuestions = Array.isArray(analysis.questions) ? analysis.questions : [];
+  const settled = new Set([...(options.answeredQuestions ?? [])].map(questionFingerprint));
+  let repeated = 0;
   let questions = rawQuestions
     .map((entry, index) => normalizeQuestion(entry, index, claimed, normalizations))
-    .filter((question): question is InterviewQuestion => Boolean(question));
+    .filter((question): question is InterviewQuestion => Boolean(question))
+    // A decision the developer already settled is not a new gap. Re-asking it
+    // is how an adaptive interview would fail to terminate, so the round drops
+    // the repeat instead of spending a question budget on it.
+    .filter((question) => {
+      if (!settled.has(questionFingerprint(question.question))) return true;
+      repeated += 1;
+      return false;
+    });
+  if (repeated) {
+    normalizations.push(`round ${options.round} re-asked ${repeated} already-answered decision(s); the settled answers stand`);
+  }
   // Surplus questions are never discarded. Asking them would break the round
   // budget, but dropping them would hide material decisions behind a clean
-  // result, so they become declared open items instead.
+  // result, so they become declared open items instead. While a further round
+  // remains they are carried, not deferred: an adaptive interview asks them
+  // next round rather than closing over them.
   const overflow = questions.slice(budget);
   const overflowQuestions = overflow.length;
   if (overflowQuestions) {
     questions = questions.slice(0, budget);
     normalizations.push(
       `round ${options.round} returned ${overflowQuestions + budget} questions; `
-      + `${budget} are asked and ${overflowQuestions} are recorded as deferred open decisions`,
+      + `${budget} are asked and ${overflowQuestions} are carried into the next round as open decisions`,
     );
   }
 
   const reviews = normalizeReviews(analysis.answerReviews, options.pendingAnswers, normalizations, semanticDefects);
-  const finalRound = options.maxQuestions === undefined && options.round >= HARNESS_BUDGET.interview.maxRounds;
+  // The last round this run can spend: either the round ceiling, or the point
+  // where the run-wide question budget leaves nothing further to ask. The
+  // budget is judged on questions already asked, not on this round's — a round
+  // that exactly consumes the remainder still gets to ask them.
+  const finalRound = adaptive
+    && (options.round >= HARNESS_BUDGET.interview.maxRounds || asked >= HARNESS_BUDGET.interview.maxQuestions);
 
   // A materially unresolved answer needs a focused follow-up. When one is
   // missing and a round still remains, reshape the provider's own stated
@@ -265,7 +315,9 @@ export function parseInterviewAnalysis(
   }
 
   const unresolved = stringList(analysis.unresolved);
-  for (const question of overflow) unresolved.push(`Deferred material decision: ${question.question}`);
+  for (const question of overflow) {
+    unresolved.push(`${finalRound ? "Deferred" : "Carried"} material decision: ${question.question}`);
+  }
   let status: InterviewAnalysis["status"] =
     analysis.status === "ready" || analysis.status === "needs_input" || analysis.status === "blocked"
       ? analysis.status
@@ -402,7 +454,7 @@ export function buildInterviewPrompt(
   const prompt = [
     // Invariant prefix first; everything below it varies by round.
     stableInterviewPrefix(state, inputPackage, resources),
-    `\n===== ROUND STATE =====\n${interviewRoundDirective(round)}`,
+    `\n===== ROUND STATE =====\n${interviewRoundDirective(round, state.answers.length)}`,
     `\nPrior validated checkpoint (navigation only, not source authority):\n${state.analysis ? JSON.stringify({
       summary: state.analysis.summary,
       discoveries: state.analysis.discoveries,
@@ -444,49 +496,54 @@ export async function requestInterviewAnalysis(options: InterviewRequestOptions)
     pendingAnswers: pending,
     round,
     usedQuestionIds: state.answers.map((answer) => answer.questionId),
+    askedQuestions: state.answers.length,
+    answeredQuestions: state.answers.map((answer) => answer.question),
   };
-  for (let attempt = HARNESS_BUDGET.interview.protocolAttempts; attempt >= 1; attempt -= 1) {
-    const recovered = await recoverInterviewAnalysis(
-      resolve(runRoot, `logs/interview-round-${round}-protocol-${attempt}.log`),
-      parseOptions,
-    );
-    if (!recovered) continue;
-    process.stdout.write(`[rb-harness] resposta válida da entrevista recuperada do log da tentativa ${attempt}; provider não será reiniciado.\n`);
-    return recovered;
-  }
-  let repair: string | undefined;
-  for (let attempt = 1; attempt <= HARNESS_BUDGET.interview.protocolAttempts; attempt += 1) {
-    const result = await runProvider({
+  const initialPrompt = buildInterviewPrompt(state, options.inputPackage, resources, round, pending);
+  const semanticLog = resolve(runRoot, `logs/interview-round-${round}-protocol-1.log`);
+  let raw = await successfulProviderLogStdout(semanticLog);
+  if (raw !== undefined) {
+    process.stdout.write(`[rb-harness] resposta bruta da entrevista recuperada do log; análise semântica não será reinvocada.\n`);
+  } else {
+    const initial = await runProvider({
       configuration: state.provider as ProviderConfiguration,
       mode: "interview",
       stage: "gap-analysis",
       projectRoot: options.evidenceRoot,
-      prompt: buildInterviewPrompt(state, options.inputPackage, resources, round, pending, repair),
-      logPath: resolve(runRoot, `logs/interview-round-${round}-protocol-${attempt}.log`),
+      prompt: initialPrompt,
+      logPath: semanticLog,
       timeoutSeconds: options.timeoutSeconds,
       firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
-      attempt,
+      attempt: 1,
     });
-    try {
-      const analysis = parseInterviewAnalysis(result.stdout, parseOptions);
-      const defects = analysis.semanticDefects ?? [];
-      // A semantic defect earns exactly one correction, which is the protocol
-      // repair the bounded flow already allows. It never becomes an
-      // acceptance, and it never buys an extra interview round.
-      if (defects.length && attempt < HARNESS_BUDGET.interview.protocolAttempts) {
-        repair = `classify every pending answer exactly once with a supported disposition: ${defects.join("; ")}`;
-        process.stdout.write(`[rb-harness] classificação incompleta na entrevista; solicitando uma única correção de protocolo.\n`);
-        continue;
-      }
-      return analysis;
-    } catch (error) {
-      repair = error instanceof Error ? error.message : String(error);
-      if (attempt === HARNESS_BUDGET.interview.protocolAttempts) {
-        throw new Error(`provider could not satisfy the interview protocol: ${repair}`);
-      }
-    }
+    raw = initial.stdout;
   }
-  throw new Error("unreachable interview protocol state");
+  const parse = (output: string): InterviewAnalysis => {
+    const analysis = parseInterviewAnalysis(output, parseOptions);
+    const defects = analysis.semanticDefects ?? [];
+    if (defects.length) {
+      throw new Error(`classify every pending answer exactly once with a supported disposition: ${defects.join("; ")}`);
+    }
+    return analysis;
+  };
+  return parseOrFormatControlOutput({
+      configuration: state.provider as ProviderConfiguration,
+      mode: "interview",
+      stage: "gap-analysis",
+      runRoot,
+      logPrefix: `interview-round-${round}-format`,
+      label: "interview response",
+      rawOutput: raw,
+      contract: [
+        `Return exactly ${BEGIN}, one JSON object, and ${END}.`,
+        `The exact JSON shape is ${INTERVIEW_SHAPE}`,
+        "Use only the fields shown in that shape. Preserve every substantive discovery, assumption, unresolved decision, answer classification, question, option, and ID from the raw response.",
+        "Disposition values are exactly ACCEPTED, PARTIAL, AMBIGUOUS, DEFERRED, or CONTRADICTED.",
+      ].join("\n"),
+      parse,
+      timeoutSeconds: options.timeoutSeconds,
+      firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
+    });
 }
 
 

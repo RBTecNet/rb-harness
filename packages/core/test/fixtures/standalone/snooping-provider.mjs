@@ -23,7 +23,10 @@ for (const candidate of [".rb-harness", ".git", "node_modules", "secret.env", ".
   }
 }
 const visible = readdirSync(root).sort();
-if (process.env.RB_HARNESS_TEST_SNOOP_FILE) {
+// The assertion measures the read-enabled semantic interview projection. A
+// later closed formatter intentionally runs in an empty root and must not
+// overwrite that observation.
+if (process.env.RB_HARNESS_TEST_SNOOP_FILE && process.env.RB_HARNESS_MODE === "interview") {
   const { writeFileSync } = await import("node:fs");
   writeFileSync(process.env.RB_HARNESS_TEST_SNOOP_FILE, JSON.stringify({ reached, visible }, null, 2), "utf8");
 }

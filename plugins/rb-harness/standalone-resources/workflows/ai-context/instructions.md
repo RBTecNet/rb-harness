@@ -17,10 +17,14 @@ Read this file completely before producing artifacts:
 
 ## How your output is delivered
 
-You do not write files and you do not run commands. Return every document as a
-`path`/`content` pair in the document bundle envelope described in your prompt.
-The orchestrator materializes the files, derives the manifest, IDs, hashes, and
-statuses, runs every deterministic validator, and publishes atomically. The
+You do not write files and you do not run commands. During the planning call,
+return only the compact document plan requested by the stage prompt, without
+document content. During each later closed authoring call, return only the
+requested raw document segment. Never emit a complete document bundle unless
+the stage prompt explicitly requests the legacy compatibility form. The
+orchestrator checkpoints and assembles parts, materializes files, derives the
+manifest, IDs, hashes and statuses, runs deterministic validators, and publishes
+atomically. The
 exact output contract for this workflow — required documents, the
 `rb-execution/v1` grammar, the `rb-operational/v1` shape, and the conventions —
 is supplied in the prompt as `rb-harness-contract-digest/v1`.
@@ -46,7 +50,11 @@ is supplied in the prompt as `rb-harness-contract-digest/v1`.
    intended behavior behind contradictions, external ownership, security or
    compliance boundaries, and known accidental legacy behavior.
 7. Present discoveries before questions so the developer can answer deltas
-   instead of retelling the system. Apply the answer acceptance gate; a vague or
+   instead of retelling the system. The interview is adaptive: keep returning
+   focused questions while any material ambiguity remains, including one an
+   earlier answer just opened, and stop the moment nothing material is open.
+   Never re-ask a decision that was already answered and accepted.
+   Apply the answer acceptance gate; a vague or
    partial response is not `CONFIRMED`. Re-ask material ambiguity narrowly or
    retain it as `UNKNOWN`/`CONFLICT`.
 8. Return `.rb/context/AGENTS.md` as a compact portable index and the conditional context documents
@@ -59,7 +67,7 @@ is supplied in the prompt as `rb-harness-contract-digest/v1`.
 9. Before returning, run the shared pre-write ambiguity audit. A writer receives
    answer dispositions and may promote only `ACCEPTED` answers to `CONFIRMED`;
    implemented behavior wins over an ungrounded interpretation.
-10. The orchestrator runs every deterministic validator after your call; produce documents that already satisfy them, and never claim to have run a command. They cover `rb-operational/v1`, the manifest, and the whole tree.
+10. The orchestrator runs every deterministic validator after assembly; produce document parts that assemble into compliant artifacts, and never claim to have run a command. They cover `rb-operational/v1`, the manifest, and the whole tree.
    Return only the documents this request actually changes; preserve compatible
    existing context documents unchanged.
 11. State coverage, confidence classes, conflicts, unknowns, skipped areas, and

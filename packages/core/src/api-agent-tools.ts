@@ -39,6 +39,8 @@ export interface ApiAgentToolContext {
   permissionMode: "yolo" | "protected";
   artifactDirectory?: string;
   evidenceDirectory?: string;
+  /** False for bounded authoring parts that must use only their closed brief. */
+  toolsEnabled?: boolean;
   /** Present for documentation roles; Ralph roles keep their own limits. */
   governor?: ToolGovernor;
 }
@@ -191,6 +193,7 @@ async function walk(root: string, start: string, maximum: number): Promise<strin
 }
 
 function definitions(context: ApiAgentToolContext): ToolDefinition[] {
+  if (context.toolsEnabled === false) return [];
   const tools: ToolDefinition[] = [
     {
       name: "list_files",

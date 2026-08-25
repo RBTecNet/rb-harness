@@ -120,7 +120,12 @@ describe("bounded state graph", () => {
   });
 
   it("counts both allowances explicitly and finitely", () => {
-    expect(HARNESS_BUDGET.interview.maxRounds).toBe(2);
+    // The interview loops until it converges, so its allowance is a declared
+    // finite ceiling rather than a fixed round count; the repair stays single.
+    expect(Number.isInteger(HARNESS_BUDGET.interview.maxRounds)).toBe(true);
+    expect(HARNESS_BUDGET.interview.maxRounds).toBeGreaterThan(0);
+    expect(Number.isInteger(HARNESS_BUDGET.interview.maxQuestions)).toBe(true);
+    expect(HARNESS_BUDGET.interview.maxQuestions).toBeGreaterThan(0);
     expect(HARNESS_BUDGET.generation.structuralRepairs).toBe(1);
     expect(TRANSITIONS.auditing).toEqual([]);
   });

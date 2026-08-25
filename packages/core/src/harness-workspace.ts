@@ -1,9 +1,11 @@
 import { copyFile, lstat, mkdir, readdir, readFile, rename, rm, chmod } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { assessDecomposition } from "./harness-granularity.js";
 import { initializeProject, loadManifest, slugify, syncManifest, validateManifestTree } from "./manifest.js";
 import type { StructuralError } from "./harness-generator.js";
 import type { HarnessRunState, HarnessWorkflow } from "./standalone-types.js";
-import type { ValidationIssue } from "./types.js";
+import type { ArtifactManifest, ValidationIssue } from "./types.js";
+import { validateExecutionMarkdown } from "./execution-contract.js";
 
 /**
  * Errors a localized repair cannot fix. They indicate a compromised staging
@@ -105,6 +107,33 @@ function structuralError(issue: ValidationIssue): StructuralError {
   };
 }
 
+/**
+ * Decomposition ceilings a published plan must respect.
+ *
+ * The manifest and the grammar can both be perfect while the plan still hands
+ * an entire feature to one context-free RB Ralph call. That is a document
+ * defect the localized repair can correct, so it is reported as a structural
+ * error rather than discovered by the executor at run time.
+ */
+async function decompositionErrors(staging: string, manifest: ArtifactManifest): Promise<StructuralError[]> {
+  const errors: StructuralError[] = [];
+  for (const artifact of manifest.artifacts) {
+    if (artifact.kind !== "execution-plan" || artifact.status !== "ready") continue;
+    let source: string;
+    try {
+      source = await readFile(resolve(staging, artifact.path), "utf8");
+    } catch {
+      continue;
+    }
+    const document = validateExecutionMarkdown(source).document;
+    if (!document) continue;
+    for (const issue of assessDecomposition(document)) {
+      errors.push(structuralError({ ...issue, path: artifact.path }));
+    }
+  }
+  return errors;
+}
+
 export interface StagedValidation {
   valid: boolean;
   repairable: boolean;
@@ -124,6 +153,7 @@ export async function validateStagedTree(staging: string, workflow: HarnessWorkf
   const manifest = await syncManifest(staging);
   const validation = await validateManifestTree(staging);
   const errors = validation.issues.map(structuralError);
+  errors.push(...await decompositionErrors(staging, manifest));
   if (validation.valid && !workflowArtifactReady(workflow, manifest.artifacts)) {
     const declaredBlockers = manifest.artifacts
       .filter((artifact) => artifact.status === "blocked" || basename(artifact.path).toUpperCase() === "BLOCKED.MD")

@@ -8,22 +8,57 @@
  */
 
 export const HARNESS_BUDGET = {
-  /** Finite interview: one initial batch plus at most one focused follow-up. */
+  /**
+   * Adaptive interview.
+   *
+   * The interview ends when the analysis converges, not when a fixed number of
+   * rounds elapses: an answer that opens a new material decision earns another
+   * focused round. `maxRounds` and `maxQuestions` are safety ceilings that keep
+   * the state machine finite, not the intended stopping point. Reaching either
+   * one is a reportable failure to converge, never a silent acceptance.
+   */
   interview: {
-    /** Total analysis rounds; round 1 is the batch, round 2 is the follow-up. */
-    maxRounds: 2,
-    /** Questions accepted in the first round. */
+    /** Safety ceiling on adaptive analysis rounds in one run. */
+    maxRounds: 12,
+    /** Questions accepted in the opening batch. */
     firstRoundQuestions: 5,
-    /** Questions accepted in the single follow-up round. */
+    /** Questions accepted in each adaptive follow-up round. */
     followUpQuestions: 3,
-    /** Protocol repair attempts per round before the run fails. */
-    protocolAttempts: 2,
+    /** Safety ceiling on questions asked across the whole run. */
+    maxQuestions: 40,
   },
-  /** One authoritative authoring call plus at most one localized repair. */
+  /** Incremental authoring plus at most one localized structural repair. */
   generation: {
-    authoringCalls: 1,
     structuralRepairs: 1,
-    protocolAttempts: 2,
+  },
+  /**
+   * Task decomposition ceilings for a generated `rb-execution/v1` plan.
+   *
+   * RB Ralph runs one ephemeral, context-free call per task. A task that
+   * carries a whole feature therefore has to be re-derived from nothing inside
+   * a single window, which is exactly where an executor forgets earlier
+   * requirements or invents them. These ceilings are deterministic and
+   * observable in the document itself; they never judge prose quality.
+   */
+  decomposition: {
+    /** Requirement IDs one task may carry in `Covers`. */
+    maxCoveredRequirements: 3,
+    /** Acceptance criteria one task may declare. */
+    maxAcceptanceCriteria: 6,
+    /** Scope path tokens one task may declare. */
+    maxScopePaths: 8,
+    /** Tasks one phase may declare before it stops being one observable outcome. */
+    maxTasksPerPhase: 12,
+    /** Requirement IDs a single-task phase may carry before it is a whole feature. */
+    maxSingleTaskPhaseRequirements: 2,
+  },
+  /** Representation-only recovery after one semantic response. */
+  formatting: {
+    /** Fresh, closed formatter calls after the raw response fails its parser. */
+    maxAttempts: 3,
+    maxRawBytes: 384 * 1024,
+    maxPriorBytes: 64 * 1024,
+    maxContractBytes: 32 * 1024,
   },
   /** Deterministic project inventory handed to the model before call one. */
   inventory: {
@@ -34,8 +69,15 @@ export const HARNESS_BUDGET = {
     directorySample: 12,
     /** Largest file the summarizer will open for a headline/summary. */
     maxSummarizedFileBytes: 128 * 1024,
-    /** Hard ceiling on the serialized input package handed to the provider. */
-    maxPackageBytes: 64 * 1024,
+    /**
+     * Hard ceiling on the serialized input package handed to the provider.
+     *
+     * Accepted decisions are authority and are never trimmed, so this ceiling
+     * has to hold every decision a converging interview can accept — up to
+     * `interview.maxQuestions` of them — alongside the request and the reduced
+     * inventory. A package that still does not fit fails loudly.
+     */
+    maxPackageBytes: 128 * 1024,
   },
   /**
    * Read-only evidence projection handed to a provider. Larger than the
@@ -77,11 +119,29 @@ export const HARNESS_BUDGET = {
     generationOutputBytes: 32 * 1024 * 1024,
     repairOutputBytes: 16 * 1024 * 1024,
   },
-  /** Documents accepted from one authoring call. */
+  /** Documents assembled from independently bounded authoring parts. */
   documents: {
     maxDocuments: 120,
     maxDocumentBytes: 512 * 1024,
     maxBundleBytes: 8 * 1024 * 1024,
+    /** The plan is intentionally small enough for conservative CLI/model output windows. */
+    maxPlanBytes: 20 * 1024,
+    /** A plan is an index, not documentation prose. */
+    maxPlannedDocuments: 48,
+    maxPlannedParts: 128,
+    /** One provider response never carries more document body than this. */
+    maxPartBytes: 12 * 1024,
+    /**
+     * Ceiling on the JSON envelope that transports one part.
+     *
+     * JSON escaping inflates the authored bytes — a segment dense in quotes or
+     * newlines grows measurably — so the transport ceiling is derived from
+     * `maxPartBytes` rather than borrowed from the plan's, which describes a
+     * different document entirely.
+     */
+    maxPartEnvelopeBytes: 32 * 1024,
+    maxPartsPerDocument: 64,
+    maxTotalParts: 512,
   },
   /** Process-tree ownership ladder (RF-008). */
   process: {
@@ -101,7 +161,14 @@ export const HARNESS_BUDGET = {
   /** Bounded prompt sections; snapshot tests assert these ceilings. */
   prompt: {
     maxContractDigestBytes: 12 * 1024,
-    maxInterviewPromptBytes: 192 * 1024,
+    /**
+     * The interview prompt carries the whole input package plus the round
+     * state, prior checkpoint, and pending answers. It keeps roughly the same
+     * headroom over `inventory.maxPackageBytes` that it had before the
+     * interview became adaptive, so a converging run cannot fail on its own
+     * accepted decisions.
+     */
+    maxInterviewPromptBytes: 320 * 1024,
     maxGenerationPromptBytes: 512 * 1024,
     maxRepairPromptBytes: 512 * 1024,
     /**

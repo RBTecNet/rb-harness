@@ -1,11 +1,15 @@
 /**
  * The documentation state machine.
  *
- * inventory → gap analysis (1 batch, at most 1 follow-up) → closed decision
- * checkpoint → one authoring call → materialization → deterministic validation
- * → at most one localized structural repair → atomic publication.
+ * inventory → adaptive gap analysis (1 batch, then focused rounds until it
+ * converges) → closed decision checkpoint → bounded incremental authoring →
+ * materialization → deterministic validation → at most one localized structural
+ * repair → atomic publication.
  *
- * The graph is acyclic apart from those two explicitly counted allowances.
+ * The graph is acyclic apart from those two explicitly counted allowances. The
+ * interview loop is bounded by declared safety ceilings rather than a fixed
+ * round count: reaching one is a failure to converge, reported as a resumable
+ * BLOCKED checkpoint naming the open decision.
  * There is no manager, no semantic auditor, and no stage that can restart
  * itself: an exhausted budget produces a resumable checkpoint and an explicit
  * diagnostic, never more provider spend.
@@ -235,7 +239,10 @@ async function interview(
       state.activeInterviewRound = round;
       state.diagnostic = undefined;
       await writeRunState(state);
-      process.stdout.write(`[rb-harness] analisando lacunas (rodada ${round}/${HARNESS_BUDGET.interview.maxRounds})...\n`);
+      process.stdout.write(
+        `[rb-harness] analisando lacunas (rodada ${round}; ${state.answers.length} pergunta(s) já respondida(s); `
+        + `teto de segurança ${HARNESS_BUDGET.interview.maxRounds} rodadas / ${HARNESS_BUDGET.interview.maxQuestions} perguntas)...\n`,
+      );
       state.analysis = await requestInterviewAnalysis({
         state,
         inputPackage,
@@ -264,6 +271,10 @@ async function interview(
       if (state.analysis.status === "ready") {
         checkpoints(state).interviewCompletedAt = new Date().toISOString();
         await writeRunState(state);
+        process.stdout.write(
+          `[rb-harness] entrevista convergida em ${round} rodada(s) e ${state.answers.length} pergunta(s); `
+          + "nenhuma ambiguidade material em aberto.\n",
+        );
         return;
       }
       if (state.analysis.status === "blocked") {
@@ -272,15 +283,17 @@ async function interview(
         await writeRunState(state);
         throw new Error(`generation is blocked: ${state.diagnostic}`);
       }
-      if (options.questionMode === "batch") {
-        process.stdout.write(`\nO modelo encontrou ${state.analysis.questions.length} decisões materiais nesta rodada.\n`);
-      }
+      process.stdout.write(
+        options.questionMode === "batch"
+          ? `\nO modelo encontrou ${state.analysis.questions.length} decisão(ões) material(is) nesta rodada.\n`
+          : `[rb-harness] ${state.analysis.questions.length} decisão(ões) material(is) em aberto; serão perguntadas uma a uma.\n`,
+      );
       await collectInterviewAnswers(state, state.analysis.questions, provided, terminal);
     }
     // The parser converts an exhausted final round into `blocked`, so reaching
-    // this point means the budget itself was violated.
+    // this point means the safety ceiling itself was violated.
     state.status = "blocked";
-    state.diagnostic = `the interview budget of ${HARNESS_BUDGET.interview.maxRounds} rounds is exhausted and a material decision remains open`;
+    state.diagnostic = `the interview did not converge within the safety ceiling of ${HARNESS_BUDGET.interview.maxRounds} rounds and a material decision remains open`;
     await writeRunState(state);
     throw new Error(state.diagnostic);
   } finally {
@@ -363,7 +376,7 @@ async function generate(
     state.status = "generating";
     state.diagnostic = undefined;
     await writeRunState(state);
-    process.stdout.write(`[rb-harness] geração única com ${state.provider.provider}/${state.provider.model || "provider-default"}...\n`);
+    process.stdout.write(`[rb-harness] geração incremental com ${state.provider.provider}/${state.provider.model || "provider-default"}...\n`);
     bundle = await requestDocumentBundle({
       state,
       inputPackage,
@@ -374,7 +387,7 @@ async function generate(
       streamOutput: false,
     });
     await persistBundle(state, runRoot, bundle, false);
-    process.stdout.write(`[rb-harness] pacote recebido: ${bundle.documents.length} documento(s).\n`);
+    process.stdout.write(`[rb-harness] pacote incremental montado: ${bundle.documents.length} documento(s).\n`);
   }
 
   if (bundle.status === "blocked") {

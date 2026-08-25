@@ -17,10 +17,14 @@ Read this file completely before producing artifacts:
 
 ## How your output is delivered
 
-You do not write files and you do not run commands. Return every document as a
-`path`/`content` pair in the document bundle envelope described in your prompt.
-The orchestrator materializes the files, derives the manifest, IDs, hashes, and
-statuses, runs every deterministic validator, and publishes atomically. The
+You do not write files and you do not run commands. During the planning call,
+return only the compact document plan requested by the stage prompt, without
+document content. During each later closed authoring call, return only the
+requested raw document segment. Never emit a complete document bundle unless
+the stage prompt explicitly requests the legacy compatibility form. The
+orchestrator checkpoints and assembles parts, materializes files, derives the
+manifest, IDs, hashes and statuses, runs deterministic validators, and publishes
+atomically. The
 exact output contract for this workflow — required documents, the
 `rb-execution/v1` grammar, the `rb-operational/v1` shape, and the conventions —
 is supplied in the prompt as `rb-harness-contract-digest/v1`.
@@ -54,21 +58,27 @@ isolated from existing behavior.
 7. Interview only material gaps using the shared answer acceptance gate. Deepen
    automatically for money, inventory, security, tenancy, migrations, public
    contracts, reservations, queues, or approval workflows.
+   The interview is adaptive: keep returning focused questions while any
+   material ambiguity remains, including one an earlier answer just opened,
+   and stop the moment nothing material is open. Never re-ask a decision that
+   was already answered and accepted.
 8. Run the pre-write ambiguity audit and confirm one normalized checkpoint that
    separates accepted delta, preservation rules, assumptions, deferrals, and
    conflicts.
 9. Return the artifacts from `artifact-shapes.md`. Every TO BE RIGID requirement
    traces to an impact, preservation/regression entry, and plan task. Emit formal
    contracts only when the public boundary requires them.
-10. Derive `PLAN.md` and a 1:1 `PHASES.md`. Tasks are small, dependency-aware,
+10. Derive `PLAN.md` and a 1:1 `PHASES.md`. Tasks are small enough for a fresh,
+    context-free executor call, dependency-aware,
     name the AS IS/TO BE delta, preserve legitimate behavior, and own focused
-    binary validation. Derive `OPERATIONS.json` when an honest consumer-level
+    binary validation. The decomposition ceilings in the contract digest are
+    validated mechanically, so respect them while writing. Derive `OPERATIONS.json` when an honest consumer-level
     scenario can validate the evolution and its key preserved path. Normal
     phases validate its structure; only the post-phase RBF audit owns the
     clean-room pass. Audit exact standard/dialect matrices, independent hostile
     schema/secret cases, explicit quality commands, validation capability, and
     lossless RIGID/preservation/regression traceability before returning.
-11. The orchestrator runs every deterministic validator after your call; produce documents that already satisfy them, and never claim to have run a command. They cover `rb-execution/v1`, `rb-operational/v1`, the manifest, and
+11. The orchestrator runs every deterministic validator after assembly; produce document parts that assemble into compliant artifacts, and never claim to have run a command. They cover `rb-execution/v1`, `rb-operational/v1`, the manifest, and
     the whole tree.
 12. State freshness, changed/preserved/deprecated/unknown counts, impact and
     regression coverage, assumptions, and blockers in the bundle summary.

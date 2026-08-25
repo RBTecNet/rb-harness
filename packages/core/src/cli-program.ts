@@ -618,9 +618,10 @@ program.command("_provider-run")
   .option("--credential <id-or-label>")
   .option("--artifacts-dir <path>")
   .option("--evidence-dir <path>")
+  .option("--no-tools", "disable the tool catalog for a closed authoring step")
   .action(async (options: {
     provider: string; model: string; effort: string; role: string; project: string; permission: string;
-    credential?: string; artifactsDir?: string; evidenceDir?: string;
+    credential?: string; artifactsDir?: string; evidenceDir?: string; tools: boolean;
   }) => {
     if (!isDirectProvider(options.provider)) throw new Error(`unsupported direct provider: ${options.provider}`);
     const roles = ["harness-interview", "harness-generation", "harness-repair", "ralph-agent", "ralph-manager"] as const;
@@ -636,6 +637,7 @@ program.command("_provider-run")
       credential: options.credential,
       artifactDirectory: options.artifactsDir,
       evidenceDirectory: options.evidenceDir,
+      toolsEnabled: options.tools,
     });
   });
 

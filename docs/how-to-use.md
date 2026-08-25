@@ -46,8 +46,9 @@ CLI providers are `codex`, `claude`, and `opencode`. Native API providers are
 custom adapter receives the prompt through stdin and model, effort, mode, and
 project metadata through `RB_HARNESS_*` environment variables.
 `RB_HARNESS_MODE` is `interview`, `generation`, or `repair`. All three are
-read-only by contract and answer with their declared JSON envelope on stdout;
-the orchestrator materializes the returned documents. Orchestrator-private
+read-only by contract. Interview, plan, and repair responses use declared JSON
+envelopes; bounded part responses use raw document content by default, and the
+orchestrator owns their checkpoint identity and materialization. Orchestrator-private
 variables — resource root, dashboard, telemetry, and Ralph run variables — are
 removed from the adapter environment.
 
@@ -161,19 +162,34 @@ the adaptive interview boundary separately from terminal artifact generation.
 ## Artifact quality gate
 
 RB Harness uses one artifact writer, not a writer/manager loop. Product choices
-and contradictions must be resolved by the finite interview before that writer
-starts: one batch of at most five material questions, at most one focused
-follow-up with at most three, then a closed decision checkpoint or `BLOCKED`.
+and contradictions must be resolved by the adaptive interview before that writer
+starts: one batch of at most five material questions, then focused rounds of at
+most three until nothing material is open, and finally a closed decision
+checkpoint. Declared safety ceilings — at most 12 rounds and 40 questions per
+run — bound the loop, and reaching one reports `BLOCKED` with the decision that
+is still open.
 
-The writer receives that checkpoint plus a compact, code-owned output contract
-and returns the complete document set as a typed `path`/`content` bundle. The
-Harness materializes it into a staging tree containing only `.rb`, derives every
+The writer receives that checkpoint plus a compact, code-owned output contract.
+It first returns a small plan with shared IDs and a closed brief per segment,
+then returns independently bounded document parts of at most 12 KiB. Each part
+is checkpointed before the next call; completed parts survive interruption and
+are not requested again. The Harness assembles the typed `path`/`content`
+bundle, materializes it into a staging tree containing only `.rb`, derives every
 mechanical field — manifest, hashes, IDs, statuses, the TSV projection — and
 validates.
 
 Publication is owned by deterministic gates: manifest hashes and identities,
-workflow-required outputs, `rb-execution/v1`, optional formal contracts,
-explicit `BLOCKED.md` state, and the complete artifact tree. A RIGID requirement
+workflow-required outputs, `rb-execution/v1`, plan decomposition, optional
+formal contracts, explicit `BLOCKED.md` state, and the complete artifact tree.
+
+The decomposition gate exists because RB Ralph runs one ephemeral, context-free
+call per task, so a task that carries a whole feature has to be re-derived from
+nothing inside a single window. Ceilings are read from what the plan itself
+declares: at most 3 covered requirement IDs, 6 acceptance criteria, and 8 scope
+paths per task; at most 12 tasks per phase; and a single-task phase covering
+more than 2 requirements is a feature that was never decomposed. Breaking one is
+a repairable structural error before publication and a blocker in
+`rb-harness artifacts verify`. A RIGID requirement
 cannot claim that deterministic code recognizes unlimited natural-language
 meaning unless the artifacts define a finite grammar, typed authority, finite
 matrix, or explicit classifier and failure contract.
@@ -183,6 +199,15 @@ runs. It receives the ordered, machine-generated error list and only the
 affected documents, and must preserve everything else byte for byte. It cannot
 reopen the interview, re-explore the repository, or re-emit the tree. A second
 failure is reported with its diagnostic; there is no loop.
+
+Interview and document-plan output have the same bounded behavior. A valid JSON
+object does not need decorative marker lines. If a provider returns the right
+substance in the wrong representation, the Harness preserves the raw response
+and makes up to three closed formatting requests with tools disabled and no
+project access. Every attempt receives the exact contract, parser defect, raw
+response, and prior invalid formatting. The paid semantic analysis is never
+repeated. Malformed legacy document-part envelopes use the same boundary while
+new part prompts continue to request raw Markdown.
 
 Historical runs stopped by the retired `rb-harness-artifact-audit/v1` stage
 remain readable. Their audit rows are historical metadata and no longer gate any
@@ -217,6 +242,13 @@ rb-harness artifacts verify --project . --artifacts-dir .rb \
 `--remediate` and `--from-report` were removed with the semantic manager and
 fail with explicit guidance. To repair a failed package, run the workflow again;
 the single bounded structural repair now happens inside generation.
+
+Generation remains fail-closed for RB Ralph. A package is publishable only
+after the strict manifest, `rb-execution/v1`, and applicable
+`rb-operational/v1` validators pass and a workflow-required ready plan exists.
+The materializer may normalize only lossless legacy spellings (for example,
+nested HTTP probe assertions or a task repeating its enclosing phase
+dependency); vague acceptance criteria and other semantic gaps remain errors.
 
 Documentation transcripts are byte-counted and bounded: 32 MiB for generation,
 16 MiB for the repair, and 8 MiB for the interview. Exceeding a role limit,

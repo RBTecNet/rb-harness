@@ -1,5 +1,5 @@
 /**
- * Reasoning as a declared, explicit provider mode (0.4.3).
+ * Reasoning as a declared, explicit provider mode (introduced in 0.4.3).
  *
  * A real run lost 65.536 output tokens to `reasoning_content` and produced no
  * document at all: the DeepSeek entry in the registry forced
@@ -141,6 +141,63 @@ describe("declared reasoning mode", () => {
     expect(server.requests[0]).toMatchObject({ thinking: { type: "disabled" } });
   }, 30_000);
 
+  it("runs a closed authoring response with no tool catalog or extra turn", async () => {
+    await credentialHome();
+    const server = await plainServer();
+    await expect(runDirectApiAgent({
+      provider: "deepseek", model: "deepseek-v4-flash", effort: "none", projectRoot: await project(),
+      role: "harness-generation", permissionMode: "protected", prompt: "write one bounded part", endpoint: server.url,
+      toolsEnabled: false,
+    })).resolves.toBe("ok");
+    expect(server.requests).toHaveLength(1);
+    expect(server.requests[0]).not.toHaveProperty("tools");
+    expect(server.requests[0]).not.toHaveProperty("tool_choice");
+    expect(providerInvocation(
+      { provider: "deepseek", model: "deepseek-v4-flash", effort: "none" },
+      "generation",
+      "/tmp/closed-authoring",
+      false,
+    ).args).toContain("--no-tools");
+  }, 30_000);
+
+  it("returns prose unchanged so the provider-neutral outer formatter owns serialization", async () => {
+    await credentialHome();
+    const expected = "I have analyzed everything; let me craft the envelope.";
+    const server = await streamServer((write, end) => {
+      write(delta({ content: expected }));
+      write(finish());
+      write(DONE);
+      end();
+    });
+    const result = await runDirectApiAgent({
+      provider: "deepseek", model: "deepseek-v4-flash", effort: "none", projectRoot: await project(),
+      role: "harness-interview", permissionMode: "protected",
+      prompt: "Return exactly RB_HARNESS_INTERVIEW_JSON_BEGIN, one JSON object, and RB_HARNESS_INTERVIEW_JSON_END. Do not add prose.",
+      endpoint: server.url,
+    });
+    expect(result).toBe(expected);
+    expect(server.requests).toHaveLength(1);
+  }, 30_000);
+
+  it("does not buy a conversion call when the provider returned a valid raw JSON object", async () => {
+    await credentialHome();
+    const expected = '{"contract":"rb-harness-interview/v1","status":"ready"}';
+    const server = await streamServer((write, end) => {
+      write(delta({ content: expected }));
+      write(finish());
+      write(DONE);
+      end();
+    });
+    const result = await runDirectApiAgent({
+      provider: "deepseek", model: "deepseek-v4-flash", effort: "none", projectRoot: await project(),
+      role: "harness-interview", permissionMode: "protected",
+      prompt: "Return exactly RB_HARNESS_INTERVIEW_JSON_BEGIN, one JSON object, and RB_HARNESS_INTERVIEW_JSON_END. Do not add prose.",
+      endpoint: server.url,
+    });
+    expect(result).toBe(expected);
+    expect(server.requests).toHaveLength(1);
+  }, 30_000);
+
   it("never sends reasoning_effort=none, because the toggle owns the shutdown", async () => {
     await credentialHome();
     const server = await plainServer();
@@ -226,6 +283,21 @@ describe("reasoning that never becomes an answer", () => {
     const failure = await askDeepSeek("high", server.url, await project()).catch((error: Error) => error.message);
     expect(failure).toContain("usage not reported by the provider");
     expect(failure).not.toMatch(/input=\d/);
+  }, 30_000);
+
+  it("rejects a non-empty partial response on finish_reason=length without a retry", async () => {
+    await credentialHome();
+    const server = await streamServer((write, end) => {
+      write(delta({ content: "RB_HARNESS_DOCUMENT_PART_JSON_BEGIN partial" }));
+      write(finish("length", { prompt_tokens: 10, completion_tokens: 8192, total_tokens: 8202 }));
+      write(DONE);
+      end();
+    });
+    const failure = await askDeepSeek("none", server.url, await project()).catch((error: Error) => error.message);
+    expect(failure).toContain("provider exhausted its output limit without producing a final response");
+    expect(failure).toContain("content events=1");
+    expect(failure).toContain("no partial response was published");
+    expect(server.requests).toHaveLength(1);
   }, 30_000);
 
   it("publishes no partial answer and writes no artifact when reasoning exhausts the limit", async () => {
@@ -364,8 +436,11 @@ describe("providers that declare no reasoning capability", () => {
     expect(claude.args).toEqual(expect.arrayContaining(["--effort", "high"]));
     const opencode = providerInvocation({ provider: "opencode", model: "m", effort: "low" }, "generation", root);
     expect(opencode.args).toEqual(expect.arrayContaining(["--variant", "low"]));
+    const opencodeNone = providerInvocation({ provider: "opencode", model: "m", effort: "none" }, "generation", root);
+    expect(opencodeNone.args).toEqual(expect.arrayContaining(["--variant", "minimal"]));
+    expect(opencodeNone.args).not.toContain("none");
     // None of them learns about a thinking toggle.
-    for (const invocation of [codex, claude, opencode]) {
+    for (const invocation of [codex, claude, opencode, opencodeNone]) {
       expect(JSON.stringify(invocation.args)).not.toContain("thinking");
     }
   });

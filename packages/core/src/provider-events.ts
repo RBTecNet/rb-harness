@@ -40,10 +40,19 @@ export interface StreamAccounting {
    * event at all. The axis is then declared unmeasured, never silently claimed.
    */
   degraded: boolean;
+  /** Provider-declared terminal reason, when the structured dialect exposes it. */
+  stopReason?: string;
+  requests?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+  totalTokens?: number;
+  cachedInputTokens?: number;
+  costUsd?: number;
 }
 
 export interface StreamLimitBreach {
-  code: "tool-budget" | "turn-budget" | "malformed-event" | "no-progress";
+  code: "tool-budget" | "turn-budget" | "malformed-event" | "no-progress" | "output-limit";
   message: string;
 }
 
@@ -79,6 +88,25 @@ export function collectEventText(value: unknown, into: string[] = [], depth = 0)
     for (const entry of Object.values(value as Record<string, unknown>)) collectEventText(entry, into, depth + 1);
   }
   return into;
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function finite(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+/** OpenCode final text lives only in a text part; ids and accounting are never answer text. */
+export function collectOpenCodeText(event: Record<string, unknown>): string[] {
+  const properties = record(event.properties);
+  const part = record(event.part) ?? record(properties?.part);
+  const type = typeof event.type === "string" ? event.type : "";
+  const partType = typeof part?.type === "string" ? part.type : "";
+  return (type === "text" || partType === "text") && typeof part?.text === "string" && part.text
+    ? [part.text]
+    : [];
 }
 
 export interface StreamObserverOptions {
@@ -195,16 +223,14 @@ export class ProviderStreamObserver {
    * `callID` is what identifies the invocation. A `step-start` part marks a
    * model turn.
    */
-  private classifyOpenCode(record: Record<string, unknown>): boolean {
-    const type = typeof record.type === "string" ? record.type : "";
-    const properties = record.properties;
-    if (!properties || typeof properties !== "object" || Array.isArray(properties)) return false;
-    const part = (properties as Record<string, unknown>).part;
-    if (type !== "message.part.updated" || !part || typeof part !== "object" || Array.isArray(part)) {
-      // `session.idle` and `message.updated` are real progress boundaries.
-      return type === "session.idle" || type === "message.updated";
-    }
-    const partRecord = part as Record<string, unknown>;
+  private classifyOpenCode(event: Record<string, unknown>): boolean {
+    const type = typeof event.type === "string" ? event.type : "";
+    const properties = record(event.properties);
+    // OpenCode 1.18 emits `{ type, part }`; older builds wrapped the same part
+    // under `properties`. Supporting both is transport compatibility, not a
+    // provider heuristic.
+    const partRecord = record(event.part) ?? record(properties?.part);
+    if (!partRecord) return type === "session.idle" || type === "message.updated";
     const partType = typeof partRecord.type === "string" ? partRecord.type : "";
     if (partType === "tool") {
       const callId = typeof partRecord.callID === "string" && partRecord.callID
@@ -218,6 +244,19 @@ export class ProviderStreamObserver {
     }
     if (partType === "step-start") {
       this.accounting.turnEvents += 1;
+      return true;
+    }
+    if (partType === "step-finish" || type === "step_finish") {
+      this.accounting.requests = (this.accounting.requests ?? 0) + 1;
+      const reason = typeof partRecord.reason === "string" ? partRecord.reason : "";
+      if (reason) this.accounting.stopReason = reason;
+      const tokens = record(partRecord.tokens);
+      this.accounting.inputTokens = (this.accounting.inputTokens ?? 0) + finite(tokens?.input);
+      this.accounting.outputTokens = (this.accounting.outputTokens ?? 0) + finite(tokens?.output);
+      this.accounting.reasoningTokens = (this.accounting.reasoningTokens ?? 0) + finite(tokens?.reasoning);
+      this.accounting.totalTokens = (this.accounting.totalTokens ?? 0) + finite(tokens?.total);
+      this.accounting.cachedInputTokens = (this.accounting.cachedInputTokens ?? 0) + finite(record(tokens?.cache)?.read);
+      this.accounting.costUsd = (this.accounting.costUsd ?? 0) + finite(partRecord.cost);
       return true;
     }
     return partType === "text";
@@ -275,8 +314,15 @@ export class ProviderStreamObserver {
         // split across fields must not gain a newline inside a JSON string.
         // Events are separated by one newline so line-oriented output stays
         // readable.
-        const leaves = collectEventText(record);
+        const leaves = this.options.dialect === "opencode" ? collectOpenCodeText(record) : collectEventText(record);
         if (leaves.length) this.text += `${leaves.join("")}\n`;
+        if (this.options.dialect === "opencode" && this.accounting.stopReason === "length") {
+          return {
+            code: "output-limit",
+            message: "OpenCode exhausted the model output limit"
+              + ` (reason=length; reasoning tokens=${this.accounting.reasoningTokens ?? 0}; output tokens=${this.accounting.outputTokens ?? 0}); partial output was not published`,
+          };
+        }
         if (this.accounting.toolEvents > this.options.maxToolEvents) {
           return {
             code: "tool-budget",

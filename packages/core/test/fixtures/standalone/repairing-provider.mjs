@@ -1,11 +1,18 @@
 #!/usr/bin/env node
-import { appendFile } from "node:fs/promises";
+import { appendFile, readdir } from "node:fs/promises";
 
 const chunks = [];
 for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
 const prompt = Buffer.concat(chunks).toString("utf8");
 if (process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE) {
   await appendFile(process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE, `${process.env.RB_HARNESS_MODE ?? "unknown"}\n`, "utf8");
+}
+if (process.env.RB_HARNESS_TEST_PROVIDER_CWD_FILE) {
+  await appendFile(process.env.RB_HARNESS_TEST_PROVIDER_CWD_FILE, `${JSON.stringify({
+    mode: process.env.RB_HARNESS_MODE ?? "unknown",
+    cwd: process.cwd(),
+    entries: await readdir(process.cwd()),
+  })}\n`, "utf8");
 }
 
 if (process.env.RB_HARNESS_MODE === "interview") {
