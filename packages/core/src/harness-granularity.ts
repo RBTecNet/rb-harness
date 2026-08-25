@@ -28,6 +28,19 @@ export function scopePathTokens(task: Task): string[] {
   return [...task.scope.matchAll(/`([^`]+)`/g)].map((match) => match[1]!.trim()).filter(Boolean);
 }
 
+/**
+ * How to actually perform a split.
+ *
+ * Task IDs are one global ascending sequence, so inserting a task renumbers
+ * every later one and rewrites the `Depends on` fields that referenced them.
+ * Without saying so, a repair edits the offending task in place, leaves the
+ * sequence broken or the split undone, and the run fails the same gate twice.
+ */
+const SPLIT_INSTRUCTION =
+  "Splitting renumbers the plan: task IDs are one global ascending sequence, so inserting a task shifts every later T### "
+  + "and every `Depends on` and `AC-` prefix that refers to them. Re-emit the whole document with the new numbering, keep each "
+  + "requirement covered by exactly one of the resulting tasks, and give each new task its own Scope, criteria, and validation.";
+
 function issue(code: string, message: string, line: number): ValidationIssue {
   return { code, message, severity: "error", line };
 }
@@ -40,7 +53,8 @@ function taskIssues(task: Task): ValidationIssue[] {
     found.push(issue(
       "execution.task.covers-too-many-requirements",
       `Task ${task.id} carries ${covered.length} requirements (${covered.join(", ")}); a task RB Ralph runs in one context-free call `
-      + `covers at most ${decomposition.maxCoveredRequirements}. Split it into bounded tasks that each own a smaller observable change.`,
+      + `covers at most ${decomposition.maxCoveredRequirements}. Split it into bounded tasks that each own a smaller observable change. `
+      + SPLIT_INSTRUCTION,
       task.line,
     ));
   }
@@ -84,7 +98,8 @@ function phaseIssues(phase: Phase): ValidationIssue[] {
       found.push(issue(
         "execution.phase.undecomposed-feature",
         `Phase ${phase.id} holds one task (${only.id}) covering ${covered.length} requirements (${covered.join(", ")}). `
-        + "That hands a whole feature to a single context-free executor call. Break the phase into bounded tasks before publishing it.",
+        + "That hands a whole feature to a single context-free executor call. Break the phase into bounded tasks before publishing it. "
+        + SPLIT_INSTRUCTION,
         phase.line,
       ));
     }

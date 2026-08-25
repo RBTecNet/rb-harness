@@ -108,7 +108,7 @@ export function buildGenerationPrompt(
   return prompt;
 }
 
-function buildDocumentPartPrompt(
+export function buildDocumentPartPrompt(
   prefix: string,
   plan: DocumentPlan,
   document: PlannedDocument,
@@ -117,6 +117,7 @@ function buildDocumentPartPrompt(
   partIndex: number,
   previousPart?: DocumentPart,
   repairContext?: string,
+  defect?: string,
 ): string {
   const prompt = [
     prefix,
@@ -141,6 +142,7 @@ function buildDocumentPartPrompt(
     "Write only the requested contiguous segment. The first part begins the file; every later part continues exactly after the previous segment; concatenation must produce one complete document without omitted or duplicated text.",
     "This is a closed authoring step. Do not inspect files, call tools, rediscover evidence, or change the plan. All authority needed for this segment is in the plan, coordination ledger, target brief, and previous segment above.",
     `The content must not exceed ${HARNESS_BUDGET.documents.maxPartBytes} UTF-8 bytes. If the plan assigned too much to this part, be concise while preserving every RIGID fact and contract requirement; never spill into another response.`,
+    defect ? `A prior attempt at this exact segment was rejected: ${defect}. Author the same span again, shorter. Keep every RIGID fact, ID, and contract requirement; cut restatement, rationale, and examples that repeat what the plan or an earlier segment already says.` : "",
   ].filter(Boolean).join("\n");
   assertPromptWithinBudget(prompt, repairContext ? HARNESS_BUDGET.prompt.maxRepairPromptBytes : HARNESS_BUDGET.prompt.maxGenerationPromptBytes, "document part");
   return prompt;
@@ -382,6 +384,8 @@ async function authorIncrementally(options: IncrementalAuthoringOptions): Promis
   if (checkpoint.plan.status === "blocked") return assembleDocumentPlan(checkpoint.plan, []);
 
   const completed = new Map(checkpoint.parts.map((part) => [`${part.path}\0${part.part}`, part]));
+  /** Segments already re-authored once after a substance defect. */
+  const rewritten = new Set<string>();
   const totalParts = checkpoint.plan.documents.reduce((sum, document) => sum + document.parts.length, 0);
   const closedRoot = await mkdtemp(resolve(tmpdir(), "rb-harness-closed-authoring-"));
   await chmod(closedRoot, 0o555);
@@ -430,7 +434,39 @@ async function authorIncrementally(options: IncrementalAuthoringOptions): Promis
         let authored: DocumentPart;
         try {
           authored = parsePartOrLegacyDocument(rawPart, expected);
-        } catch {
+        } catch (error) {
+          // A substance defect — an oversized segment — cannot be repaired by
+          // the formatter, which may only change representation. The writer
+          // authors the same span again, told exactly what was rejected.
+          if (error instanceof DocumentSubstanceError && !rewritten.has(key)) {
+            rewritten.add(key);
+            process.stdout.write(`[rb-harness] ${error.message}; reescrevendo o segmento uma vez.\n`);
+            const retryLog = resolve(options.runRoot, `logs/${options.logPrefix}-document-${String(documentIndex + 1).padStart(3, "0")}-part-${String(partIndex + 1).padStart(3, "0")}-rewrite.log`);
+            const retry = await runProvider({
+              configuration: options.state.provider as ProviderConfiguration,
+              mode: options.mode,
+              stage: options.stage,
+              projectRoot: closedRoot,
+              prompt: buildDocumentPartPrompt(
+                options.prefix,
+                checkpoint.plan,
+                document,
+                part,
+                documentIndex,
+                partIndex,
+                previousPart,
+                options.repairContext,
+                error.message,
+              ),
+              logPath: retryLog,
+              timeoutSeconds: options.timeoutSeconds,
+              firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
+              streamOutput: options.streamOutput,
+              attempt: ordinal + 1,
+              toolsEnabled: false,
+            });
+            rawPart = retry.stdout;
+          }
           authored = await parseOrFormatControlOutput({
             configuration: options.state.provider as ProviderConfiguration,
             mode: options.mode,

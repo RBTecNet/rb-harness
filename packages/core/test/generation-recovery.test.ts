@@ -2,14 +2,23 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { generationContractDigest, repairContractDigest } from "../src/harness-contract-digest.js";
+import { generationContractDigest, interviewContractDigest, repairContractDigest } from "../src/harness-contract-digest.js";
+import { HARNESS_BUDGET } from "../src/harness-budget.js";
+import { DOCUMENT_PART_BEGIN, DOCUMENT_PART_END, parseDocumentPart } from "../src/harness-incremental-documents.js";
+import { assessDecomposition } from "../src/harness-granularity.js";
+import { validateExecutionMarkdown } from "../src/execution-contract.js";
 import {
   DocumentSubstanceError,
   normalizeGeneratedDocumentContent,
   normalizeGeneratedDocumentPath,
   stripEnclosingCodeFence,
 } from "../src/harness-documents.js";
-import { assertRepairPreservedDocument, buildGenerationPrompt, buildRepairPrompt } from "../src/harness-generator.js";
+import {
+  assertRepairPreservedDocument,
+  buildDocumentPartPrompt,
+  buildGenerationPrompt,
+  buildRepairPrompt,
+} from "../src/harness-generator.js";
 import { buildInputPackage } from "../src/harness-input-package.js";
 import { inspectProjectInventory } from "../src/harness-inventory.js";
 import type { DocumentBundle } from "../src/harness-documents.js";
@@ -189,5 +198,104 @@ describe("a code fence around the whole document never reaches the file", () => 
 
   it("leaves an unwrapped document byte for byte", () => {
     expect(stripEnclosingCodeFence(PLAN)).toBe(PLAN);
+  });
+});
+
+/**
+ * Observed: `document part .rb/init/REQUIREMENTS.md#requirements-rigid formatter
+ * could not satisfy the contract after 3 attempts: … exceeds 12288 bytes`.
+ *
+ * Length is substance. The formatter may only change representation, so it
+ * could not shorten anything and all three paid attempts failed identically —
+ * the same shape as the AGENTS.md path defect above.
+ */
+describe("an oversized segment is re-authored, not re-formatted", () => {
+  it("classifies the size defect as substance", () => {
+    const oversized = {
+      contract: "rb-harness-document-part/v1",
+      path: ".rb/init/REQUIREMENTS.md",
+      part: "requirements-rigid",
+      content: "x".repeat(HARNESS_BUDGET.documents.maxPartBytes + 1),
+    };
+    const envelope = `${DOCUMENT_PART_BEGIN}\n${JSON.stringify(oversized)}\n${DOCUMENT_PART_END}`;
+    const expected = { path: ".rb/init/REQUIREMENTS.md", part: "requirements-rigid" };
+    expect(() => parseDocumentPart(envelope, expected)).toThrow(DocumentSubstanceError);
+    expect(() => parseDocumentPart(envelope, expected)).toThrow(/above the 12288-byte limit/);
+  });
+
+  it("tells the writer exactly what to shorten on the retry", () => {
+    const state = { workflow: "init", request: "Create the project." } as HarnessRunState;
+    const plan = {
+      contract: "rb-harness-document-plan/v1" as const,
+      status: "complete" as const,
+      summary: "s",
+      coordination: "c",
+      documents: [{ path: ".rb/init/REQUIREMENTS.md", purpose: "Requirements", parts: [{ id: "requirements-rigid", purpose: "RIGID section" }] }],
+      blocked: [],
+    };
+    const defect = "document part .rb/init/REQUIREMENTS.md#requirements-rigid is 13000 bytes, above the 12288-byte limit for one segment";
+    const prompt = buildDocumentPartPrompt(
+      "prefix", plan, plan.documents[0]!, plan.documents[0]!.parts[0]!, 0, 0, undefined, undefined, defect,
+    );
+    expect(prompt).toContain(defect);
+    expect(prompt).toContain("Author the same span again, shorter");
+    expect(prompt).toContain("Keep every RIGID fact");
+    // Without a defect the prompt stays byte-stable for prefix caching.
+    expect(buildDocumentPartPrompt("prefix", plan, plan.documents[0]!, plan.documents[0]!.parts[0]!, 0, 0))
+      .not.toContain("was rejected");
+  });
+});
+
+/**
+ * Observed: `structural repair did not converge:
+ * execution.task.covers-too-many-requirements … Task T002 carries 4`.
+ *
+ * The gate was right and the repair still could not land it, because splitting
+ * a task renumbers every later T### and the `Depends on` fields that point at
+ * them. A message that says only "split it" invites an in-place edit that fails
+ * the same gate again.
+ */
+function planWithTask(covers: string): string {
+  return PLAN.replace("  - **Covers:** RF-001", `  - **Covers:** ${covers}`)
+    .replace("- [ ] T001 —", "- [ ] T002 —")
+    .replace("AC-T001-01", "AC-T002-01")
+    .replace("## Phase 1: Deliver the behavior", "## Phase 1: Deliver the behavior")
+    + `
+- [ ] T003 — Second bounded task
+  - **Scope:** \`src/other.ts\`
+  - **Change:** Implement the other behavior.
+  - **Covers:** RF-009
+  - **Depends on:** none
+  - **Parallel safe:** false
+  - **Acceptance criteria:**
+    - AC-T003-01: The other operation returns status 200.
+  - **Validation:**
+    - \`npm test\`
+  - **Expected evidence:** Source changes and passing output.
+`;
+}
+
+describe("a decomposition finding explains how to land the split", () => {
+  it("names the renumbering a split forces", () => {
+    const covers = "RF-001, RF-002, RF-003, RF-004";
+    const source = planWithTask(covers);
+    const issues = assessDecomposition(validateExecutionMarkdown(source).document!);
+    const finding = issues.find((entry) => entry.code === "execution.task.covers-too-many-requirements");
+    expect(finding?.message).toContain("one global ascending sequence");
+    expect(finding?.message).toContain("Re-emit the whole document");
+    expect(finding?.message).toContain("covered by exactly one");
+  });
+});
+
+describe("the interview asks in the developer's language", () => {
+  it("fixes the language and forbids drift between rounds", () => {
+    for (const workflow of ["init", "plan", "evolve"] as const) {
+      const digest = interviewContractDigest(workflow);
+      expect(digest, workflow).toContain("same language the developer used");
+      expect(digest, workflow).toContain("must not drift between rounds");
+      expect(digest, workflow).toContain("Keep IDs, disposition words, and machine field names in English");
+    }
+    // The digest stays round-independent so it can sit in the cached prefix.
+    expect(interviewContractDigest("plan")).toBe(interviewContractDigest("plan"));
   });
 });

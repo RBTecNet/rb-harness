@@ -10,6 +10,7 @@
 import { HARNESS_BUDGET } from "./harness-budget.js";
 import {
   DOCUMENT_BUNDLE_CONTRACT,
+  DocumentSubstanceError,
   extractEnvelopeOrJson,
   normalizeGeneratedDocument,
   normalizeGeneratedDocumentPath,
@@ -214,7 +215,13 @@ export function parseDocumentPart(output: string, expected: { path: string; part
   }
   if (typeof value.content !== "string" || !value.content) throw new Error(`document part ${path}#${part} has no content`);
   if (Buffer.byteLength(value.content) > HARNESS_BUDGET.documents.maxPartBytes) {
-    throw new Error(`document part ${path}#${part} exceeds ${HARNESS_BUDGET.documents.maxPartBytes} bytes`);
+    // Length is substance: the formatter may only change representation, so
+    // sending an oversized part through it buys attempts that cannot shorten
+    // anything. The writer has to author this segment again, more concisely.
+    throw new DocumentSubstanceError(
+      `document part ${path}#${part} is ${Buffer.byteLength(value.content)} bytes, above the `
+      + `${HARNESS_BUDGET.documents.maxPartBytes}-byte limit for one segment`,
+    );
   }
   return { contract: DOCUMENT_PART_CONTRACT, path, part, content: value.content.replace(/\r\n/g, "\n").replace(/\r/g, "\n") };
 }

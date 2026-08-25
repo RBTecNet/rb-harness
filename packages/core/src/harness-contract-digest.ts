@@ -233,7 +233,11 @@ Never ask about a fact you can discover: commands, dependencies, paths, conventi
 
 Each question carries the evidence already found, the single missing decision, why it matters, and — when a closed set is genuinely appropriate — two to six concrete options plus a recommendation. Use \`type: "text"\` for open decisions, \`"single-choice"\` with 2-6 options, or \`"confirm"\` for a yes/no. IDs are internal correlation keys of 2-80 ASCII letters, digits, dots, underscores, or hyphens.
 
-The CLI presents your batch locally, one question at a time. Never plan for one question per call.`,
+The CLI presents your batch locally, one question at a time. Never plan for one question per call.
+
+Write every question, option, recommendation, and \`why\` in the same language the developer used in their request. That choice is theirs, not yours, and it must not drift between rounds of the same run: a developer who wrote in Portuguese is asked in Portuguese from the first round to the last. Keep IDs, disposition words, and machine field names in English regardless.
+
+Ask for the decision, not for prose. Two runs of the same request should surface the same material gaps, so derive each question from a concrete gap in the evidence rather than from what would be interesting to know.`,
     `## Answer acceptance gate
 
 Classify every pending answer exactly once, with one of these five words spelled exactly:

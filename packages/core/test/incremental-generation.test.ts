@@ -118,7 +118,9 @@ describe("incremental document contracts", () => {
     }))).toThrow("cannot retain blockers");
     expect(() => parseDocumentPart(envelope(DOCUMENT_PART_BEGIN, DOCUMENT_PART_END, {
       contract: "rb-harness-document-part/v1", path: ".rb/init/X.md", part: "x", content: "x".repeat(HARNESS_BUDGET.documents.maxPartBytes + 1),
-    }), { path: ".rb/init/X.md", part: "x" })).toThrow("exceeds");
+      // The size defect names the observed bytes and the limit, because the
+      // writer is asked to author the same span again rather than reformat it.
+    }), { path: ".rb/init/X.md", part: "x" })).toThrow(/is \d+ bytes, above the \d+-byte limit/);
     const plan = parseDocumentPlan(envelope(DOCUMENT_PLAN_BEGIN, DOCUMENT_PLAN_END, samplePlan()));
     expect(() => assembleDocumentPlan(plan, [{
       contract: "rb-harness-document-part/v1", path: ".rb/init/OTHER.md", part: "x", content: "unexpected",
