@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { generationContractDigest, repairContractDigest } from "../src/harness-contract-digest.js";
-import { DocumentSubstanceError, normalizeGeneratedDocumentPath } from "../src/harness-documents.js";
+import {
+  DocumentSubstanceError,
+  normalizeGeneratedDocumentContent,
+  normalizeGeneratedDocumentPath,
+  stripEnclosingCodeFence,
+} from "../src/harness-documents.js";
 import { assertRepairPreservedDocument, buildGenerationPrompt, buildRepairPrompt } from "../src/harness-generator.js";
 import { buildInputPackage } from "../src/harness-input-package.js";
 import { inspectProjectInventory } from "../src/harness-inventory.js";
@@ -149,5 +154,40 @@ describe("a repair cannot silently truncate the document it replaces", () => {
     expect(prompt).toContain("rewritten in full from its parts");
     expect(prompt).toContain("not just the fragment that changes");
     expect(repairContractDigest("init")).toContain("replaced in full");
+  });
+});
+
+/**
+ * Root cause of the observed cron2 run: the part writer returned the whole
+ * `OPERATIONS.json` wrapped in a ```json fence, the fence was published inside
+ * the file, the operational contract failed, and the single structural repair
+ * it forced then truncated `PHASES.md`. One habitual formatting slip took down
+ * the whole tree.
+ */
+describe("a code fence around the whole document never reaches the file", () => {
+  it("strips the wrapper the observed run published into OPERATIONS.json", () => {
+    const wrapped = '```json\n{\n  "contract": "rb-operational/v1",\n  "scenarios": []\n}\n```\n';
+    const content = normalizeGeneratedDocumentContent(wrapped, ".rb/init/OPERATIONS.json");
+    expect(() => JSON.parse(content)).not.toThrow();
+    expect(content.split("\n")[0]).toBe("{");
+  });
+
+  it("keeps a document that legitimately contains fenced code blocks", () => {
+    const document = "# Operations\n\nRun it:\n\n```bash\nnpm test\n```\n\nDone.\n";
+    expect(stripEnclosingCodeFence(document)).toBe(document);
+  });
+
+  it("refuses to strip when an interior fence is at least as long as the wrapper", () => {
+    const ambiguous = "```\n# Title\n```\nnpm test\n```\n```\n";
+    expect(stripEnclosingCodeFence(ambiguous)).toBe(ambiguous);
+  });
+
+  it("strips a longer wrapper around interior fences", () => {
+    const wrapped = "````markdown\n# Title\n\n```bash\nnpm test\n```\n````\n";
+    expect(stripEnclosingCodeFence(wrapped)).toBe("# Title\n\n```bash\nnpm test\n```\n");
+  });
+
+  it("leaves an unwrapped document byte for byte", () => {
+    expect(stripEnclosingCodeFence(PLAN)).toBe(PLAN);
   });
 });

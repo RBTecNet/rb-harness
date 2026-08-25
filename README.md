@@ -819,7 +819,15 @@ Two failures observed against real providers are fixed with them:
   phase. The validators then reported four symptoms of one cause. The contract
   now states that a replanned document is rewritten in full, and a repair that
   drops a title or contract marker its original declared is rejected by name
-  instead of through the grammar errors it produces.
+  instead of through the grammar errors it produces;
+- a part writer that wrapped its whole answer in a Markdown code fence had those
+  backticks published inside the file. One observed run wrote a valid
+  `OPERATIONS.json` body between ```` ```json ```` and ```` ``` ````, which
+  failed the operational contract and forced the structural repair that then
+  truncated `PHASES.md` — one habitual formatting slip taking down the tree. A
+  fence that encloses an entire document is now removed before publication,
+  under CommonMark rules narrow enough that a document legitimately containing
+  fenced code blocks is never touched.
 
 The readiness pass that followed added, without changing that public surface:
 

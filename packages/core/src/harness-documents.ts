@@ -69,12 +69,50 @@ export function normalizeGeneratedDocumentPath(value: unknown, index: number): s
   return path;
 }
 
+/**
+ * Remove a Markdown code fence that wraps the entire document.
+ *
+ * A part writer is told to return raw document bytes, but a model that has just
+ * been shown a JSON or Markdown shape often wraps its answer in a fence out of
+ * habit. Those three backticks then land *inside* the published file: an
+ * observed run wrote `.rb/init/OPERATIONS.json` beginning with ```` ```json ````
+ * and ending with ```` ``` ````, which failed the operational contract, forced
+ * the single structural repair, and the repair took the rest of the tree down
+ * with it.
+ *
+ * The strip is deliberately narrow, following CommonMark: the opening fence
+ * must be the first non-empty line, the closing fence the last, both the same
+ * length, and no interior line may open a fence at least as long — so a
+ * document that legitimately contains fenced code blocks is never touched.
+ */
+export function stripEnclosingCodeFence(content: string): string {
+  const lines = content.split("\n");
+  let first = 0;
+  while (first < lines.length && !lines[first]!.trim()) first += 1;
+  let last = lines.length - 1;
+  while (last > first && !lines[last]!.trim()) last -= 1;
+  if (last <= first) return content;
+  const open = lines[first]!.match(/^(\s{0,3})(`{3,}|~{3,})\s*([A-Za-z0-9_+-]*)\s*$/);
+  if (!open) return content;
+  const marker = open[2]!;
+  const close = lines[last]!.match(/^\s{0,3}(`{3,}|~{3,})\s*$/);
+  if (!close || close[1]![0] !== marker[0] || close[1]!.length < marker.length) return content;
+  const interior = lines.slice(first + 1, last);
+  const collides = interior.some((line) => {
+    const fence = line.match(/^\s{0,3}(`{3,}|~{3,})/);
+    return Boolean(fence && fence[1]![0] === marker[0] && fence[1]!.length >= marker.length);
+  });
+  if (collides) return content;
+  const stripped = interior.join("\n");
+  return stripped.trim() ? `${stripped}\n` : content;
+}
+
 export function normalizeGeneratedDocumentContent(value: unknown, path: string): string {
   if (typeof value !== "string") throw new Error(`document ${path} has no string content`);
   if (Buffer.byteLength(value) > HARNESS_BUDGET.documents.maxDocumentBytes) {
     throw new Error(`document ${path} exceeds ${HARNESS_BUDGET.documents.maxDocumentBytes} bytes`);
   }
-  const normalized = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const normalized = stripEnclosingCodeFence(value.replace(/\r\n/g, "\n").replace(/\r/g, "\n"));
   if (!normalized.trim()) throw new Error(`document ${path} is empty`);
   return normalized.endsWith("\n") ? normalized : `${normalized}\n`;
 }

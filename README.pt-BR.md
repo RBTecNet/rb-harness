@@ -238,7 +238,15 @@ Duas falhas observadas contra providers reais são corrigidas junto:
   documento, e os validadores reportavam quatro sintomas de uma única causa. O
   contrato agora afirma que um documento replanejado é reescrito por inteiro, e
   uma correção que perde o título ou um marcador declarado pelo original é
-  rejeitada pelo nome do defeito, não pelos erros de gramática que ele produz.
+  rejeitada pelo nome do defeito, não pelos erros de gramática que ele produz;
+- um escritor de parte que envolvia toda a resposta em uma cerca de código
+  Markdown gravava essas crases dentro do arquivo. Em uma execução observada, um
+  corpo válido de `OPERATIONS.json` foi escrito entre ```` ```json ```` e
+  ```` ``` ````, o que reprovou o contrato operacional e forçou a correção
+  estrutural que então truncou o `PHASES.md` — um vício de formatação derrubando
+  a árvore inteira. Uma cerca que envolve o documento inteiro passa a ser
+  removida antes da publicação, por uma regra CommonMark estreita o bastante
+  para nunca tocar um documento que legitimamente contém blocos de código.
 
 Em todos os papéis documentais o provider é somente leitura: o Codex roda com
 `--sandbox read-only`, o Claude com `--permission-mode plan` e o OpenCode com
