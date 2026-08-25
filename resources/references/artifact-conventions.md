@@ -5,7 +5,10 @@
 
 ## Tree
 
-Write under `.rb/` except for the compact root `AGENTS.md` index:
+Write under `.rb/`, with no exception. `rb-manifest/v1` requires every artifact
+path to start with `.rb/`, so a root-level document could not be indexed,
+hashed, or discovered by RB Ralph. The ai-context index is
+`.rb/context/AGENTS.md`:
 
 ```text
 .rb/

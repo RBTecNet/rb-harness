@@ -221,6 +221,25 @@ os orçamentos do pacote de entrada e do prompt de entrevista cresceram junto.
 Uma entrevista totalmente convergida nunca falha sobre as respostas que o
 desenvolvedor já deu.
 
+Duas falhas observadas contra providers reais são corrigidas junto:
+
+- o contrato de saída prometia um `AGENTS.md` na raiz para o ai-context
+  enquanto o parser rejeitava qualquer caminho fora de `.rb/`. Um modelo que
+  obedecia ao contrato era rejeitado e depois enviado três vezes a um formatador
+  que só muda representação e jamais poderia corrigir um caminho. O contrato
+  agora declara o único local que o `rb-manifest/v1` consegue indexar,
+  `.rb/context/AGENTS.md`; um caminho proibido é classificado como defeito de
+  substância, não de forma; e um defeito assim ganha um único replanejamento
+  contado carregando a rejeição exata, em vez de três tentativas que só podem
+  falhar do mesmo jeito;
+- a correção estrutural substitui por inteiro cada documento que planeja, mas o
+  contrato pedia uma mudança "localizada". Uma correção que emitia apenas o
+  trecho corrigido apagava título, marcadores de contrato e todas as fases do
+  documento, e os validadores reportavam quatro sintomas de uma única causa. O
+  contrato agora afirma que um documento replanejado é reescrito por inteiro, e
+  uma correção que perde o título ou um marcador declarado pelo original é
+  rejeitada pelo nome do defeito, não pelos erros de gramática que ele produz.
+
 Em todos os papéis documentais o provider é somente leitura: o Codex roda com
 `--sandbox read-only`, o Claude com `--permission-mode plan` e o OpenCode com
 edição, shell, task e diretório externo negados.

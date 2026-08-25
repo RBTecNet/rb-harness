@@ -19,6 +19,7 @@ import {
   DOCUMENT_BUNDLE_BEGIN,
   DOCUMENT_BUNDLE_CONTRACT,
   DOCUMENT_BUNDLE_END,
+  DocumentSubstanceError,
   documentExcerpts,
   mergeDocumentBundles,
   parseDocumentBundle,
@@ -39,6 +40,7 @@ import {
   type DocumentPlan,
   type DocumentPlanPart,
   type PlannedDocument,
+  type PlannedOrLegacyBundle,
 } from "./harness-incremental-documents.js";
 import { assertPromptWithinBudget, serializeInputPackage, type HarnessInputPackage } from "./harness-input-package.js";
 import { runProvider } from "./harness-provider.js";
@@ -270,6 +272,8 @@ interface IncrementalAuthoringOptions {
   logPrefix: string;
   prefix: string;
   planPrompt: string;
+  /** Rebuild the plan prompt after a defect the formatter cannot repair. */
+  replanPrompt: (defect: string) => string;
   repairContext?: string;
 }
 
@@ -277,61 +281,91 @@ async function authorIncrementally(options: IncrementalAuthoringOptions): Promis
   const authoritySha256 = sha256Text(options.planPrompt);
   let checkpoint = await loadCheckpoint(options.runRoot, options.checkpointName, authoritySha256);
   if (!checkpoint) {
-    const planLogPath = resolve(options.runRoot, `logs/${options.logPrefix}-plan.log`);
-    let rawPlan = await successfulProviderLogStdout(planLogPath);
-    if (rawPlan !== undefined) {
-      process.stdout.write("[rb-harness] resposta bruta do plano recuperada do log; geração semântica não será reinvocada.\n");
-    }
-    // A repair receives the complete affected excerpts and deterministic error
-    // list in its prompt. Giving it discovery tools made it search the original
-    // project for staged artifacts that intentionally do not exist there,
-    // multiplying requests and inventing blockers. Generation planning still
-    // gets the bounded evidence projection; repair planning is closed.
-    const closedPlanRoot = rawPlan === undefined && options.mode === "repair"
-      ? await mkdtemp(resolve(tmpdir(), "rb-harness-closed-repair-plan-"))
-      : undefined;
-    if (closedPlanRoot) await chmod(closedPlanRoot, 0o555);
-    if (rawPlan === undefined) {
-      let result: Awaited<ReturnType<typeof runProvider>>;
-      try {
-        result = await runProvider({
-          configuration: options.state.provider as ProviderConfiguration,
-          mode: options.mode,
-          stage: options.stage,
-          projectRoot: closedPlanRoot ?? options.evidenceRoot,
-          prompt: options.planPrompt,
-          logPath: planLogPath,
-          timeoutSeconds: options.timeoutSeconds,
-          firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
-          streamOutput: options.streamOutput,
-          attempt: 1,
-          // A greenfield init already carries its complete request and closed
-          // decisions in the authority prefix. Re-reading the same PRD buys a
-          // second provider turn and input bill without discovering AS IS code.
-          toolsEnabled: options.mode !== "repair" && options.state.workflow !== "init",
-        });
-      } finally {
-        if (closedPlanRoot) {
-          await chmod(closedPlanRoot, 0o700).catch(() => undefined);
-          await rm(closedPlanRoot, { recursive: true, force: true });
-        }
+    const label = options.mode === "repair" ? "structural repair plan" : "document plan";
+    /** One planning turn: provider call, then the representation-only formatter. */
+    const requestPlan = async (prompt: string, attempt: number): Promise<PlannedOrLegacyBundle> => {
+      const suffix = attempt > 1 ? `-replan-${attempt}` : "";
+      const planLogPath = resolve(options.runRoot, `logs/${options.logPrefix}-plan${suffix}.log`);
+      let rawPlan = await successfulProviderLogStdout(planLogPath);
+      if (rawPlan !== undefined) {
+        process.stdout.write("[rb-harness] resposta bruta do plano recuperada do log; geração semântica não será reinvocada.\n");
       }
-      rawPlan = result.stdout;
+      // A repair receives the complete affected excerpts and deterministic error
+      // list in its prompt. Giving it discovery tools made it search the original
+      // project for staged artifacts that intentionally do not exist there,
+      // multiplying requests and inventing blockers. Generation planning still
+      // gets the bounded evidence projection; repair planning is closed.
+      const closedPlanRoot = rawPlan === undefined && options.mode === "repair"
+        ? await mkdtemp(resolve(tmpdir(), "rb-harness-closed-repair-plan-"))
+        : undefined;
+      if (closedPlanRoot) await chmod(closedPlanRoot, 0o555);
+      if (rawPlan === undefined) {
+        let result: Awaited<ReturnType<typeof runProvider>>;
+        try {
+          result = await runProvider({
+            configuration: options.state.provider as ProviderConfiguration,
+            mode: options.mode,
+            stage: options.stage,
+            projectRoot: closedPlanRoot ?? options.evidenceRoot,
+            prompt,
+            logPath: planLogPath,
+            timeoutSeconds: options.timeoutSeconds,
+            firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
+            streamOutput: options.streamOutput,
+            attempt,
+            // A greenfield init already carries its complete request and closed
+            // decisions in the authority prefix. Re-reading the same PRD buys a
+            // second provider turn and input bill without discovering AS IS code.
+            toolsEnabled: options.mode !== "repair" && options.state.workflow !== "init",
+          });
+        } finally {
+          if (closedPlanRoot) {
+            await chmod(closedPlanRoot, 0o700).catch(() => undefined);
+            await rm(closedPlanRoot, { recursive: true, force: true });
+          }
+        }
+        rawPlan = result.stdout;
+      }
+      // A substance defect is never sent to the formatter: it may only change
+      // representation, so all three of its attempts would fail identically.
+      try {
+        return parsePlanOrLegacyBundle(rawPlan);
+      } catch (error) {
+        if (error instanceof DocumentSubstanceError) throw error;
+      }
+      return parseOrFormatControlOutput({
+        configuration: options.state.provider as ProviderConfiguration,
+        mode: options.mode,
+        stage: options.stage,
+        runRoot: options.runRoot,
+        logPrefix: `${options.logPrefix}-plan${suffix}-format`,
+        label,
+        rawOutput: rawPlan,
+        contract: planFormattingContract(),
+        parse: parsePlanOrLegacyBundle,
+        timeoutSeconds: options.timeoutSeconds,
+        firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
+        streamOutput: options.streamOutput,
+      });
+    };
+
+    let planned: PlannedOrLegacyBundle | undefined;
+    let defect: string | undefined;
+    for (let attempt = 1; attempt <= HARNESS_BUDGET.generation.planReplans + 1; attempt += 1) {
+      try {
+        planned = await requestPlan(attempt === 1 ? options.planPrompt : options.replanPrompt(defect!), attempt);
+        break;
+      } catch (error) {
+        // Only a substance defect earns a replan. A persistent formatting
+        // defect already has its own bounded formatter allowance; replanning it
+        // would buy a second full planning turn for the same failure mode.
+        if (!(error instanceof DocumentSubstanceError) || attempt > HARNESS_BUDGET.generation.planReplans) throw error;
+        defect = error.message;
+        process.stdout.write(`[rb-harness] ${label} rejeitado por defeito de substância: ${error.message}\n`);
+        process.stdout.write("[rb-harness] replanejando uma vez com o defeito declarado (o formatador só corrige representação).\n");
+      }
     }
-    const planned = await parseOrFormatControlOutput({
-      configuration: options.state.provider as ProviderConfiguration,
-      mode: options.mode,
-      stage: options.stage,
-      runRoot: options.runRoot,
-      logPrefix: `${options.logPrefix}-plan-format`,
-      label: options.mode === "repair" ? "structural repair plan" : "document plan",
-      rawOutput: rawPlan,
-      contract: planFormattingContract(),
-      parse: parsePlanOrLegacyBundle,
-      timeoutSeconds: options.timeoutSeconds,
-      firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
-      streamOutput: options.streamOutput,
-    });
+    if (!planned) throw new Error(`${label} could not be planned`);
     if (planned.kind === "bundle") return planned.bundle;
     checkpoint = {
       contract: "rb-harness-incremental-generation/v1",
@@ -449,6 +483,7 @@ export async function requestDocumentBundle(options: GenerationRequestOptions): 
     logPrefix: "generation",
     prefix,
     planPrompt: buildGenerationPrompt(options.state, options.inputPackage, resources),
+    replanPrompt: (defect) => buildGenerationPrompt(options.state, options.inputPackage, resources, defect),
   });
 }
 
@@ -474,7 +509,8 @@ export function buildRepairPrompt(
     `\n===== DETERMINISTIC ERRORS =====\n${JSON.stringify(errors.map((error, index) => ({ order: index + 1, ...error })))}`,
     `\n===== AFFECTED DOCUMENTS =====\n${JSON.stringify(documentExcerpts(bundle, affected))}`,
     `\n===== DOCUMENTS THAT MUST NOT CHANGE =====\n${JSON.stringify(bundle.documents.map((document) => document.path).filter((path) => !affected.includes(path)))}`,
-    `Plan only replacements or additions required by those errors. Existing documents outside AFFECTED DOCUMENTS are forbidden. Split each document into parts of at most ${HARNESS_BUDGET.documents.maxPartBytes} UTF-8 bytes, and put the complete repair brief for each segment in its part purpose because the part writer cannot inspect files.`,
+    `Plan only replacements or additions required by those errors. Existing documents outside AFFECTED DOCUMENTS are forbidden.`,
+    `Every document you plan is rewritten in full from its parts, so plan parts that cover the whole corrected document — not just the fragment that changes. Split it into parts of at most ${HARNESS_BUDGET.documents.maxPartBytes} UTF-8 bytes, and state in each part purpose which span of the original it reproduces and what, if anything, changes inside it. The part writer cannot inspect files; it sees the original under REPAIR AUTHORITY and must reproduce its span byte for byte apart from the listed error.`,
     protocolDefect ? `A prior repair response was rejected. Do not repeat it: ${protocolDefect}` : "",
   ].filter(Boolean).join("\n");
   assertPromptWithinBudget(prompt, HARNESS_BUDGET.prompt.maxRepairPromptBytes, "structural repair plan");
@@ -490,6 +526,39 @@ export interface RepairRequestOptions {
   timeoutSeconds: number;
   firstOutputTimeoutSeconds: number;
   streamOutput?: boolean;
+}
+
+/**
+ * Load-bearing markers a repaired document must not lose.
+ *
+ * A repaired document replaces its original in full, so a repair that emits
+ * only the corrected fragment silently deletes the rest of the file. The
+ * deterministic validators then report the *symptoms* — missing title, missing
+ * contract marker, no phases — which read as a rewrite that went wrong rather
+ * than as a truncation. These invariants name the real defect instead.
+ */
+function documentInvariants(content: string): string[] {
+  const invariants: string[] = [];
+  const title = content.match(/^#\s+\S.*$/m);
+  if (title) invariants.push("its title line");
+  for (const marker of content.matchAll(/<!--\s*(rb-execution-contract|rb-artifact-id)\s*:\s*(\S+?)\s*-->/g)) {
+    invariants.push(`the ${marker[1]} marker ${marker[2]}`);
+  }
+  return invariants;
+}
+
+/** Reject a repair that dropped what the original document declared. */
+export function assertRepairPreservedDocument(original: string, repaired: string, path: string): void {
+  const missing = documentInvariants(original).filter((invariant) => {
+    if (invariant === "its title line") return !/^#\s+\S.*$/m.test(repaired);
+    const value = invariant.slice(invariant.lastIndexOf(" ") + 1);
+    return !repaired.includes(value);
+  });
+  if (!missing.length) return;
+  throw new Error(
+    `structural repair truncated ${path}: the repaired document no longer carries ${missing.join(", ")}. `
+    + "A repaired document replaces the original in full, so its parts must reproduce the complete corrected document, not only the fragment that changed.",
+  );
 }
 
 export async function requestStructuralRepair(options: RepairRequestOptions): Promise<DocumentBundle> {
@@ -513,12 +582,16 @@ export async function requestStructuralRepair(options: RepairRequestOptions): Pr
       repairContractDigest(options.state.workflow),
     ].join("\n"),
     planPrompt,
+    replanPrompt: (defect) => buildRepairPrompt(options.state, options.bundle, options.errors, affected, defect),
     repairContext: JSON.stringify({ errors: options.errors, affected: documentExcerpts(options.bundle, affected) }),
   });
+  const originals = new Map(options.bundle.documents.map((document) => [document.path, document.content]));
   for (const document of repaired.documents) {
     if (known.has(document.path) && !affected.includes(document.path)) {
       throw new Error(`structural repair attempted to rewrite unaffected document ${document.path}`);
     }
+    const original = originals.get(document.path);
+    if (original) assertRepairPreservedDocument(original, document.content, document.path);
   }
   return mergeDocumentBundles(options.bundle, repaired);
 }

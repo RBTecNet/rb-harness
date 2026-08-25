@@ -803,6 +803,24 @@ count ceiling follows the run-wide question ceiling, and the input package and
 interview prompt budgets grew with it, so a fully converged interview can never
 fail on the answers the developer already gave.
 
+Two failures observed against real providers are fixed with them:
+
+- the output contract promised a root `AGENTS.md` for ai-context while the
+  parser rejected every path outside `.rb/`, so a model that obeyed the contract
+  was rejected and then sent three times to a formatter that may only change
+  representation and could never fix a path. The contract now states the one
+  location `rb-manifest/v1` can actually index, `.rb/context/AGENTS.md`, a
+  forbidden path is classified as a substance defect rather than a formatting
+  one, and such a defect earns a single counted replan carrying the exact
+  rejection instead of three attempts that can only fail the same way;
+- a structural repair replaces each document it plans in full, but the repair
+  contract asked for a "localized" change, so a repair that emitted only the
+  corrected fragment deleted the document's title, contract markers, and every
+  phase. The validators then reported four symptoms of one cause. The contract
+  now states that a replanned document is rewritten in full, and a repair that
+  drops a title or contract marker its original declared is rejected by name
+  instead of through the grammar errors it produces.
+
 The readiness pass that followed added, without changing that public surface:
 
 - structural process-tree containment through cgroup v2 where the platform

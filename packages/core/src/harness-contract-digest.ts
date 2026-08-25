@@ -153,7 +153,7 @@ const OPERATIONAL_GRAMMAR = `## rb-operational/v1 — OPERATIONS.json shape
 
 const CONVENTIONS = `## Conventions
 
-- Write only under \`.rb/\`, plus the optional root \`AGENTS.md\` for the ai-context workflow. All paths are project-root-relative.
+- Write only under \`.rb/\`. There is no exception: a path outside it is rejected before publication, and \`rb-manifest/v1\` cannot index one. The ai-context index lives at \`.rb/context/AGENTS.md\` like every other artifact. All paths are project-root-relative.
 - Every generated document carries \`<!-- generated-by: rb-harness; schema: rb-artifact/v1 -->\` immediately after its title.
 - IDs (project, requirement, finding, phase, task, decision, artifact) stay stable across re-runs.
 - Classify knowledge as OBSERVED (cite the file path), CONFIRMED (an accepted interview decision), INFERRED, UNKNOWN, or CONFLICT. Never present INFERRED as OBSERVED.
@@ -259,9 +259,10 @@ export function repairContractDigest(workflow: HarnessWorkflow): string {
     `This is the only repair. It is mechanical, not editorial.
 
 - Fix exactly the listed deterministic errors, in the order given.
-- Return only the documents you actually changed, plus any new document an error requires.
-- Preserve every semantically unrelated line, section, ID, and decision byte for byte.
-- Do not reopen the interview, re-explore the repository, restate the manifest, or re-emit the whole tree when a localized change suffices.
+- Plan only the documents an error actually requires: the ones named as affected, plus any new document an error requires. Never replan a document no error names.
+- **A document you replan is replaced in full.** Its parts are concatenated and the result overwrites the whole file — there is no partial patch. So re-emit the complete corrected document: title, contract markers, artifact ID, every phase, every task, every section. Emitting only the corrected fragment deletes the rest of the file and fails the run.
+- Outside the exact error, preserve every line, section, ID, and decision byte for byte from the original supplied under REPAIR AUTHORITY.
+- Do not reopen the interview, re-explore the repository, or restate the manifest.
 - If an error cannot be repaired without a developer decision, return \`status: "blocked"\` and name the decision.`,
     EXECUTION_GRAMMAR,
     ...(workflowSupportsOperations(workflow) ? [OPERATIONAL_GRAMMAR] : []),

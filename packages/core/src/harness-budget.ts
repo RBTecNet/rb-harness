@@ -30,6 +30,15 @@ export const HARNESS_BUDGET = {
   /** Incremental authoring plus at most one localized structural repair. */
   generation: {
     structuralRepairs: 1,
+    /**
+     * Replans of the document plan after a substance defect.
+     *
+     * The formatter may only change representation, so a plan that names a
+     * forbidden path cannot be repaired by it — three paid attempts would each
+     * fail the same way. One replan, told exactly what was rejected, is both
+     * cheaper and the only thing that can actually fix it.
+     */
+    planReplans: 1,
   },
   /**
    * Task decomposition ceilings for a generated `rb-execution/v1` plan.
