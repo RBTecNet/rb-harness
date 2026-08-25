@@ -820,6 +820,21 @@ Two failures observed against real providers are fixed with them:
   now states that a replanned document is rewritten in full, and a repair that
   drops a title or contract marker its original declared is rejected by name
   instead of through the grammar errors it produces;
+- a published `OPERATIONS.json` could assert against a service the scenario had
+  already stopped. The verifier starts a `process` step, waits for `ready`, runs
+  that step's own `checks`, then stops it in a `finally`, so a sibling
+  `http`/`tcp` step placed after it meets a closed port — and a scenario that
+  probes a local address without starting a process never had a server at all.
+  Both shapes pass every structural rule and can never pass execution, and the
+  executor cannot repair them because generated specifications are read-only to
+  it. One observed run spent nine attempts and five hours there before the
+  circuit breaker paused it. The contract is now rejected before publication,
+  the digest states the lifecycle and the example models it, and `${RB_VERIFY_PORT}`
+  replaces hard-coded ports;
+- `Parallel safe` is now a decision the contract asks the writer to make, with
+  the criteria for `true` spelled out. A phase runs concurrently only when every
+  pending task declares `true`, so a plan that marked all 25 tasks `false` — as
+  an observed one did — serialized work that had disjoint scopes.
 - a part writer that wrapped its whole answer in a Markdown code fence had those
   backticks published inside the file. One observed run wrote a valid
   `OPERATIONS.json` body between ```` ```json ```` and ```` ``` ````, which

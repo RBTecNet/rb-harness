@@ -122,6 +122,18 @@ So decompose every capability into the smallest steps that are each independentl
 - Split along boundaries the code already has: contract before use, storage before behavior, behavior before interface, happy path before each error path. Order them with \`Depends on\` instead of merging them.
 - More small tasks is the correct outcome. A plan with many bounded tasks is cheaper and safer to execute than a plan with a few large ones, and it never costs a completeness claim: every requirement must still be covered by some task.
 
+## Parallel safe — decide it, do not default it
+
+\`Parallel safe\` is a real decision with a real cost. The consumer runs a phase's pending tasks concurrently only when *every* one of them declares \`true\`, so a single unjustified \`false\` serializes the whole phase. Marking everything \`false\` is not the safe choice; it is the slow one.
+
+Write \`true\` when all of these hold, which is common for sibling tasks that each own one module:
+
+- its \`Scope\` paths are disjoint from every other pending task in the same phase — no shared file, and no shared directory that both will write;
+- it declares \`Depends on: none\`, or depends only on tasks in an earlier phase;
+- it does not add to a shared registry, index, barrel file, migration sequence, generated artifact, or lockfile that another pending task also touches.
+
+Write \`false\` when independence cannot be shown — a shared file, an ordering requirement, or an interface one task defines and another consumes. Splitting a shared edit into its own earlier task is usually what unlocks the rest of the phase.
+
 These ceilings are validated mechanically. A plan that breaks one is rejected before publication, so decompose while you write instead of repairing afterwards.`;
 
 const OPERATIONAL_GRAMMAR = `## rb-operational/v1 — OPERATIONS.json shape
@@ -139,6 +151,17 @@ const OPERATIONAL_GRAMMAR = `## rb-operational/v1 — OPERATIONS.json shape
       { "id": "build", "kind": "command", "command": { "argv": ["npm", "run", "build"] }, "expect": { "exitCode": 0 } },
       { "id": "run", "kind": "command", "command": { "argv": ["./bin/app", "--version"] }, "expect": { "exitCode": 0, "stdoutIncludes": ["1."] } }
     ]
+  }, {
+    "id": "service-request",
+    "title": "A consumer reaches the running service",
+    "platforms": ["linux"],
+    "steps": [
+      { "id": "serve", "kind": "process", "command": { "argv": ["npm", "start"] },
+        "ready": { "kind": "http", "url": "http://127.0.0.1:\${RB_VERIFY_PORT}/", "status": 200 },
+        "checks": [
+          { "kind": "http", "url": "http://127.0.0.1:\${RB_VERIFY_PORT}/api/thing", "status": 200, "bodyIncludes": ["expected"] }
+        ] }
+    ]
   }]
 }
 \`\`\`
@@ -146,6 +169,8 @@ const OPERATIONAL_GRAMMAR = `## rb-operational/v1 — OPERATIONS.json shape
 - Root keys: \`contract\`, optional \`cleanRoom\`, optional \`environment\`, required non-empty \`scenarios\`.
 - Scenario keys: \`id\`, \`title\`, optional \`platforms\` (\`linux\`/\`darwin\`/\`win32\`), non-empty \`steps\`. IDs are unique.
 - Step kinds: \`command\`, \`process\` (with \`ready\` probe and optional \`checks\`), \`http\`, \`tcp\`, \`file\`. \`stdout\` exists only as a process probe.
+- **A process lives only inside its own step.** The runner starts it, waits for \`ready\`, runs that step's \`checks\`, then stops it. Every assertion that needs the service alive belongs in that step's \`checks\` array. A sibling \`http\`/\`tcp\` step placed after the process step runs against a closed port, and a scenario that probes a local address without starting a process never had a server at all. Both shapes are structurally valid, always fail execution, and cannot be repaired by the executor, which may not edit generated specifications.
+- Use \`\${RB_VERIFY_PORT}\` for the local port instead of a fixed one such as 3000, and make the product read it (\`PORT\`/\`process.env\`). The runner allocates a free port per verification; a hard-coded port can collide with something already running on the machine and prove nothing.
 - An HTTP probe puts assertions directly on the probe: \`{ "kind": "http", "url": "http://127.0.0.1:3000/", "status": 200, "bodyIncludes": ["expected text"] }\`. Never put an \`expect\` object inside \`ready\`, \`checks\`, or another probe; \`expect\` exists only on a \`command\` step.
 - Commands are \`argv\` arrays; never a shell string, never an invented executable, path, port, or route.
 - Never write a secret value. Inherit only the named non-secret variables the scenario needs.

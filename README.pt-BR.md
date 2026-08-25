@@ -239,6 +239,21 @@ Duas falhas observadas contra providers reais são corrigidas junto:
   contrato agora afirma que um documento replanejado é reescrito por inteiro, e
   uma correção que perde o título ou um marcador declarado pelo original é
   rejeitada pelo nome do defeito, não pelos erros de gramática que ele produz;
+- um `OPERATIONS.json` publicado podia fazer asserções contra um serviço que o
+  próprio cenário já havia encerrado. O verificador sobe um step `process`,
+  espera o `ready`, roda os `checks` daquele step e o encerra num `finally` —
+  então um step `http`/`tcp` irmão colocado depois encontra a porta fechada, e um
+  cenário que sonda um endereço local sem subir processo nenhum nunca teve
+  servidor. As duas formas passam em todas as regras estruturais e jamais passam
+  na execução, e o executor não pode corrigi-las porque especificações geradas
+  são somente leitura para ele. Uma execução observada gastou nove tentativas e
+  cinco horas nisso antes do circuit breaker pausá-la. O contrato agora é
+  rejeitado antes da publicação, o digest declara o ciclo de vida, o exemplo o
+  reproduz e `${RB_VERIFY_PORT}` substitui portas fixas;
+- `Parallel safe` passa a ser uma decisão que o contrato pede ao escritor, com os
+  critérios de `true` explicitados. Uma fase só roda concorrente quando todas as
+  tasks pendentes declaram `true`, então um plano que marcou as 25 tasks como
+  `false` — como um observado — serializou trabalho de escopos disjuntos.
 - um escritor de parte que envolvia toda a resposta em uma cerca de código
   Markdown gravava essas crases dentro do arquivo. Em uma execução observada, um
   corpo válido de `OPERATIONS.json` foi escrito entre ```` ```json ```` e

@@ -124,6 +124,54 @@ function step(value: unknown, issues: ValidationIssue[], path: string): void {
   }
 }
 
+/** Loopback hosts a scenario can only reach through a process it started itself. */
+const LOCAL_HOSTS = ["127.0.0.1", "localhost", "[::1]", "0.0.0.0", "::1"];
+
+function localTarget(probe: Record<string, unknown>): string | undefined {
+  if (probe.kind === "http" && nonEmpty(probe.url)) {
+    const url = probe.url;
+    const local = LOCAL_HOSTS.some((entry) => url.includes(`//${entry}:`) || url.includes(`//${entry}/`));
+    return local ? url : undefined;
+  }
+  if (probe.kind === "tcp" && nonEmpty(probe.host) && LOCAL_HOSTS.includes(probe.host)) {
+    return `${probe.host}:${String(probe.port ?? "")}`;
+  }
+  return undefined;
+}
+
+/**
+ * A local endpoint is only reachable while the process serving it is alive.
+ *
+ * The verifier starts a `process` step, waits for `ready`, runs that step's own
+ * `checks`, and then stops the process in a `finally`. A sibling `http`/`tcp`
+ * step placed after it therefore runs against a closed port, and one placed in
+ * a scenario with no `process` step at all never had a server to talk to.
+ *
+ * Both shapes pass every structural rule and can never pass execution. An
+ * observed run spent nine attempts and five hours on exactly this: the executor
+ * cannot repair the contract, because generated specifications are read-only to
+ * it, so the phase could only fail until the circuit breaker paused the run.
+ */
+function reachableService(steps: unknown[], issues: ValidationIssue[], path: string): void {
+  steps.forEach((entry, index) => {
+    if (!object(entry)) return;
+    const target = localTarget(entry);
+    if (!target) return;
+    const owner = steps.slice(0, index).find((candidate) => object(candidate) && candidate.kind === "process");
+    issue(
+      issues,
+      "operational.step.unreachable-service",
+      owner
+        ? `Step ${String(entry.id ?? index)} probes ${target}, but the process started by step `
+          + `${String((owner as Record<string, unknown>).id ?? "")} is stopped when its own step ends. `
+          + "Move this assertion into that step's checks array."
+        : `Step ${String(entry.id ?? index)} probes ${target}, but no earlier step starts a process to serve it. `
+          + "Add a process step and put this assertion in its checks array.",
+      `${path}.steps[${index}]`,
+    );
+  });
+}
+
 export function validateOperationalValue(value: unknown): OperationalValidation {
   const issues: ValidationIssue[] = [];
   if (!object(value)) {
@@ -178,6 +226,7 @@ export function validateOperationalValue(value: unknown): OperationalValidation 
             stepIds.add(entry.id);
           }
         });
+        reachableService(scenario.steps, issues, path);
       }
     });
   }
