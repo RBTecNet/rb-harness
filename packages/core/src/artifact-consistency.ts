@@ -1,6 +1,7 @@
 import { lstat, readFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import { taskScopeTokens, validateExecutionMarkdown } from "./execution-contract.js";
+import { goPlanNeedsImportInventory, inspectExistingGoImports, validateGoPlanConvergence } from "./go-plan-convergence.js";
 import { validateOperationalJson } from "./operational-contract.js";
 import type { ArtifactManifest, ArtifactRecord, ExecutionDocument, ValidationIssue } from "./types.js";
 
@@ -244,6 +245,19 @@ export async function validateArtifactConsistency(options: ConsistencyOptions): 
           + `${plan.artifact.path} gives no task authority to create it and cleanRoom.exclude does not declare it as generated output.`,
         operational.path,
       ));
+    }
+  }
+
+  const goPlans = [...plans.values()].filter(({ document }) => goPlanNeedsImportInventory(document));
+  if (goPlans.length) {
+    const inventory = await inspectExistingGoImports(options.projectRoot);
+    if (inventory.complete) {
+      for (const { artifact, document } of goPlans) {
+        issues.push(...validateGoPlanConvergence(document, {
+          existingImports: inventory.imports,
+          path: artifact.path,
+        }));
+      }
     }
   }
   return issues;

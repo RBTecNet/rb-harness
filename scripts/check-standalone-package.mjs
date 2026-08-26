@@ -91,6 +91,65 @@ try {
 
   const plan = resolve(project, ".rb/features/standalone-test/PHASES.md");
   assert(cli(["contract", "validate", plan]).includes("OK"), "Published PHASES.md failed contract validate");
+  const goConvergencePlan = resolve(project, "GO-NONCONVERGENT-PHASES.md");
+  await writeFile(goConvergencePlan, `# RB Execution Plan: Installed Go convergence gate
+
+<!-- rb-execution-contract: rb-execution/v1 -->
+<!-- rb-artifact-id: installed-go-convergence-gate -->
+
+## Phase 1: Resolve the direct module
+
+**Phase ID:** P01
+**Goal:** Resolve the required direct module.
+**Depends on:** none
+**Context:**
+- \`.rb/features/standalone-test/PLAN.md\`
+
+- [ ] T001 — Resolve the direct module early
+  - **Scope:** \`go.mod\`, \`go.sum\`
+  - **Change:** Declare the direct Go module before its first consumer.
+  - **Covers:** RF-001
+  - **Depends on:** none
+  - **Parallel safe:** false
+  - **Acceptance criteria:**
+    - AC-T001-01: \`github.com/charmbracelet/bubbletea\` is a direct Go dependency in \`go.mod\`.
+  - **Validation:**
+    - \`go mod tidy\`
+  - **Expected evidence:** A normalized module graph.
+
+## Phase 2: Implement the first consumer
+
+**Phase ID:** P02
+**Goal:** Implement the first module consumer.
+**Depends on:** P01
+**Context:**
+- \`.rb/features/standalone-test/PLAN.md\`
+
+- [ ] T002 — Implement the TUI
+  - **Scope:** \`internal/tui/app.go\`
+  - **Change:** Import \`github.com/charmbracelet/bubbletea\` and use it in the initial model.
+  - **Covers:** RF-001
+  - **Depends on:** T001
+  - **Parallel safe:** false
+  - **Acceptance criteria:**
+    - AC-T002-01: The TUI constructs its initial model.
+  - **Validation:**
+    - \`go test ./internal/tui/...\`
+  - **Expected evidence:** A passing focused test.
+`, "utf8");
+  let rejectedNonConvergentGoPlan = false;
+  try {
+    cli(["contract", "validate", "--project", project, goConvergencePlan]);
+  } catch (error) {
+    rejectedNonConvergentGoPlan = String(error?.stderr ?? error)
+      .includes("execution.go-tidy.nonconvergent-direct-requirement");
+  }
+  assert(rejectedNonConvergentGoPlan, "Installed contract validator accepted a non-convergent Go plan");
+  await writeFile(resolve(project, "existing.go"), `package fixture\n\nimport _ "github.com/charmbracelet/bubbletea"\n`, "utf8");
+  assert(
+    cli(["contract", "validate", "--project", project, goConvergencePlan]).includes("OK"),
+    "Installed contract validator rejected a plan whose module already has an existing import",
+  );
   const operations = resolve(project, ".rb/features/standalone-test/OPERATIONS.json");
   let operationsPresent = true;
   try {

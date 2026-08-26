@@ -5,6 +5,7 @@ import type {
   Task,
   ValidationIssue,
 } from "./types.js";
+import { validateGoPlanConvergence } from "./go-plan-convergence.js";
 
 const CONTRACT = "rb-execution/v1" as const;
 const PHASE_HEADING = /^## Phase ([0-9]+):\s+(.+)$/;
@@ -502,6 +503,8 @@ export function validateExecutionMarkdown(source: string): ExecutionValidation {
         phases,
       }
     : undefined;
+
+  if (document) issues.push(...validateGoPlanConvergence(document));
 
   return { valid: issues.length === 0, issues, ...(document ? { document } : {}) };
 }

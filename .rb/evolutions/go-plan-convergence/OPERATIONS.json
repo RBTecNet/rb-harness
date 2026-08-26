@@ -1,0 +1,37 @@
+{
+  "contract": "rb-operational/v1",
+  "cleanRoom": {
+    "exclude": ["node_modules", "packages/core/dist", "coverage"]
+  },
+  "environment": {
+    "inherit": [],
+    "set": {}
+  },
+  "scenarios": [
+    {
+      "id": "packed-go-convergence-gate",
+      "title": "Packed Harness rejects the non-convergent Go plan and preserves an existing-import variant",
+      "platforms": ["linux"],
+      "steps": [
+        {
+          "id": "install",
+          "kind": "command",
+          "command": { "argv": ["npm", "ci"] },
+          "expect": { "exitCode": 0 }
+        },
+        {
+          "id": "build",
+          "kind": "command",
+          "command": { "argv": ["npm", "run", "build"] },
+          "expect": { "exitCode": 0 }
+        },
+        {
+          "id": "exercise-packed-validator",
+          "kind": "command",
+          "command": { "argv": ["npm", "run", "check:package"] },
+          "expect": { "exitCode": 0, "stdoutIncludes": ["OK: packed standalone"] }
+        }
+      ]
+    }
+  ]
+}

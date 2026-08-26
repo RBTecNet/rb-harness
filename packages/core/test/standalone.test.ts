@@ -517,6 +517,30 @@ describe("standalone RB Harness", () => {
     }
   }, 60_000);
 
+  it("repairs the Go convergence finding without rewriting unrelated documents", async () => {
+    const project = await mkdtemp(resolve(tmpdir(), "rb-harness-go-convergence-repair-"));
+    await writeFile(resolve(project, "go.mod"), "module example.com/repair-fixture\n\ngo 1.22\n", "utf8");
+    const answers = resolve(project, "answers.json");
+    await writeFile(answers, "{}\n", "utf8");
+    await chmod(repairingProvider, 0o755);
+    process.env.RB_HARNESS_TEST_GO_REPAIR = "1";
+    try {
+      const state = await runStandaloneWorkflow({
+        ...baseOptions(project, answers, repairingProvider),
+        request: "Plan a convergent Go module introduction.",
+      });
+      expect(state.status).toBe("complete");
+      expect(state.repairsUsed).toBe(1);
+      const repaired = await readFile(resolve(project, ".rb/features/structural-repair/PHASES.md"), "utf8");
+      expect(repaired).toContain("`go.mod`, `go.sum`, `internal/tui/app.go`");
+      expect(repaired).not.toContain("Resolve the direct module early");
+      expect(await readFile(resolve(project, ".rb/features/structural-repair/SPEC.md"), "utf8"))
+        .toContain("request.targetMode");
+    } finally {
+      delete process.env.RB_HARNESS_TEST_GO_REPAIR;
+    }
+  }, 60_000);
+
   it("keeps correcting when one generated fix exposes a second deterministic defect", async () => {
     const project = await mkdtemp(resolve(tmpdir(), "rb-harness-multi-repair-"));
     await writeFile(resolve(project, "package.json"), '{"name":"repair-fixture"}\n', "utf8");

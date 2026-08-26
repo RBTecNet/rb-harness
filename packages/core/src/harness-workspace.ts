@@ -103,7 +103,9 @@ function workflowArtifactReady(workflow: HarnessWorkflow, artifacts: Awaited<Ret
 function structuralError(issue: ValidationIssue): StructuralError {
   return {
     code: issue.code,
-    message: issue.line ? `${issue.message} (line ${issue.line})` : issue.message,
+    // Go convergence diagnostics already carry stable task/criterion identity.
+    // Keep their public message byte-identical to artifacts verify/headless.
+    message: issue.line && !issue.code.startsWith("execution.go-") ? `${issue.message} (line ${issue.line})` : issue.message,
     ...(issue.path ? { path: issue.path } : {}),
   };
 }

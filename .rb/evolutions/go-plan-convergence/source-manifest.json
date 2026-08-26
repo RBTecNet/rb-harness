@@ -1,0 +1,52 @@
+{
+  "contract": "rb-evolve-source-manifest/v1",
+  "artifactId": "source-manifest-go-plan-convergence",
+  "evolutionId": "go-plan-convergence",
+  "targetRevision": "b6c205bd532d8fe9e9e982bb9ed9b78f63dd3e49",
+  "request": {
+    "source": "docs/incidents/2026-08-26-harness-go-plan-convergence-correction.md",
+    "sha256": "6c13c0159482a9dc614ad60a4b52d3993e3ec9fbe609b6922c92cbde6bccb229",
+    "language": "pt-BR",
+    "normalizedObjective": "Impedir a publicação de planos Go cujo requisito direto é removido pela própria validação canônica antes do primeiro import autorizado."
+  },
+  "inspectedSources": [
+    { "path": "packages/core/src/go-plan-convergence.ts", "sha256": "e4665cf50a08ee3c5e60da4d791c778e9196cff2b87430cf7e4e7faae42440b1", "knowledge": "OBSERVED" },
+    { "path": "packages/core/src/execution-contract.ts", "sha256": "31cb5bc171f4d2d2e082f726220ddf89315ff77dfcc541d8083a8adcfd65d734", "knowledge": "OBSERVED" },
+    { "path": "packages/core/src/artifact-consistency.ts", "sha256": "4d7bcacc2c538bed6b9956f5a56ccac7ff315c0c5759a1e42187c7430cca9e9c", "knowledge": "OBSERVED" },
+    { "path": "packages/core/src/harness-workspace.ts", "sha256": "443e7e38acd98bf9fe425252179022135e2617cda044e21534de59b6410c962d", "knowledge": "OBSERVED" },
+    { "path": "packages/core/src/artifact-verifier.ts", "sha256": "d2fd3b842bb15b395fcbd9a6910aae1240127066fa1548f9960f7325612b51b1", "knowledge": "OBSERVED" },
+    { "path": "packages/core/src/harness-generator.ts", "sha256": "31000db50ac02d36e743f83c14ca9d3941d388107f4e0245cc1d70c786866793", "knowledge": "OBSERVED" },
+    { "path": "packages/core/src/headless-runner.ts", "sha256": "40485e16782125327acce131a04c88f939c00f368680c60185b8abb2200c5b0b", "knowledge": "OBSERVED" },
+    { "path": "packages/core/src/harness-contract-digest.ts", "sha256": "9fbabe6ed3d3fc79688a7a64ce8cbb9b76eafee93c6edd03c374fe0e27d9753c", "knowledge": "OBSERVED" },
+    { "path": "packages/core/src/cli-program.ts", "sha256": "aefb4ba53bb70a0d73b8b1490c15188cf04834b74d26200458d422eb73c7b098", "knowledge": "OBSERVED" },
+    { "path": "packages/core/test/go-plan-convergence.test.ts", "sha256": "2191cf73518cbfae83b9a4f6bb8269d8df89b99b42d4bbee364993ac503bcece", "knowledge": "OBSERVED" },
+    { "path": "packages/core/test/headless-init.test.ts", "sha256": "e615cb5d9e5d16d815b3962679db1c9bb1ea4e81ba3becff78e7cafd3b58ab10", "knowledge": "OBSERVED" },
+    { "path": "packages/core/test/standalone.test.ts", "sha256": "30f473139fe211e07aecff821160d3ed321bf6e520aef6f38bfba0c03e2cd424", "knowledge": "OBSERVED" },
+    { "path": "scripts/check-standalone-package.mjs", "sha256": "101ef4a1f85e3b186c276fddf8e484a78a5071ad44012088f52556bf0e8c1336", "knowledge": "OBSERVED" }
+  ],
+  "answers": [],
+  "assumptions": [
+    {
+      "id": "incomplete-inventory-fails-open",
+      "disposition": "ACCEPTED_LOW_RISK_ASSUMPTION",
+      "value": "Um inventário truncado ou com fonte Go ilegível não prova ausência e não pode produzir o finding de não convergência."
+    }
+  ],
+  "traceability": [
+    { "requirements": ["RF-001", "RF-002", "RF-003", "RF-004"], "impact": ["classifier", "execution-contract", "artifact-consistency"], "preservation": ["PR-003", "PR-004", "PR-005", "PR-006", "PR-007", "PR-008"], "regressions": ["RG-001", "RG-002", "RG-003", "RG-004", "RG-005", "RG-006", "RG-007", "RG-011"], "tasks": ["T001"] },
+    { "requirements": ["RF-005", "RF-006"], "impact": ["staging", "verifier", "contract-cli", "headless", "repair"], "preservation": ["PR-009"], "regressions": ["RG-008", "RG-009", "RG-010"], "tasks": ["T002", "T003", "T004"] }
+  ],
+  "generatedArtifacts": [
+    "change-request-go-plan-convergence",
+    "as-is-go-plan-convergence",
+    "to-be-go-plan-convergence",
+    "impact-go-plan-convergence",
+    "preservation-go-plan-convergence",
+    "migration-go-plan-convergence",
+    "regression-matrix-go-plan-convergence",
+    "plan-go-plan-convergence",
+    "execution-go-plan-convergence",
+    "operations-go-plan-convergence",
+    "source-manifest-go-plan-convergence"
+  ]
+}

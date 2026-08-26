@@ -1,4 +1,4 @@
-import { mkdir, rename, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, symlink, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 
 const mode = process.argv[2] ?? "ready";
@@ -79,6 +79,64 @@ await writeFile(resolve(output, ".rb", "init", "PHASES.md"), `# RB Execution Pla
     - \`npm test\`
   - **Expected evidence:** A valid generated plan.
 `, "utf8");
+if (mode === "go-nonconvergent" || mode === "go-module-identity-missing") {
+  await writeFile(resolve(output, ".rb", "init", "PHASES.md"), `# RB Execution Plan: non-convergent Go fixture
+
+<!-- rb-execution-contract: rb-execution/v1 -->
+<!-- rb-artifact-id: generated-init -->
+
+## Phase 1: Resolve dependencies
+
+**Phase ID:** P01
+**Goal:** Resolve the direct Go module requirement.
+**Depends on:** none
+**Context:**
+- \`.rb/init/PROJECT.md\`
+
+- [ ] T001 — Resolve the direct module
+  - **Scope:** \`go.mod\`, \`go.sum\`
+  - **Change:** Declare the requested direct Go module.
+  - **Covers:** RF-001
+  - **Depends on:** none
+  - **Parallel safe:** false
+  - **Acceptance criteria:**
+    - AC-T001-01: \`github.com/charmbracelet/bubbletea\` is a direct dependency in \`go.mod\`.
+  - **Validation:**
+    - \`go mod tidy\`
+  - **Expected evidence:** A normalized module graph.
+
+## Phase 2: Import the dependency
+
+**Phase ID:** P02
+**Goal:** Implement the first module consumer.
+**Depends on:** P01
+**Context:**
+- \`.rb/init/PROJECT.md\`
+
+- [ ] T002 — Implement the TUI
+  - **Scope:** \`internal/tui/app.go\`
+  - **Change:** Import \`github.com/charmbracelet/bubbletea\` and use it in the TUI.
+  - **Covers:** RF-001
+  - **Depends on:** T001
+  - **Parallel safe:** false
+  - **Acceptance criteria:**
+    - AC-T002-01: The TUI constructs its initial model.
+  - **Validation:**
+    - \`go test ./internal/tui/...\`
+  - **Expected evidence:** A passing focused test.
+`, "utf8");
+}
+if (mode === "go-module-identity-missing") {
+  const phasesPath = resolve(output, ".rb", "init", "PHASES.md");
+  const phases = await readFile(phasesPath, "utf8");
+  await writeFile(
+    phasesPath,
+    phases
+      .replace("`github.com/charmbracelet/bubbletea` is a direct dependency", "Bubble Tea is a direct dependency")
+      .replace("Import `github.com/charmbracelet/bubbletea`", "Import Bubble Tea"),
+    "utf8",
+  );
+}
 if (mode === "evolve-layout") {
   const evolution = resolve(output, ".rb", "evolutions", "existing-change");
   await mkdir(evolution, { recursive: true });

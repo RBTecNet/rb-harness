@@ -40,6 +40,7 @@ import {
   parseValidationInstruction,
   validateExecutionMarkdown,
 } from "./execution-contract.js";
+import { goPlanNeedsImportInventory, inspectExistingGoImports, validateGoPlanConvergence } from "./go-plan-convergence.js";
 import { validateOperationalJson } from "./operational-contract.js";
 import { validateResponsiveInventoryJson } from "./responsive-inventory.js";
 import {
@@ -94,12 +95,21 @@ const contract = program.command("contract").description("Validate RB execution 
 contract
   .command("validate")
   .argument("<path>", "PHASES.md path")
+  .option("--project <path>", "project root used to inventory existing Go imports", ".")
   .option("--json", "emit JSON")
-  .action(async (path: string, options: { json?: boolean }) => {
+  .action(async (path: string, options: { project: string; json?: boolean }) => {
     try {
       const result = validateExecutionMarkdown(await readFile(resolve(path), "utf8"));
-      printIssues(result.issues, Boolean(options.json));
-      if (!result.valid) process.exitCode = 1;
+      const inventory = result.document && goPlanNeedsImportInventory(result.document)
+        ? await inspectExistingGoImports(resolve(options.project))
+        : undefined;
+      const convergence = result.document && inventory?.complete
+        ? validateGoPlanConvergence(result.document, { existingImports: inventory.imports, path: path })
+        : [];
+      const issues = [...result.issues, ...convergence.filter((candidate) => !result.issues.some((existing) =>
+        existing.code === candidate.code && existing.line === candidate.line && existing.message === candidate.message))];
+      printIssues(issues, Boolean(options.json));
+      if (issues.length) process.exitCode = 1;
       else if (!options.json) process.stdout.write(`OK: ${path} conforms to rb-execution/v1\n`);
     } catch (error) {
       fail(error);

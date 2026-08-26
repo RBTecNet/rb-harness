@@ -61,18 +61,83 @@ function phases(valid, controlPlaneScope = false) {
 `;
 }
 
+function goPhases(valid) {
+  const first = valid
+    ? `- [ ] T001 — Introduce the direct module at its first use
+  - **Scope:** \`go.mod\`, \`go.sum\`, \`internal/tui/app.go\`
+  - **Change:** Import \`github.com/charmbracelet/bubbletea\`, use it in the initial TUI model, and declare the direct module in the same convergent task.
+  - **Covers:** RF-001
+  - **Depends on:** none
+  - **Parallel safe:** false
+  - **Acceptance criteria:**
+    - AC-T001-01: \`github.com/charmbracelet/bubbletea\` is a direct Go dependency in \`go.mod\` and \`internal/tui/app.go\` constructs the initial model.
+  - **Validation:**
+    - \`go mod tidy && go test ./internal/tui/...\`
+  - **Expected evidence:** The scoped source and module graph remain valid after the normalizer.`
+    : `- [ ] T001 — Resolve the direct module early
+  - **Scope:** \`go.mod\`, \`go.sum\`
+  - **Change:** Declare the requested direct Go module before implementing its consumer.
+  - **Covers:** RF-001
+  - **Depends on:** none
+  - **Parallel safe:** false
+  - **Acceptance criteria:**
+    - AC-T001-01: \`github.com/charmbracelet/bubbletea\` is a direct Go dependency in \`go.mod\`.
+  - **Validation:**
+    - \`go mod tidy\`
+  - **Expected evidence:** A normalized module graph.`;
+  const later = valid ? "" : `
+
+## Phase 2: Implement the consumer
+
+**Phase ID:** P02
+**Goal:** Implement the first module consumer.
+**Depends on:** P01
+**Context:**
+- \`.rb/features/structural-repair/SPEC.md\`
+- \`.rb/features/structural-repair/PLAN.md\`
+
+- [ ] T002 — Implement the TUI
+  - **Scope:** \`internal/tui/app.go\`
+  - **Change:** Import \`github.com/charmbracelet/bubbletea\` and use it in the initial TUI model.
+  - **Covers:** RF-001
+  - **Depends on:** T001
+  - **Parallel safe:** false
+  - **Acceptance criteria:**
+    - AC-T002-01: The TUI constructs its initial model.
+  - **Validation:**
+    - \`go test ./internal/tui/...\`
+  - **Expected evidence:** A passing focused test.`;
+  return `# RB Execution Plan: Go convergence repair
+
+<!-- rb-execution-contract: rb-execution/v1 -->
+<!-- rb-artifact-id: structural-repair-execution -->
+
+## Phase 1: Produce a stable module graph
+
+**Phase ID:** P01
+**Goal:** Keep the direct module after canonical validation.
+**Depends on:** none
+**Context:**
+- \`.rb/features/structural-repair/SPEC.md\`
+- \`.rb/features/structural-repair/PLAN.md\`
+
+${first}${later}
+`;
+}
+
 // The repair prompt carries the ordered deterministic errors; their presence is
 // what tells the fixture which pass it is running.
 const repairing = process.env.RB_HARNESS_MODE === "repair" || prompt.includes("DETERMINISTIC ERRORS");
 const needsSecondRepair = process.env.RB_HARNESS_TEST_TWO_REPAIRS === "1"
   && repairing
   && !prompt.includes("task.scope.control-plane");
+const goRepair = process.env.RB_HARNESS_TEST_GO_REPAIR === "1";
 const bundle = repairing
   ? {
     contract: "rb-harness-documents/v1",
     status: "complete",
     summary: "Repaired the ambiguous acceptance criterion in place.",
-    documents: [{ path: ".rb/features/structural-repair/PHASES.md", content: phases(true, needsSecondRepair) }],
+    documents: [{ path: ".rb/features/structural-repair/PHASES.md", content: goRepair ? goPhases(true) : phases(true, needsSecondRepair) }],
     blocked: [],
   }
   : {
@@ -83,7 +148,7 @@ const bundle = repairing
       { path: ".rb/features/structural-repair/REQUEST.md", content: "# Request\n\nGenerate a deterministic scope gate.\n" },
       { path: ".rb/features/structural-repair/SPEC.md", content: "# Specification\n\n## RF-001\n\nThe request is accepted only when `request.targetMode` equals `greenfield`.\n" },
       { path: ".rb/features/structural-repair/PLAN.md", content: "# Plan\n\nImplement the typed scope gate and its finite matrix.\n" },
-      { path: ".rb/features/structural-repair/PHASES.md", content: phases(false) },
+      { path: ".rb/features/structural-repair/PHASES.md", content: goRepair ? goPhases(false) : phases(false) },
     ],
     blocked: [],
   };

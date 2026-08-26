@@ -3,6 +3,7 @@ import { isUtf8 } from "node:buffer";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
 import { validateExecutionMarkdown } from "./execution-contract.js";
+import { validateArtifactConsistency } from "./artifact-consistency.js";
 import { safeProjectPath } from "./fs-utils.js";
 import { sha256File, sha256Text } from "./hash.js";
 import { isSafeRelativePath, validateHeadlessInitJson, validateHeadlessInitValue, type HeadlessInitDocument } from "./headless-contract.js";
@@ -22,6 +23,8 @@ const PUBLIC_OUTPUT_DIAGNOSTICS = new Set([
   "secret_detected", "output_path", "output_duplicate_path", "output_link", "output_special_file",
   "manifest_schema_invalid", "manifest_project_mismatch", "execution_plan_invalid",
   "execution_contract_invalid", "operations_contract_invalid", "tree_invalid", "result_invalid",
+  "execution.go-tidy.nonconvergent-direct-requirement",
+  "execution.go-direct-requirement.module-identity-missing",
 ]);
 
 type Status = "ready" | "invalid" | "failed";
@@ -360,20 +363,32 @@ async function inspectOutput(outputRoot: string, secretValues: string[]): Promis
   return files.sort((left, right) => left.path.localeCompare(right.path));
 }
 
-async function validateOutput(outputRoot: string, projectId: string, secretValues: string[]): Promise<OutputFile[]> {
+async function validateOutput(outputRoot: string, projectRoot: string, projectId: string, secretValues: string[]): Promise<OutputFile[]> {
   const beforeSync = await inspectOutput(outputRoot, secretValues);
   const manifest = await loadManifest(outputRoot);
   if (!validateManifestValue(manifest).valid) throw new Error("manifest_schema_invalid");
   if (manifest.project.id !== projectId) throw new Error("manifest_project_mismatch");
   const phasePaths = beforeSync.filter((file) => file.path.endsWith("/PHASES.md"));
   if (phasePaths.length === 0) throw new Error("execution_plan_invalid");
-  for (const file of phasePaths) if (!validateExecutionMarkdown(await readFile(safeProjectPath(outputRoot, file.path), "utf8")).valid) throw new Error("execution_contract_invalid");
+  for (const file of phasePaths) {
+    const validation = validateExecutionMarkdown(await readFile(safeProjectPath(outputRoot, file.path), "utf8"));
+    if (!validation.valid) {
+      const publicIssue = validation.issues.find((issue) => PUBLIC_OUTPUT_DIAGNOSTICS.has(issue.code));
+      throw new Error(publicIssue?.code ?? "execution_contract_invalid");
+    }
+  }
   for (const file of beforeSync.filter((entry) => entry.path.endsWith("/OPERATIONS.json"))) if (!validateOperationalJson(await readFile(safeProjectPath(outputRoot, file.path), "utf8")).valid) throw new Error("operations_contract_invalid");
   await syncManifest(outputRoot);
   const synced = await loadManifest(outputRoot);
   const phases = synced.artifacts.filter((artifact) => artifact.kind === "execution-plan");
   if (phases.length === 0 || phases.some((artifact) => artifact.status !== "ready" || artifact.contract !== "rb-execution/v1")) throw new Error("execution_plan_invalid");
   if (!(await validateManifestTree(outputRoot)).valid) throw new Error("tree_invalid");
+  const consistency = await validateArtifactConsistency({
+    projectRoot,
+    artifactRoot: resolve(outputRoot, ".rb"),
+    manifest: synced,
+  });
+  if (consistency.length) throw new Error(consistency[0]!.code);
   return inspectOutput(outputRoot, secretValues);
 }
 
@@ -432,7 +447,7 @@ export async function runHeadlessInit(options: HeadlessRunOptions): Promise<Head
   try {
     const postAdapterOutputRoot = await validatedOutputRoot(options.outputRoot, workspace, outputRoot);
     if (!sameSnapshot(workspaceBefore, await workspaceSnapshot(workspace, postAdapterOutputRoot))) throw new Error("workspace_modified");
-    const files = await validateOutput(postAdapterOutputRoot, String((request.project as Record<string, unknown>).id), adapterEnvironment.secrets);
+    const files = await validateOutput(postAdapterOutputRoot, workspace, String((request.project as Record<string, unknown>).id), adapterEnvironment.secrets);
     const validations = VALIDATIONS.map((name) => ({ name, passed: true, exitCode: 0 }));
     const completed = result(requestId, requestHash, adapter, "ready", "", startedAt, validations, files);
     if (includesSecret(adapterEnvironment.secrets, canonicalHeadlessJson(completed))) throw new Error("secret_detected");

@@ -12,8 +12,19 @@ evolutions-artifact-generation-integrity-preservation	evolution-document	ready		
 evolutions-artifact-generation-integrity-regression-matrix	regression-specification	ready		.rb/evolutions/artifact-generation-integrity/REGRESSION_MATRIX.md	9ffd3c7f6e7386ceacb2fddcb26f3d0a71633125be476df7ad7e51faf9caaf01
 evolutions-artifact-generation-integrity-source-manifest	evolution-document	ready		.rb/evolutions/artifact-generation-integrity/source-manifest.json	649602c51a3872c001e9ff6d3fc59c03c44a477686179463c91f196a79dd8f90
 evolutions-artifact-generation-integrity-to-be	evolution-document	ready		.rb/evolutions/artifact-generation-integrity/TO_BE.md	122d140a97b2856b1d7d960fcf08cf5991c66492d293c888da6bb2babb430a1e
-reviews-rb-harness-2026-08-26-baseline	review-baseline	ready		.rb/reviews/rb-harness-2026-08-26/BASELINE.json	7020084ceb62154ae04b20a722a36eac5b57f75a655bc9993609bd9be1f5b58e
-reviews-rb-harness-2026-08-26-findings	review-findings	ready		.rb/reviews/rb-harness-2026-08-26/FINDINGS.md	a72b157cf713f795d655fe97ced50f1dde63fc53a0faffd12076af3810031e9c
-reviews-rb-harness-2026-08-26-journeys	review-document	ready		.rb/reviews/rb-harness-2026-08-26/JOURNEYS.md	7922ea39e9bd798dd44449398db550825dd19b521a6e2466eb9728ec8bd293a5
+evolutions-go-plan-convergence-as-is	evolution-document	ready		.rb/evolutions/go-plan-convergence/AS_IS.md	b7385f3756df2d8c799a07d1195a1443ebdf94162b2aba47dd911847e9842c4f
+evolutions-go-plan-convergence-change-request	request	ready		.rb/evolutions/go-plan-convergence/CHANGE_REQUEST.md	bb44e4719eb00423d0240f529938f053b31127993699108136c8c49b4f289b18
+evolutions-go-plan-convergence-impact	evolution-document	ready		.rb/evolutions/go-plan-convergence/IMPACT.md	ddd91d664f3f1314eaf1d4c7164f5f218d4064a9c93f0970a396b6f460064c85
+evolutions-go-plan-convergence-migration	evolution-document	ready		.rb/evolutions/go-plan-convergence/MIGRATION.md	b3141c27ade9d8d1389ca8f93d46f93a3aa82a68bf0722b098c1e1ba89f421a5
+evolutions-go-plan-convergence-operations	operational-verification	ready	rb-operational/v1	.rb/evolutions/go-plan-convergence/OPERATIONS.json	e698ce9631afa2b36acdc28b0afb8cea828dc7f1d3a302b2f24238a6357b3f24
+execution-go-plan-convergence	execution-plan	ready	rb-execution/v1	.rb/evolutions/go-plan-convergence/PHASES.md	c5ebc90569bef55990d2c07501de4477a36ee038e43ccc5ff43fe96981471928
+evolutions-go-plan-convergence-plan	implementation-plan	ready		.rb/evolutions/go-plan-convergence/PLAN.md	130132721f76c5348e326598e9f808da4968367e2cc86365b96ec79c46430baf
+evolutions-go-plan-convergence-preservation	evolution-document	ready		.rb/evolutions/go-plan-convergence/PRESERVATION.md	85d2ce81cc6b1ffd21ed992ba7ae591cd9b7873a2b94352635f4f76da74c5976
+evolutions-go-plan-convergence-regression-matrix	regression-specification	ready		.rb/evolutions/go-plan-convergence/REGRESSION_MATRIX.md	01dea413864333faeb6fbc82660ca0986ee1331f462890ae3e2a6de0e36294f3
+evolutions-go-plan-convergence-source-manifest	evolution-document	ready		.rb/evolutions/go-plan-convergence/source-manifest.json	228e607b595cf7586de7034bcae46ff5d1c9bb039d41d903fc552533d5ddad1b
+evolutions-go-plan-convergence-to-be	evolution-document	ready		.rb/evolutions/go-plan-convergence/TO_BE.md	2a755ca3ba5ab2ddd9eeae068e56b9468f1153fcf6e2ae016b96640562a17856
+reviews-rb-harness-2026-08-26-baseline	review-baseline	ready		.rb/reviews/rb-harness-2026-08-26/BASELINE.json	5d77cf421ead7f258f661f5c346cd491c822e76faf139809cdac44be7db76bdf
+reviews-rb-harness-2026-08-26-findings	review-findings	ready		.rb/reviews/rb-harness-2026-08-26/FINDINGS.md	825d13fc68f45943c49f245c9af1c603e2b3245b78bdbf473efc2fac3dd5c127
+reviews-rb-harness-2026-08-26-journeys	review-document	ready		.rb/reviews/rb-harness-2026-08-26/JOURNEYS.md	8a660086952b87af210694eefd2d30775cd0c2ad27277ea96e6dc8f9976fd9ee
 reviews-rb-harness-2026-08-26-review	review-document	ready		.rb/reviews/rb-harness-2026-08-26/REVIEW.md	0f1f0842446d5784b4861ef1b69b9e56de2e221d5dff7d71a2579f7bb6e05eb6
 reviews-rb-harness-2026-08-26-source-manifest	review-document	ready		.rb/reviews/rb-harness-2026-08-26/source-manifest.json	386140f6dfe71fd580f76c8926bc7f75930efc29e6564d3b7cf312d006c0aee4

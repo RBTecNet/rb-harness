@@ -90,6 +90,22 @@ async function runPluginHeadlessInit(input: string | Buffer, workspace: string, 
 }
 
 describe("headless init", () => {
+  it("rejects a non-convergent Go plan with the shared stable finding", async () => {
+    const run = await options("go-nonconvergent");
+    const outcome = await runHeadlessInit(run);
+    expect([outcome.exitCode, outcome.result.status, outcome.result.diagnosticCode]).toEqual([
+      2,
+      "invalid",
+      "execution.go-tidy.nonconvergent-direct-requirement",
+    ]);
+  });
+
+  it("preserves the module-identity finding instead of collapsing it to a generic contract error", async () => {
+    const run = await options("go-module-identity-missing");
+    const outcome = await runHeadlessInit(run);
+    expect(outcome.result.diagnosticCode).toBe("execution.go-direct-requirement.module-identity-missing");
+  });
+
   it("uses a Harness-owned prompt, isolated cwd/output, and an allowlisted adapter environment", async () => {
     const run = await options();
     const outcome = await runHeadlessInit(run);

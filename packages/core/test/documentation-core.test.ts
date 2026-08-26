@@ -115,6 +115,10 @@ describe("compact contract digest", () => {
     expect(digest).toContain('"status": 200, "bodyIncludes": ["expected text"]');
     expect(digest).toContain("Never put an `expect` object inside `ready`, `checks`, or another probe");
     expect(digest).toContain("Never copy a vague source phrase such as `when applicable` or `quando aplicável` into acceptance");
+    expect(digest).toContain("state left after the complete Validation list");
+    expect(digest).toContain("name every module path in backticks");
+    expect(digest).toContain("A first import in a later phase is non-convergent");
+    expect(digest).toContain("never invent a sentinel file");
   });
 
   it("declares the remaining interview budget in each round", () => {
