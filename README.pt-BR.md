@@ -16,7 +16,7 @@ retomáveis em vez de exigir um pacote monolítico do modelo.
 
 ## Instalação do executável
 
-O RB Harness 0.5.13 exige Node.js 20 ou superior. No clone do repositório:
+O RB Harness 0.5.14 exige Node.js 20 ou superior. No clone do repositório:
 
 ```bash
 npm install
@@ -35,7 +35,7 @@ Confira a versão instalada:
 ```bash
 rb-harness --version
 rb-harness --ver
-# 0.5.13
+# 0.5.14
 ```
 
 Executar apenas `rb-harness` abre o assistente interativo. O splash com a
@@ -254,6 +254,13 @@ Duas falhas observadas contra providers reais são corrigidas junto:
   cinco horas nisso antes do circuit breaker pausá-la. O contrato agora é
   rejeitado antes da publicação, o digest declara o ciclo de vida, o exemplo o
   reproduz e `${RB_VERIFY_PORT}` substitui portas fixas;
+- uma validação declarada que não pode passar. Duas formas vieram de um plano
+  real que o `contract validate` havia aprovado: `npm start` como validação da
+  task que faz o `npm start` funcionar — um serviço nunca encerra, então o
+  runner espera o timeout de validação e repete a fase — e uma inspeção do
+  gerente envolta em crases, que o runner tenta executar como um programa
+  inexistente. As duas passam a ser rejeitadas antes da publicação, nomeando a
+  linha e a forma que a entrada deveria ter;
 - `Parallel safe` passa a ser uma decisão que o contrato pede ao escritor, com os
   critérios de `true` explicitados. Uma fase só roda concorrente quando todas as
   tasks pendentes declaram `true`, então um plano que marcou as 25 tasks como

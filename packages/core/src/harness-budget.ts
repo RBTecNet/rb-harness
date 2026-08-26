@@ -209,7 +209,17 @@ export const HARNESS_BUDGET = {
   },
   /** Bounded prompt sections; snapshot tests assert these ceilings. */
   prompt: {
-    maxContractDigestBytes: 12 * 1024,
+    /**
+     * The code-owned output contract handed to every authoring call.
+     *
+     * Raised from 12 KiB as the contract absorbed rules that each came from an
+     * observed failure — process lifecycle in `OPERATIONS.json`, one part per
+     * phase, `Parallel safe` as a decision, and validations that cannot pass.
+     * It is a cacheable prefix measured in kilobytes against prompts measured
+     * in hundreds, so the headroom costs nothing and losing a rule would cost a
+     * run.
+     */
+    maxContractDigestBytes: 16 * 1024,
     /**
      * The interview prompt carries the whole input package plus the round
      * state, prior checkpoint, and pending answers. It keeps roughly the same

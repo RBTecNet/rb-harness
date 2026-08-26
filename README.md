@@ -28,7 +28,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.5.13 is an executable rather than a workflow that must run inside
+RB Harness 0.5.14 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -49,7 +49,7 @@ the current shell. Verify the exact installed build with:
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.5.13
+# Both print 0.5.14
 ```
 
 Run without arguments to start the wizard:
@@ -835,6 +835,13 @@ Two failures observed against real providers are fixed with them:
   circuit breaker paused it. The contract is now rejected before publication,
   the digest states the lifecycle and the example models it, and `${RB_VERIFY_PORT}`
   replaces hard-coded ports;
+- a declared validation that cannot pass. Two shapes came from one real plan
+  that `contract validate` had approved: `npm start` as the validation for the
+  task that makes `npm start` work — a service never exits, so the runner waits
+  out the validation timeout and repeats the phase — and a manager inspection
+  wrapped in backticks, which the runner tries to execute as a program that does
+  not exist. Both are now rejected before publication, naming the line and the
+  form the entry should have taken;
 - `Parallel safe` is now a decision the contract asks the writer to make, with
   the criteria for `true` spelled out. A phase runs concurrently only when every
   pending task declares `true`, so a plan that marked all 25 tasks `false` — as

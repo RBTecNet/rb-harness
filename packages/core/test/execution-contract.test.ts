@@ -156,3 +156,68 @@ describe("rb-execution/v1", () => {
     expect(result.issues.map((entry) => entry.code)).toContain("task.validation.ambiguous");
   });
 });
+
+/**
+ * Both defects come from one real plan that `contract validate` had approved:
+ * T044 declared `npm start` as the validation for the task that made
+ * `npm start` work, and T052 wrapped a manager inspection in backticks. The
+ * grammar was correct in both cases; the commands could not do their job.
+ */
+describe("a validation command must be able to pass", () => {
+  const withValidation = (source: string, validation: string) =>
+    source.replace("    - `npm test`", `    - ${validation}`);
+
+  it("rejects a service command that never exits", async () => {
+    const source = await fixture("valid", "minimal");
+    for (const command of [
+      "`npm start`", "`npm run dev`", "`yarn serve`", "`pnpm run watch`",
+      "`vite`", "`nodemon src/index.js`", "`uvicorn app:main`",
+      "`npm test -- --watch`", "`tsc -w`",
+    ]) {
+      const result = validateExecutionMarkdown(withValidation(source, command));
+      const issue = result.issues.find((entry) => entry.code === "task.validation.ambiguous");
+      expect(issue?.message, command).toContain("never exits");
+    }
+  });
+
+  it("accepts the one-shot commands a phase really runs", async () => {
+    const source = await fixture("valid", "minimal");
+    for (const command of [
+      "`npm test`", "`npm run build`", "`npm run lint`", "`npm test -- src/server/app`",
+      "`cargo test`", "`go test ./...`", "`docker compose up --abort-on-container-exit`",
+      "`npm run start:check`", "`./scripts/serve-once.sh`",
+    ]) {
+      const result = validateExecutionMarkdown(withValidation(source, command));
+      expect(result.issues.filter((entry) => entry.code === "task.validation.ambiguous"), command).toEqual([]);
+    }
+  });
+
+  it("rejects manager prose wrapped in backticks", async () => {
+    const source = await fixture("valid", "minimal");
+    const result = validateExecutionMarkdown(
+      withValidation(source, "`manual: inspecionar .rb/init/OPERATIONS.json em busca das chaves contract e scenarios`"),
+    );
+    const issue = result.issues.find((entry) => entry.code === "task.validation.ambiguous");
+    expect(issue?.message).toContain("prose written as a command");
+    expect(issue?.message).toContain("manual: ...");
+  });
+
+  it("rejects human prose wrapped in backticks and names the right form", async () => {
+    const source = await fixture("valid", "minimal");
+    const result = validateExecutionMarkdown(withValidation(source, "`human: confirmar o layout num monitor 4K`"));
+    const issue = result.issues.find((entry) => entry.code === "task.validation.ambiguous");
+    expect(issue?.message).toContain("human: ...");
+    expect(issue?.message).toContain("external evidence");
+  });
+
+  it("still accepts the declared manual and human forms", async () => {
+    const source = await fixture("valid", "minimal");
+    for (const validation of [
+      "manual: inspecionar o contrato operacional publicado",
+      "human: confirmar o layout num monitor 4K",
+    ]) {
+      const result = validateExecutionMarkdown(withValidation(source, validation));
+      expect(result.issues.filter((entry) => entry.code === "task.validation.ambiguous"), validation).toEqual([]);
+    }
+  });
+});

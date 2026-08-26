@@ -28,10 +28,50 @@ export function parseValidationInstruction(value: string): ValidationInstruction
   return undefined;
 }
 
+/**
+ * Service commands that never return on their own.
+ *
+ * A validation is run to completion and judged by its exit code. A server or
+ * watcher has no exit code to give: the runner waits out the validation
+ * timeout, fails the phase, and repeats it. An observed plan declared
+ * `npm start` as the validation for the task that made `npm start` work, which
+ * would have cost fifteen minutes per attempt to discover.
+ */
+const LONG_RUNNING_COMMAND = new RegExp(
+  "^(?:"
+  // The script name must end here: `npm run start:check` is a one-shot check,
+  // not the dev server, and rejecting it would be a false positive.
+  + "(?:npm|pnpm|yarn|bun)\\s+(?:run\\s+)?(?:start|dev|serve|preview|watch)(?=\\s|$)"
+  + "|(?:npx|pnpx)\\s+(?:serve|http-server|vite|nodemon)(?=\\s|$)"
+  + "|(?:vite|nodemon|serve|http-server|webpack-dev-server)(?=\\s|$)"
+  + "|(?:python3?\\s+-m\\s+http\\.server)(?=\\s|$)"
+  + "|(?:docker(?:-compose)?\\s+up)(?!\\s+[^|;&]*--(?:abort-on-container-exit|exit-code-from))"
+  + "|(?:go\\s+run|cargo\\s+run|dotnet\\s+run|rails\\s+server|flask\\s+run|uvicorn|gunicorn)(?=\\s|$)"
+  + ")",
+  "i",
+);
+
+/** A `--watch`-style flag turns any command into one that never returns. */
+const WATCH_FLAG = /(^|\s)--watch(?:=(?:true|always))?(\s|$)|(^|\s)-w(\s|$)/i;
+
 function ambiguousValidationInstruction(instruction: ValidationInstruction): string | undefined {
   if (instruction.kind === "command") {
     if (/(^|\s)(?:\|\|\s*true|;\s*(?:true|exit\s+0))(?:\s|$)/i.test(instruction.value)) {
       return "must not mask a failing command with a forced successful exit";
+    }
+    // The mirror of the `manual: run ...` defect below: prose that names a
+    // manager inspection, wrapped in backticks so the runner executes it. The
+    // shell has no `manual:` program, so the phase can only ever fail.
+    const disguised = instruction.value.match(/^(manual|human)\s*:/i);
+    if (disguised) {
+      const kind = disguised[1]!.toLowerCase();
+      return `is prose written as a command; drop the backticks and declare it as \`${kind}: ...\` so it reaches the ${
+        kind === "manual" ? "manager as an inspection" : "operator as external evidence"
+      }`;
+    }
+    if (LONG_RUNNING_COMMAND.test(instruction.value) || WATCH_FLAG.test(instruction.value)) {
+      return "starts a long-running service or watcher and never exits; a validation must run to completion "
+        + "and return its real exit code, so prove the running service through OPERATIONS.json instead";
     }
     return undefined;
   }
