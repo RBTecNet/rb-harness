@@ -238,7 +238,7 @@ describe("an oversized segment is re-authored, not re-formatted", () => {
       "prefix", plan, plan.documents[0]!, plan.documents[0]!.parts[0]!, 0, 0, undefined, undefined, defect,
     );
     expect(prompt).toContain(defect);
-    expect(prompt).toContain("Author the same span again, shorter");
+    expect(prompt).toContain("Author the same span again and make it fit");
     expect(prompt).toContain("Keep every RIGID fact");
     // Without a defect the prompt stays byte-stable for prefix caching.
     expect(buildDocumentPartPrompt("prefix", plan, plan.documents[0]!, plan.documents[0]!.parts[0]!, 0, 0))
@@ -297,5 +297,39 @@ describe("the interview asks in the developer's language", () => {
     }
     // The digest stays round-independent so it can sit in the cached prefix.
     expect(interviewContractDigest("plan")).toBe(interviewContractDigest("plan"));
+  });
+});
+
+/**
+ * Observed on a second run, after the rewrite allowance landed: the rewrite
+ * happened (a `-rewrite.log` exists) and still came back at 12941 bytes, and the
+ * flow then spent three formatter attempts on it anyway. A rewrite that is still
+ * oversized is a planning defect — the plan gave one part four phases — so the
+ * run should say that instead of paying to discover it again.
+ */
+describe("an oversized part is diagnosed as a planning defect", () => {
+  it("plans one part per phase for an execution document", () => {
+    const state = { workflow: "init", request: "Create the project." } as HarnessRunState;
+    const prompt = buildGenerationPrompt(state, { contract: "rb-harness-input/v1" } as never, "");
+    expect(prompt).toContain("one part per phase");
+    expect(prompt).toContain("phases-p01-p04");
+    expect(prompt).toContain("plan more parts");
+  });
+
+  it("tells the rewrite to clear the limit rather than graze it", () => {
+    const plan = {
+      contract: "rb-harness-document-plan/v1" as const,
+      status: "complete" as const,
+      summary: "s",
+      coordination: "c",
+      documents: [{ path: ".rb/init/PHASES.md", purpose: "Plan", parts: [{ id: "phases-p01-p04", purpose: "Phases" }] }],
+      blocked: [],
+    };
+    const prompt = buildDocumentPartPrompt(
+      "prefix", plan, plan.documents[0]!, plan.documents[0]!.parts[0]!, 0, 0, undefined, undefined,
+      "document part .rb/init/PHASES.md#phases-p01-p04 is 12941 bytes, above the 12288-byte limit for one segment",
+    );
+    expect(prompt).toContain("remove clearly more than the overflow rather than trimming to the edge");
+    expect(prompt).toContain("12288 UTF-8 bytes");
   });
 });

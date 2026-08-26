@@ -96,7 +96,9 @@ export function buildGenerationPrompt(
     `Return exactly ${DOCUMENT_PLAN_BEGIN}, one JSON object, and ${DOCUMENT_PLAN_END}. Do not use Markdown fences or surrounding prose.`,
     `The JSON shape is:\n${PLAN_SHAPE}`,
     `Plan every required artifact, but do not write any document content yet. At most ${HARNESS_BUDGET.documents.maxPlannedDocuments} documents and ${HARNESS_BUDGET.documents.maxPlannedParts} total parts.`,
-    `Split every document into semantic, contiguous parts whose authored content will each be at most ${HARNESS_BUDGET.documents.maxPartBytes} UTF-8 bytes. A large PHASES.md must be divided by phase or another stable semantic boundary.`,
+    `Split every document into semantic, contiguous parts whose authored content will each be at most ${HARNESS_BUDGET.documents.maxPartBytes} UTF-8 bytes.`,
+    "For PHASES.md, allocate **one part per phase**. A part that carries several phases is the single most common way a plan becomes unwritable: one phase with five tasks already approaches the limit, so a part named for a range such as `phases-p01-p04` will overflow and the run fails there. Name each part for the one phase it writes.",
+    "For any other document, split at a heading boundary and keep one part to a few thousand words at most. When in doubt, plan more parts: an extra part costs one bounded call, while an oversized one costs the run.",
     `Keep the entire plan below ${HARNESS_BUDGET.documents.maxPlanBytes} UTF-8 bytes and target 12 KiB. Be concise, but never try to count bytes in an individual prose field; RB Harness enforces the total response budget deterministically.`,
     "The plan is a compact index, never documentation prose. Do not repeat the request, rationale, acceptance criteria, evidence, or decisions inside every purpose. Put shared decisions and stable IDs once in the coordination ledger; a part purpose names only its boundary, required sections, and referenced IDs.",
     "Part writers receive the complete authority prefix, closed decision checkpoint, coordination ledger, and whole plan. They do not need duplicated facts in each purpose and cannot inspect the project again.",
@@ -142,7 +144,7 @@ export function buildDocumentPartPrompt(
     "Write only the requested contiguous segment. The first part begins the file; every later part continues exactly after the previous segment; concatenation must produce one complete document without omitted or duplicated text.",
     "This is a closed authoring step. Do not inspect files, call tools, rediscover evidence, or change the plan. All authority needed for this segment is in the plan, coordination ledger, target brief, and previous segment above.",
     `The content must not exceed ${HARNESS_BUDGET.documents.maxPartBytes} UTF-8 bytes. If the plan assigned too much to this part, be concise while preserving every RIGID fact and contract requirement; never spill into another response.`,
-    defect ? `A prior attempt at this exact segment was rejected: ${defect}. Author the same span again, shorter. Keep every RIGID fact, ID, and contract requirement; cut restatement, rationale, and examples that repeat what the plan or an earlier segment already says.` : "",
+    defect ? `A prior attempt at this exact segment was rejected: ${defect}. Author the same span again and make it fit: the limit is ${HARNESS_BUDGET.documents.maxPartBytes} UTF-8 bytes, so remove clearly more than the overflow rather than trimming to the edge. Keep every RIGID fact, ID, and contract requirement; cut restatement, rationale, and examples that repeat what the plan or an earlier segment already says.` : "",
   ].filter(Boolean).join("\n");
   assertPromptWithinBudget(prompt, repairContext ? HARNESS_BUDGET.prompt.maxRepairPromptBytes : HARNESS_BUDGET.prompt.maxGenerationPromptBytes, "document part");
   return prompt;
@@ -466,6 +468,27 @@ async function authorIncrementally(options: IncrementalAuthoringOptions): Promis
               toolsEnabled: false,
             });
             rawPart = retry.stdout;
+            // A rewrite that is still oversized is a planning defect, not a
+            // formatting one: the plan gave this segment more document than a
+            // part can hold. The formatter cannot shorten prose, so failing
+            // here costs three fewer paid attempts and says what to change.
+            try {
+              authored = parsePartOrLegacyDocument(rawPart, expected);
+              const stored = { ...authored, sha256: sha256Text(authored.content) };
+              checkpoint.parts.push(stored);
+              completed.set(key, stored);
+              await saveCheckpoint(options.runRoot, options.checkpointName, checkpoint);
+              continue;
+            } catch (rewriteError) {
+              if (rewriteError instanceof DocumentSubstanceError) {
+                throw new Error(
+                  `${rewriteError.message}, and the rewrite did not fit either. `
+                  + `The plan assigned too much of ${document.path} to part ${part.id}; it needs more parts, `
+                  + "each covering a smaller contiguous span — for an execution plan, one phase per part.",
+                );
+              }
+              rawPart = retry.stdout;
+            }
           }
           authored = await parseOrFormatControlOutput({
             configuration: options.state.provider as ProviderConfiguration,

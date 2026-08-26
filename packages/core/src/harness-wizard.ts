@@ -1,6 +1,6 @@
 import { lstat, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { createInterface } from "node:readline/promises";
+import { createInterface, type Interface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { formatProjectInventory, inspectProjectInventory } from "./harness-inventory.js";
 import { playHarnessSplash } from "./harness-splash.js";
@@ -12,6 +12,62 @@ import type { HarnessWorkflow, ProviderConfiguration } from "./standalone-types.
 function shellQuote(value: string): string {
   if (/^[A-Za-z0-9_./:@+-]+$/.test(value)) return value;
   return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
+/**
+ * Ask until the answer is one of the offered choices.
+ *
+ * A single `question()` accepts whatever arrives, so pasting a request into the
+ * "digitar ou arquivo" prompt used to be read as a mode, silently swallowing
+ * the pasted line and leaving the rest of the paste to be consumed — one line
+ * each — by the questions that followed.
+ */
+export interface WizardPrompt {
+  ask: (prompt: string) => Promise<string>;
+  write: (text: string) => void;
+}
+
+export async function askChoice(
+  io: WizardPrompt,
+  prompt: string,
+  choices: readonly string[],
+  fallback: string,
+): Promise<string> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const answer = (await io.ask(prompt)).trim().toLowerCase();
+    if (!answer) return fallback;
+    if (choices.includes(answer)) return answer;
+    io.write(`Responda com ${choices.join(", ")} — recebi ${answer.length} caractere(s) que não são uma dessas opções.\n`);
+    if (answer.length > 40) {
+      io.write("Se você colou o pedido aqui, escolha \"digitar\" primeiro; o texto completo é pedido na pergunta seguinte.\n");
+    }
+  }
+  throw new Error(`resposta inválida após 5 tentativas; esperado: ${choices.join(", ")}`);
+}
+
+/**
+ * Read a request that spans several lines.
+ *
+ * A request is normally a paragraph or a pasted specification, and `question()`
+ * returns at the first newline. Everything after it stayed in the input buffer
+ * and was answered into the following prompts, which is how a pasted brief
+ * ended up scattered across the provider, model, and effort answers.
+ */
+export async function askRequest(io: WizardPrompt, prompt: string): Promise<string> {
+  io.write(`${prompt}\n`);
+  io.write("Cole ou digite quantas linhas quiser. Finalize com uma linha contendo apenas . (ponto) ou pressione Ctrl-D.\n");
+  const lines: string[] = [];
+  for (;;) {
+    let line: string;
+    try {
+      line = await io.ask("> ");
+    } catch {
+      break; // Ctrl-D closes the interface.
+    }
+    if (line.trim() === ".") break;
+    lines.push(line);
+  }
+  return lines.join("\n").trim();
 }
 
 async function directory(path: string): Promise<string> {
@@ -68,7 +124,16 @@ export async function runHarnessWizard(version: string): Promise<void> {
     let requestSource: string | undefined;
     if (workflow === "ai-context") request = "Reverse-engineer this implemented project into evidence-grounded AS IS documentation.";
     else if (workflow === "review") request = "Audit this implemented project end to end and record evidence-grounded findings.";
-    const sourceMode = (await terminal.question(`Pedido: digitar ou arquivo [${request ? "padrão/digitar/arquivo" : "digitar/arquivo"}]: `)).trim().toLowerCase();
+    const io: WizardPrompt = {
+      ask: (prompt) => terminal.question(prompt),
+      write: (text) => void process.stdout.write(text),
+    };
+    const sourceMode = await askChoice(
+      io,
+      `Pedido: digitar ou arquivo [${request ? "padrão/digitar/arquivo" : "digitar/arquivo"}]: `,
+      request ? ["padrao", "padrão", "digitar", "arquivo"] : ["digitar", "arquivo"],
+      request ? "padrao" : "digitar",
+    );
     if (sourceMode === "arquivo") {
       const path = (await terminal.question("Caminho do arquivo: ")).trim();
       if (!path) throw new Error("o caminho do arquivo não pode ficar vazio");
@@ -78,7 +143,7 @@ export async function runHarnessWizard(version: string): Promise<void> {
       request = await readFile(absolute, "utf8");
       requestSource = absolute;
     } else if (sourceMode === "digitar" || !request) {
-      request = (await terminal.question("Descreva o pedido: ")).trim();
+      request = await askRequest(io, "Descreva o pedido:");
     }
     if (!request.trim()) throw new Error("o pedido não pode ficar vazio");
     const requestForCommand = request;
