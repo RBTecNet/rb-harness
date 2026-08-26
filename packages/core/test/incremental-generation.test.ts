@@ -25,6 +25,7 @@ const originalFailure = process.env.RB_HARNESS_TEST_INCREMENTAL_FAIL_PART;
 const originalExitPart = process.env.RB_HARNESS_TEST_INCREMENTAL_EXIT_PART;
 const originalFormatFailures = process.env.RB_HARNESS_TEST_FORMAT_INVALID_ATTEMPTS;
 const originalDocumentDependencies = process.env.RB_HARNESS_TEST_DOCUMENT_DEPENDENCIES;
+const originalCyclicDocumentDependencies = process.env.RB_HARNESS_TEST_CYCLIC_DOCUMENT_DEPENDENCIES;
 
 afterEach(() => {
   if (originalCalls === undefined) delete process.env.RB_HARNESS_TEST_INCREMENTAL_CALLS;
@@ -37,6 +38,8 @@ afterEach(() => {
   else process.env.RB_HARNESS_TEST_FORMAT_INVALID_ATTEMPTS = originalFormatFailures;
   if (originalDocumentDependencies === undefined) delete process.env.RB_HARNESS_TEST_DOCUMENT_DEPENDENCIES;
   else process.env.RB_HARNESS_TEST_DOCUMENT_DEPENDENCIES = originalDocumentDependencies;
+  if (originalCyclicDocumentDependencies === undefined) delete process.env.RB_HARNESS_TEST_CYCLIC_DOCUMENT_DEPENDENCIES;
+  else process.env.RB_HARNESS_TEST_CYCLIC_DOCUMENT_DEPENDENCIES = originalCyclicDocumentDependencies;
 });
 
 function envelope(begin: string, end: string, value: unknown): string {
@@ -167,18 +170,87 @@ describe("incremental document contracts", () => {
     expect(plan.documents[2]?.dependsOn).toEqual([".rb/init/PHASES.md"]);
   });
 
-  it("rejects missing and cyclic document dependencies as substance defects", () => {
+  it("rejects missing dependencies and normalizes provider-only cycles", () => {
     expect(() => parseDocumentPlan(envelope(DOCUMENT_PLAN_BEGIN, DOCUMENT_PLAN_END, {
       ...samplePlan(),
       documents: [{ ...samplePlan().documents[0], dependsOn: [".rb/init/MISSING.md"] }],
     }))).toThrow("depends on missing document");
-    expect(() => parseDocumentPlan(envelope(DOCUMENT_PLAN_BEGIN, DOCUMENT_PLAN_END, {
+
+    const cyclic = parseDocumentPlan(envelope(DOCUMENT_PLAN_BEGIN, DOCUMENT_PLAN_END, {
       ...samplePlan(),
       documents: [
         { path: ".rb/init/A.md", purpose: "A", dependsOn: [".rb/init/B.md"], parts: [{ id: "a", purpose: "A" }] },
         { path: ".rb/init/B.md", purpose: "B", dependsOn: [".rb/init/A.md"], parts: [{ id: "b", purpose: "B" }] },
       ],
-    }))).toThrow("dependency graph contains a cycle");
+    }));
+    expect(cyclic.documents.map((document) => document.path)).toEqual([".rb/init/B.md", ".rb/init/A.md"]);
+    expect(cyclic.documents[0]?.dependsOn).toEqual([]);
+    expect(cyclic.documents[1]?.dependsOn).toEqual([".rb/init/B.md"]);
+  });
+
+  it("keeps the code-owned init order when provider suggestions contain realistic reciprocal edges", () => {
+    const document = (name: string, dependsOn: string[] = []) => ({
+      path: `.rb/init/${name}`,
+      purpose: name,
+      dependsOn,
+      parts: [{ id: name.toLowerCase().replace(/[^a-z0-9]+/g, "-"), purpose: name }],
+    });
+    const value = samplePlan();
+    value.documents = [
+      document("ARCHITECTURE.md"),
+      document("DECISIONS.md"),
+      document("GLOSSARY.md"),
+      document("NON_FUNCTIONAL.md"),
+      document("PROJECT.md"),
+      document("REQUIREMENTS.md"),
+      document("WORKFLOWS.md"),
+      document("OPERATIONS.json", [
+        ".rb/init/ARCHITECTURE.md",
+        ".rb/init/DECISIONS.md",
+        ".rb/init/NON_FUNCTIONAL.md",
+        ".rb/init/PHASES.md",
+        ".rb/init/REQUIREMENTS.md",
+      ]),
+      document("PLAN.md", [
+        ".rb/init/ARCHITECTURE.md",
+        ".rb/init/DECISIONS.md",
+        ".rb/init/NON_FUNCTIONAL.md",
+        ".rb/init/OPERATIONS.json",
+        ".rb/init/REQUIREMENTS.md",
+      ]),
+      document("PHASES.md", [
+        ".rb/init/ARCHITECTURE.md",
+        ".rb/init/DECISIONS.md",
+        ".rb/init/NON_FUNCTIONAL.md",
+        ".rb/init/OPERATIONS.json",
+        ".rb/init/PLAN.md",
+        ".rb/init/PROJECT.md",
+        ".rb/init/REQUIREMENTS.md",
+        ".rb/init/WORKFLOWS.md",
+      ]),
+      document("source-manifest.json", [
+        ".rb/init/ARCHITECTURE.md",
+        ".rb/init/DECISIONS.md",
+        ".rb/init/GLOSSARY.md",
+        ".rb/init/NON_FUNCTIONAL.md",
+        ".rb/init/OPERATIONS.json",
+        ".rb/init/PHASES.md",
+        ".rb/init/PLAN.md",
+        ".rb/init/PROJECT.md",
+        ".rb/init/REQUIREMENTS.md",
+        ".rb/init/WORKFLOWS.md",
+      ]),
+    ];
+
+    const plan = parseDocumentPlan(envelope(DOCUMENT_PLAN_BEGIN, DOCUMENT_PLAN_END, value));
+    const byPath = new Map(plan.documents.map((entry) => [entry.path, entry]));
+    const paths = plan.documents.map((entry) => entry.path);
+    expect(byPath.get(".rb/init/PHASES.md")?.dependsOn).not.toContain(".rb/init/OPERATIONS.json");
+    expect(byPath.get(".rb/init/PLAN.md")?.dependsOn).not.toContain(".rb/init/OPERATIONS.json");
+    expect(byPath.get(".rb/init/OPERATIONS.json")?.dependsOn).toContain(".rb/init/PHASES.md");
+    expect(paths.indexOf(".rb/init/PLAN.md")).toBeLessThan(paths.indexOf(".rb/init/PHASES.md"));
+    expect(paths.indexOf(".rb/init/PHASES.md")).toBeLessThan(paths.indexOf(".rb/init/OPERATIONS.json"));
+    expect(paths.at(-1)).toBe(".rb/init/source-manifest.json");
   });
 
   it("preserves a document part whose JSON string contains literal streamed line breaks", () => {
@@ -222,6 +294,27 @@ describe("provider-neutral incremental authoring", () => {
     process.env.RB_HARNESS_TEST_INCREMENTAL_CALLS = calls;
     process.env.RB_HARNESS_TEST_DOCUMENT_DEPENDENCIES = "1";
     await writeFile(resolve(project, "README.md"), "fixture\n", "utf8");
+    const bundle = await requestFixture(project, runRoot);
+    expect(bundle.documents.find((document) => document.path.endsWith("OPERATIONS.json"))?.content)
+      .toContain('"path": "src/index.js"');
+    expect((await readFile(calls, "utf8")).trim().split("\n")).toEqual([
+      "plan",
+      ".rb/init/PROJECT.md#whole",
+      ".rb/init/PHASES.md#header",
+      ".rb/init/PHASES.md#phase-01",
+      ".rb/init/OPERATIONS.json#whole",
+    ]);
+  }, 60_000);
+
+  it("normalizes a provider PHASES to OPERATIONS cycle without buying a replan", async () => {
+    await chmod(fixture, 0o755);
+    const project = await mkdtemp(resolve(tmpdir(), "rb-incremental-cyclic-dependencies-"));
+    const runRoot = resolve(project, ".rb-harness/runs/test");
+    const calls = resolve(await mkdtemp(resolve(tmpdir(), "rb-incremental-cyclic-dependency-calls-")), "calls.log");
+    process.env.RB_HARNESS_TEST_INCREMENTAL_CALLS = calls;
+    process.env.RB_HARNESS_TEST_CYCLIC_DOCUMENT_DEPENDENCIES = "1";
+    await writeFile(resolve(project, "README.md"), "fixture\n", "utf8");
+
     const bundle = await requestFixture(project, runRoot);
     expect(bundle.documents.find((document) => document.path.endsWith("OPERATIONS.json"))?.content)
       .toContain('"path": "src/index.js"');

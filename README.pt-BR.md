@@ -16,7 +16,7 @@ retomáveis em vez de exigir um pacote monolítico do modelo.
 
 ## Instalação do executável
 
-O RB Harness 0.5.17 exige Node.js 20 ou superior. No clone do repositório:
+O RB Harness 0.5.18 exige Node.js 20 ou superior. No clone do repositório:
 
 ```bash
 npm install
@@ -35,7 +35,7 @@ Confira a versão instalada:
 ```bash
 rb-harness --version
 rb-harness --ver
-# 0.5.17
+# 0.5.18
 ```
 
 Executar apenas `rb-harness` abre o assistente interativo. O splash com a
@@ -710,6 +710,11 @@ continua na primeira parte ausente. Uma execução que falhou apenas na validaç
 retoma a partir do pacote montado. Publicações interrompidas restauram a revisão
 anterior, e um lock residual sem processo vivo é recuperado automaticamente com
 mensagem explícita.
+
+O `dependsOn` de documentos representa pré-requisito de autoria, não referência
+semântica recíproca. O Harness estabelece primeiro seu DAG obrigatório e mantém
+arestas sugeridas pelo provider somente quando preservam esse DAG; assim uma
+sugestão `PHASES -> OPERATIONS -> PHASES` não interrompe a geração.
 
 Quando uma nova árvore é publicada, a anterior é movida para
 `.rb-harness/runs/<run-id>/previous-artifacts`. O Harness nunca apaga

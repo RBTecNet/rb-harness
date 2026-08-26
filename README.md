@@ -28,7 +28,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.5.17 is an executable rather than a workflow that must run inside
+RB Harness 0.5.18 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -49,7 +49,7 @@ the current shell. Verify the exact installed build with:
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.5.17
+# Both print 0.5.18
 ```
 
 Run without arguments to start the wizard:
@@ -744,6 +744,11 @@ US$ 1.84 here without publishing anything.
 - checkpoints separate interview, document plan, every accepted part, assembled
   bundle, materialization, validation, and publication, so a resume never pays
   twice for completed work.
+
+Document `dependsOn` entries express authoring prerequisites, not reciprocal
+semantic references. The Harness establishes its mandatory workflow DAG first
+and retains provider-suggested edges only when they preserve that DAG, so a
+provider cannot deadlock generation with `PHASES -> OPERATIONS -> PHASES`.
 
 The public CLI, the wizard, the dashboard, the splash, and the capybara are
 unchanged.

@@ -178,6 +178,72 @@ function codeOwnedDependencies(path: string, allPaths: readonly string[]): strin
   return [];
 }
 
+function dependencyWouldCycle(
+  target: string,
+  dependency: string,
+  dependenciesByPath: ReadonlyMap<string, ReadonlySet<string>>,
+): boolean {
+  if (target === dependency) return true;
+  const pending = [dependency];
+  const visited = new Set<string>();
+  while (pending.length) {
+    const current = pending.pop()!;
+    if (current === target) return true;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    pending.push(...(dependenciesByPath.get(current) ?? []));
+  }
+  return false;
+}
+
+/**
+ * `dependsOn` means authoring order, not a general cross-reference graph.
+ * Providers naturally describe reciprocal semantic relationships between
+ * planning documents, so treating every suggestion as write order creates
+ * cycles such as PHASES -> OPERATIONS -> PHASES. Establish the code-owned
+ * workflow DAG first, then retain provider edges only while they preserve it.
+ */
+function reconcileDocumentDependencies(documents: PlannedDocument[]): PlannedDocument[] {
+  const allPaths = documents.map((document) => document.path);
+  const knownPaths = new Set(allPaths);
+  for (const document of documents) {
+    for (const dependency of document.dependsOn) {
+      if (!knownPaths.has(dependency)) {
+        throw new DocumentSubstanceError(`planned document ${document.path} depends on missing document ${dependency}`);
+      }
+    }
+  }
+
+  const dependenciesByPath = new Map(documents.map((document) => [
+    document.path,
+    new Set(codeOwnedDependencies(document.path, allPaths)),
+  ]));
+
+  // A cycle here would be a harness defect, not provider output. Keep the
+  // closed validator as an invariant before considering any suggested edge.
+  orderDocuments(documents.map((document) => ({
+    ...document,
+    dependsOn: [...dependenciesByPath.get(document.path)!].sort(),
+  })));
+
+  const suggestions = documents.flatMap((document) => [...new Set(document.dependsOn)].map((dependency) => ({
+    target: document.path,
+    dependency,
+  }))).sort((left, right) => left.target.localeCompare(right.target) || left.dependency.localeCompare(right.dependency));
+
+  for (const { target, dependency } of suggestions) {
+    const dependencies = dependenciesByPath.get(target)!;
+    if (dependencies.has(dependency)) continue;
+    if (dependencyWouldCycle(target, dependency, dependenciesByPath)) continue;
+    dependencies.add(dependency);
+  }
+
+  return documents.map((document) => ({
+    ...document,
+    dependsOn: [...dependenciesByPath.get(document.path)!].sort(),
+  }));
+}
+
 function orderDocuments(documents: PlannedDocument[]): PlannedDocument[] {
   const byPath = new Map(documents.map((document) => [document.path, document]));
   for (const document of documents) {
@@ -256,11 +322,7 @@ export function parseDocumentPlan(output: string): DocumentPlan {
   if (value.status === "blocked" && !blocked.length) throw new Error("a blocked document plan must name the missing decision");
   if (value.status === "complete" && !documents.length) throw new Error("a complete document plan must contain documents");
   if (value.status === "complete" && blocked.length) throw new Error("a complete document plan cannot retain blockers");
-  const allPaths = documents.map((document) => document.path);
-  documents = documents.map((document) => ({
-    ...document,
-    dependsOn: [...new Set([...document.dependsOn, ...codeOwnedDependencies(document.path, allPaths)])].sort(),
-  }));
+  documents = reconcileDocumentDependencies(documents);
   documents = orderDocuments(documents);
   return { contract: DOCUMENT_PLAN_CONTRACT, status: value.status, summary, coordination, documents, blocked };
 }

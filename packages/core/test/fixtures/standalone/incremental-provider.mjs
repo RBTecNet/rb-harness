@@ -35,7 +35,8 @@ const plan = {
   blocked: [],
 };
 
-if (process.env.RB_HARNESS_TEST_DOCUMENT_DEPENDENCIES === "1") {
+if (process.env.RB_HARNESS_TEST_DOCUMENT_DEPENDENCIES === "1"
+  || process.env.RB_HARNESS_TEST_CYCLIC_DOCUMENT_DEPENDENCIES === "1") {
   // Deliberately place OPERATIONS first. The orchestrator must derive and
   // enforce PROJECT -> PHASES -> OPERATIONS rather than trusting response
   // order or asking the operations writer to rediscover another document.
@@ -44,6 +45,15 @@ if (process.env.RB_HARNESS_TEST_DOCUMENT_DEPENDENCIES === "1") {
     purpose: "Operational acceptance grounded in the final execution paths.",
     parts: [{ id: "whole", purpose: "Complete operational contract." }],
   });
+}
+
+if (process.env.RB_HARNESS_TEST_CYCLIC_DOCUMENT_DEPENDENCIES === "1") {
+  // This is the realistic provider regression: it treats a semantic reference
+  // as authoring order, while the orchestrator requires the inverse edge so
+  // OPERATIONS receives finalized PHASES authority.
+  plan.documents.find((document) => document.path.endsWith("PHASES.md")).dependsOn = [
+    ".rb/init/OPERATIONS.json",
+  ];
 }
 
 if (prompt.includes("===== EXACT OUTPUT CONTRACT =====")) {
