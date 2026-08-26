@@ -45,6 +45,7 @@ const required = [
   "skills/rb-review/references/responsive-evidence.md",
   "scripts/rb-harness.cjs",
   "scripts/rb-resolve.sh",
+  "contracts/RB-RALPH-CONTRACT.md",
   "contracts/rb-headless-init-v1.md",
   "contracts/rb-headless-interview-v1.md",
 ];
@@ -64,6 +65,32 @@ for (const path of [
 for (const path of pluginFiles.filter((value) => /\.(?:md|json|yaml|yml)$/.test(value))) {
   const source = await readFile(path, "utf8");
   assert(!source.includes("[TODO:"), `Placeholder remains in ${path}`);
+}
+
+const rootRalphContract = await readFile(resolve(root, "contracts/RB-RALPH-CONTRACT.md"), "utf8");
+const pluginRalphContract = await readFile(resolve(plugin, "contracts/RB-RALPH-CONTRACT.md"), "utf8");
+const normalizedRalphContract = rootRalphContract.replace(/\s+/g, " ");
+assert(pluginRalphContract === rootRalphContract, "Packaged RB Ralph contract differs from the root contract");
+assert(
+  rootRalphContract.includes("RB_RALPH_DECISION: <COMPLETE|RETRY|BLOCKED>"),
+  "RB Ralph manager protocol does not distinguish the decision placeholder from a literal value",
+);
+assert(
+  !rootRalphContract.includes("RB_RALPH_DECISION: COMPLETE | RETRY | BLOCKED"),
+  "RB Ralph manager protocol still publishes the ambiguous decision example",
+);
+assert(
+  rootRalphContract.includes("`COMPLETE  ` normaliza para `COMPLETE`"),
+  "RB Ralph manager protocol does not specify trailing-horizontal-whitespace normalization",
+);
+for (const invariant of [
+  "protocolo de texto plano, não Markdown",
+  "IDs de task sintética como `RBT-FINAL`",
+  "`COMPLETE extra` continua inválido",
+  "Feedback e resultados transitórios de uma chamada anterior são substituídos",
+  "nenhum evento pode citar feedback ou log já superado",
+]) {
+  assert(normalizedRalphContract.includes(invariant), `RB Ralph manager protocol omits invariant: ${invariant}`);
 }
 
 for (const skill of ["rb-init", "rb-ai-context", "rb-plan", "rb-review", "rb-evolve"]) {

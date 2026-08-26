@@ -549,9 +549,22 @@ RB_RALPH_AGENT_EXIT_CODE
 RB_RALPH_AUDIT_STATUS: COMPLETE
 RB_RALPH_CRITERION: <id> | <status> | <evidência canônica>
 RB_RALPH_FINDING: <id[,id]> | <fronteira> | <esperado> | <observado> | <evidência/reprodução>
-RB_RALPH_DECISION: COMPLETE | RETRY | BLOCKED
+RB_RALPH_DECISION: <COMPLETE|RETRY|BLOCKED>
 RB_RALPH_REASON: <motivo curto baseado em evidência>
 ```
+
+Esse bloco é um protocolo de texto plano, não Markdown. Cada chave começa na
+primeira coluna, sem marcador, indentação ou cerca de código. Chaves, IDs e
+valores enumerados não podem conter espaços horizontais antes ou depois do
+valor; cada registro termina imediatamente antes de `LF` ou `CRLF`. O produtor
+emite exatamente um dos valores entre `<>`, nunca a expressão de alternativas
+literal.
+
+Antes de emitir a decisão, o gerente deve fazer uma conferência mecânica contra
+a `REQUIRED ACCEPTANCE MATRIX` recebida: copiar cada ID, inclusive IDs de task
+sintética como `RBT-FINAL`, emitir exatamente uma linha
+`RB_RALPH_CRITERION` por ID e confirmar que a contagem e o conjunto de IDs são
+idênticos. Critérios filhos aprovados não substituem a linha da task pai.
 
 Status permitidos para cada linha da matriz:
 
@@ -571,6 +584,15 @@ Em `--manager-audit exhaustive`, o gerente deve:
 - em `RETRY`, devolver ao menos um finding;
 - em `COMPLETE`, deixar todas as linhas em `PASS` ou `NOT_APPLICABLE`;
 - auditar a matriz inteira antes da decisão, sem parar na primeira falha.
+
+O consumidor deve aceitar `LF` e `CRLF`, remover `CR` e espaços horizontais nas
+duas extremidades dos valores antes da validação e então exigir igualdade exata
+do token normalizado. Por exemplo, `COMPLETE  ` normaliza para `COMPLETE`, mas
+`COMPLETE extra` continua inválido. Quando o relatório estruturado da chamada
+atual for válido, ele é a autoridade única para status, decisão, razão e matriz.
+Feedback e resultados transitórios de uma chamada anterior são substituídos no
+início da chamada seguinte; uma resposta atual válida encerra imediatamente o
+retry do gerente e nenhum evento pode citar feedback ou log já superado.
 
 Findings são identificados pela combinação normalizada de critérios, fronteira
 e estado esperado. Eles permanecem abertos entre retries. Um gerente não pode
