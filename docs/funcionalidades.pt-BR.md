@@ -1,6 +1,6 @@
 # RB Harness — funcionalidades e exemplos de uso
 
-Referência completa dos comandos do RB Harness `0.5.12`, com um exemplo de uso
+Referência completa dos comandos do RB Harness `0.5.13`, com um exemplo de uso
 para cada funcionalidade. Todo comando aqui foi extraído da própria CLI
 instalada; nada é aspiracional.
 
@@ -42,7 +42,7 @@ Verifique a instalação:
 
 ```bash
 rb-harness --version
-# 0.5.12
+# 0.5.13
 ```
 
 ---

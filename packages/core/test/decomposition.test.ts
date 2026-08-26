@@ -67,14 +67,18 @@ describe("task decomposition gate", () => {
     expect(assessDecomposition(document(source))).toEqual([]);
   });
 
-  it("rejects a task that carries a whole feature's requirements", () => {
-    const covers = Array.from(
-      { length: HARNESS_BUDGET.decomposition.maxCoveredRequirements + 1 },
-      (_value, index) => `RF-00${index + 1}`,
-    ).join(", ");
-    const issues = assessDecomposition(document(plan([task({ id: "T001", covers }), task({ id: "T002", covers: "RF-009" })])));
-    expect(issues.map((issue) => issue.code)).toContain("execution.task.covers-too-many-requirements");
-    expect(issues[0]?.message).toContain("T001");
+  /**
+   * `Covers` records traceability, not size. Two observed tasks proved it: one
+   * added a single `npm run quality` script to `package.json` and legitimately
+   * covered seven requirements because the script proves them; another was a
+   * one-file frontend flow test covering four. Gating on the count rejected
+   * both, and rewarded listing fewer requirements — degrading the coverage the
+   * requirement-coverage check depends on.
+   */
+  it("never judges size by how many requirements a task traces", () => {
+    const many = "RF-001, RF-004, RF-005, RNF-001, RNF-004, CT-001, UI-001";
+    const qualityGate = task({ id: "T001", covers: many, scope: "`package.json`", criteria: 3 });
+    expect(assessDecomposition(document(plan([qualityGate, task({ id: "T002", covers: "RF-002" })])))).toEqual([]);
   });
 
   it("rejects a task with more acceptance criteria than one bounded change proves", () => {
@@ -94,13 +98,37 @@ describe("task decomposition gate", () => {
     expect(issues.map((issue) => issue.code)).toContain("execution.task.scope-too-broad");
   });
 
-  it("rejects a phase that never decomposed its feature", () => {
-    const covers = Array.from(
-      { length: HARNESS_BUDGET.decomposition.maxSingleTaskPhaseRequirements + 1 },
-      (_value, index) => `RF-00${index + 1}`,
-    ).join(", ");
-    const issues = assessDecomposition(document(plan([task({ id: "T001", covers })])));
-    expect(issues.map((issue) => issue.code)).toContain("execution.phase.undecomposed-feature");
+  const substantial = HARNESS_BUDGET.decomposition.undecomposedFeatureCriteria;
+
+  it("rejects a lone area-scoped task that also proves substantial work", () => {
+    for (const scope of ["`src/`", "`src/**`", "`src`, `tests`"]) {
+      const issues = assessDecomposition(document(plan([task({ id: "T001", scope, criteria: substantial })])));
+      expect(issues.map((issue) => issue.code), scope).toContain("execution.phase.undecomposed-feature");
+    }
+  });
+
+  /**
+   * Any two of the three signals describe a perfectly good small phase. The
+   * contract's own minimal example is one task scoped to `src/`, `tests/` with
+   * a single criterion, and an earlier version of this gate rejected it.
+   */
+  it("accepts a lone area-scoped task that is genuinely small", () => {
+    expect(assessDecomposition(document(plan([
+      task({ id: "T001", scope: "`src/`, `tests/`", criteria: substantial - 1 }),
+    ])))).toEqual([]);
+  });
+
+  it("accepts a lone task that names the files it changes", () => {
+    expect(assessDecomposition(document(plan([
+      task({ id: "T001", scope: "`src/thing.ts`, `tests/thing.test.ts`", criteria: substantial }),
+    ])))).toEqual([]);
+  });
+
+  it("accepts a broad area once it is split across tasks", () => {
+    expect(assessDecomposition(document(plan([
+      task({ id: "T001", scope: "`src/`", criteria: substantial }),
+      task({ id: "T002", scope: "`tests/`", covers: "RF-002", criteria: substantial }),
+    ])))).toEqual([]);
   });
 
   it("rejects a phase that is no longer one observable outcome", () => {
@@ -135,15 +163,12 @@ async function stagedProject(source: string): Promise<string> {
 
 describe("the decomposition gate reaches both boundaries", () => {
   it("fails staged validation with a repairable structural error", async () => {
-    const covers = Array.from(
-      { length: HARNESS_BUDGET.decomposition.maxCoveredRequirements + 1 },
-      (_value, index) => `RF-00${index + 1}`,
-    ).join(", ");
-    const staging = await stagedProject(plan([task({ id: "T001", covers }), task({ id: "T002", covers: "RF-009" })]));
+    const criteria = HARNESS_BUDGET.decomposition.maxAcceptanceCriteria + 1;
+    const staging = await stagedProject(plan([task({ id: "T001", criteria }), task({ id: "T002", covers: "RF-002" })]));
     const validation = await validateStagedTree(staging, "init");
     expect(validation.valid).toBe(false);
     expect(validation.repairable).toBe(true);
-    const error = validation.errors.find((entry) => entry.code === "execution.task.covers-too-many-requirements");
+    const error = validation.errors.find((entry) => entry.code === "execution.task.too-many-acceptance-criteria");
     expect(error?.path).toBe(".rb/init/PHASES.md");
   });
 
@@ -154,11 +179,8 @@ describe("the decomposition gate reaches both boundaries", () => {
   });
 
   it("blocks artifact verification before RB Ralph is ever started", async () => {
-    const covers = Array.from(
-      { length: HARNESS_BUDGET.decomposition.maxCoveredRequirements + 1 },
-      (_value, index) => `RF-00${index + 1}`,
-    ).join(", ");
-    const project = await stagedProject(plan([task({ id: "T001", covers }), task({ id: "T002", covers: "RF-009" })]));
+    const criteria = HARNESS_BUDGET.decomposition.maxAcceptanceCriteria + 1;
+    const project = await stagedProject(plan([task({ id: "T001", criteria }), task({ id: "T002", covers: "RF-002" })]));
     // Publishing the manifest is what verification reads; staged validation syncs it.
     await validateStagedTree(project, "init");
     const report = await verifyArtifacts({ projectRoot: project, artifactDirectory: ".rb" });

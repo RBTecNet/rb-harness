@@ -16,7 +16,7 @@ retomáveis em vez de exigir um pacote monolítico do modelo.
 
 ## Instalação do executável
 
-O RB Harness 0.5.12 exige Node.js 20 ou superior. No clone do repositório:
+O RB Harness 0.5.13 exige Node.js 20 ou superior. No clone do repositório:
 
 ```bash
 npm install
@@ -35,7 +35,7 @@ Confira a versão instalada:
 ```bash
 rb-harness --version
 rb-harness --ver
-# 0.5.12
+# 0.5.13
 ```
 
 Executar apenas `rb-harness` abre o assistente interativo. O splash com a
@@ -142,10 +142,14 @@ task, então uma task que carrega uma feature inteira precisa ser rederivada do
 zero dentro de uma única janela — exatamente onde um executor esquece um
 requisito ou inventa outro.
 
-Os tetos são lidos do que o próprio documento declara: uma task cobre no máximo
-3 IDs de requisito, declara no máximo 6 critérios de aceitação e 8 caminhos de
-escopo; uma fase tem no máximo 12 tasks, e uma fase de task única cobrindo mais
-de 2 requisitos simplesmente não decompôs a feature. Um plano que viola qualquer
+Os tetos são lidos do que o próprio documento declara: uma task declara no
+máximo 6 critérios de aceitação e 8 caminhos de escopo, e uma fase tem no máximo
+12 tasks. Uma task solitária só é recusada quando três sinais coincidem: ela é a
+única task da fase, todo o seu escopo nomeia áreas em vez de arquivos, e ela
+prova 4 ou mais critérios — dois quaisquer desses descrevem uma fase pequena
+perfeitamente legítima. `Covers` deliberadamente não é um teto: ele registra
+rastreabilidade, então uma task de um arquivo só pode legitimamente provar vários
+requisitos, e limitar a contagem apenas ensinava o escritor a listar menos. Um plano que viola qualquer
 teto é erro estrutural reparável antes da publicação e blocker em
 `rb-harness artifacts verify` — nunca uma surpresa descoberta por um executor
 travado.

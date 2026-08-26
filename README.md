@@ -28,7 +28,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.5.12 is an executable rather than a workflow that must run inside
+RB Harness 0.5.13 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -49,7 +49,7 @@ the current shell. Verify the exact installed build with:
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.5.12
+# Both print 0.5.13
 ```
 
 Run without arguments to start the wizard:
@@ -260,9 +260,13 @@ An `rb-execution/v1` plan is also validated for decomposition, not only for
 grammar. RB Ralph runs one ephemeral, context-free call per task, so a task
 carrying a whole feature has to be re-derived from nothing inside a single
 window. Ceilings are read from what the document itself declares — a task
-covers at most 3 requirement IDs, declares at most 6 acceptance criteria and 8
-scope paths; a phase holds at most 12 tasks, and a single-task phase covering
-more than 2 requirements never decomposed its feature at all. A plan that breaks
+declares at most 6 acceptance criteria and 8 scope paths, and a phase holds at
+most 12 tasks. A lone task is refused only when three signals coincide: it is
+the phase's only task, its whole scope names areas rather than files, and it
+proves 4 or more criteria — any two of those describe a perfectly good small
+phase. `Covers` is deliberately not a ceiling: it records traceability, so a
+one-file quality-gate task may legitimately prove many requirements, and gating
+on the count only taught the writer to list fewer. A plan that breaks
 one is a repairable structural error before publication and a blocker in
 `rb-harness artifacts verify`, never a surprise discovered by a stalled
 executor.

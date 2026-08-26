@@ -256,32 +256,22 @@ describe("an oversized segment is re-authored, not re-formatted", () => {
  * them. A message that says only "split it" invites an in-place edit that fails
  * the same gate again.
  */
-function planWithTask(covers: string): string {
-  return PLAN.replace("  - **Covers:** RF-001", `  - **Covers:** ${covers}`)
-    .replace("- [ ] T001 —", "- [ ] T002 —")
-    .replace("AC-T001-01", "AC-T002-01")
-    .replace("## Phase 1: Deliver the behavior", "## Phase 1: Deliver the behavior")
-    + `
-- [ ] T003 — Second bounded task
-  - **Scope:** \`src/other.ts\`
-  - **Change:** Implement the other behavior.
-  - **Covers:** RF-009
-  - **Depends on:** none
-  - **Parallel safe:** false
-  - **Acceptance criteria:**
-    - AC-T003-01: The other operation returns status 200.
-  - **Validation:**
-    - \`npm test\`
-  - **Expected evidence:** Source changes and passing output.
-`;
-}
-
 describe("a decomposition finding explains how to land the split", () => {
   it("names the renumbering a split forces", () => {
-    const covers = "RF-001, RF-002, RF-003, RF-004";
-    const source = planWithTask(covers);
+    // A lone task scoping whole areas while proving substantial work.
+    const source = PLAN
+      .replace("  - **Scope:** `src/thing.ts`", "  - **Scope:** `src/`, `tests/`")
+      .replace(
+        "    - AC-T001-01: The operation returns status 200 and stores one record.",
+        [
+          "    - AC-T001-01: The operation returns status 200 and stores one record.",
+          "    - AC-T001-02: An unknown identifier returns status 404.",
+          "    - AC-T001-03: A malformed body returns status 422.",
+          "    - AC-T001-04: A duplicate request stores exactly one record.",
+        ].join("\n"),
+      );
     const issues = assessDecomposition(validateExecutionMarkdown(source).document!);
-    const finding = issues.find((entry) => entry.code === "execution.task.covers-too-many-requirements");
+    const finding = issues.find((entry) => entry.code === "execution.phase.undecomposed-feature");
     expect(finding?.message).toContain("one global ascending sequence");
     expect(finding?.message).toContain("Re-emit the whole document");
     expect(finding?.message).toContain("covered by exactly one");

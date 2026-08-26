@@ -7,10 +7,17 @@
  * re-derived from nothing inside a single window, which is where an executor
  * drops earlier requirements or invents them.
  *
- * Every check here reads a value the document itself declares — covered
- * requirement IDs, acceptance criteria, scope tokens, task counts. None of
- * them judges prose quality, estimates effort, or asks a model anything, so a
- * plan either violates a stated ceiling or it does not.
+ * Every check here reads a value the document itself declares — acceptance
+ * criteria, scope tokens, task counts. None of them judges prose quality,
+ * estimates effort, or asks a model anything, so a plan either violates a
+ * stated ceiling or it does not.
+ *
+ * `Covers` is deliberately not one of those values. It records traceability,
+ * not size: an observed task that added a single `npm run quality` script to
+ * `package.json` legitimately covered seven requirements because the script
+ * proves them, and a one-file frontend flow test covered four. Gating on the
+ * count rejected both, and worse, it rewarded listing fewer requirements —
+ * degrading the very coverage the requirement-coverage check depends on.
  */
 
 import { HARNESS_BUDGET } from "./harness-budget.js";
@@ -41,23 +48,23 @@ const SPLIT_INSTRUCTION =
   + "and every `Depends on` and `AC-` prefix that refers to them. Re-emit the whole document with the new numbering, keep each "
   + "requirement covered by exactly one of the resulting tasks, and give each new task its own Scope, criteria, and validation.";
 
+/**
+ * A scope token that names a whole area rather than the files it will change.
+ *
+ * `src/` or `src/**` is what "implement the feature" looks like in a Scope
+ * field; `src/server/routes.ts` is what a bounded task looks like.
+ */
+function wholeAreaToken(token: string): boolean {
+  return /(?:^|\/)\*{1,2}$/.test(token) || token.endsWith("/") || !/\.[A-Za-z0-9]+$/.test(token);
+}
+
 function issue(code: string, message: string, line: number): ValidationIssue {
   return { code, message, severity: "error", line };
 }
 
 function taskIssues(task: Task): ValidationIssue[] {
   const found: ValidationIssue[] = [];
-  const covered = coveredRequirementIds(task);
   const { decomposition } = HARNESS_BUDGET;
-  if (covered.length > decomposition.maxCoveredRequirements) {
-    found.push(issue(
-      "execution.task.covers-too-many-requirements",
-      `Task ${task.id} carries ${covered.length} requirements (${covered.join(", ")}); a task RB Ralph runs in one context-free call `
-      + `covers at most ${decomposition.maxCoveredRequirements}. Split it into bounded tasks that each own a smaller observable change. `
-      + SPLIT_INSTRUCTION,
-      task.line,
-    ));
-  }
   if (task.acceptanceCriteria.length > decomposition.maxAcceptanceCriteria) {
     found.push(issue(
       "execution.task.too-many-acceptance-criteria",
@@ -89,17 +96,23 @@ function phaseIssues(phase: Phase): ValidationIssue[] {
       phase.line,
     ));
   }
-  // A phase whose single task carries several requirements did not decompose
-  // the feature at all: the executor receives the feature, not a step.
+  // "Implement the whole feature" has three signals at once: the phase has a
+  // single task, that task claims an area rather than files, and it carries
+  // enough criteria to be substantial work. Any two of them describe a
+  // perfectly good small phase — the contract's own minimal example is one task
+  // scoped to `src/`, `tests/` with a single criterion — so all three are
+  // required before the run is stopped.
   if (phase.tasks.length === 1) {
     const only = phase.tasks[0]!;
-    const covered = coveredRequirementIds(only);
-    if (covered.length > decomposition.maxSingleTaskPhaseRequirements) {
+    const tokens = scopePathTokens(only);
+    const areas = tokens.filter(wholeAreaToken);
+    const substantial = only.acceptanceCriteria.length >= decomposition.undecomposedFeatureCriteria;
+    if (tokens.length > 0 && areas.length === tokens.length && substantial) {
       found.push(issue(
         "execution.phase.undecomposed-feature",
-        `Phase ${phase.id} holds one task (${only.id}) covering ${covered.length} requirements (${covered.join(", ")}). `
-        + "That hands a whole feature to a single context-free executor call. Break the phase into bounded tasks before publishing it. "
-        + SPLIT_INSTRUCTION,
+        `Phase ${phase.id} holds one task (${only.id}) that proves ${only.acceptanceCriteria.length} criteria while scoping whole `
+        + `areas rather than files: ${areas.join(", ")}. That hands a whole feature to a single context-free executor call. `
+        + "Break the phase into bounded tasks that each name the files they change. " + SPLIT_INSTRUCTION,
         phase.line,
       ));
     }

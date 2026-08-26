@@ -64,16 +64,26 @@ export const HARNESS_BUDGET = {
    * observable in the document itself; they never judge prose quality.
    */
   decomposition: {
-    /** Requirement IDs one task may carry in `Covers`. */
-    maxCoveredRequirements: 3,
-    /** Acceptance criteria one task may declare. */
+    /**
+     * Acceptance criteria one task may declare.
+     *
+     * A proxy for how much work the task carries, unlike `Covers`, which
+     * records traceability: a one-file task can legitimately prove many
+     * requirements, so its count says nothing about size.
+     */
     maxAcceptanceCriteria: 6,
     /** Scope path tokens one task may declare. */
     maxScopePaths: 8,
     /** Tasks one phase may declare before it stops being one observable outcome. */
     maxTasksPerPhase: 12,
-    /** Requirement IDs a single-task phase may carry before it is a whole feature. */
-    maxSingleTaskPhaseRequirements: 2,
+    /**
+     * Criteria that make a lone area-scoped task "the whole feature".
+     *
+     * Below this, a single task scoped to a directory is just a small phase —
+     * the contract's own minimal example is exactly that — so the undecomposed
+     * gate needs this third signal before it stops a run.
+     */
+    undecomposedFeatureCriteria: 4,
   },
   /** Representation-only recovery after one semantic response. */
   formatting: {

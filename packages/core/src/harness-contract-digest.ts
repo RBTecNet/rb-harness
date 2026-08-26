@@ -116,8 +116,9 @@ The consumer runs **one ephemeral, context-free call per task**: the executor se
 
 So decompose every capability into the smallest steps that are each independently observable:
 
-- A task covers at most ${HARNESS_BUDGET.decomposition.maxCoveredRequirements} requirement IDs in \`Covers\`, declares at most ${HARNESS_BUDGET.decomposition.maxAcceptanceCriteria} acceptance criteria, and lists at most ${HARNESS_BUDGET.decomposition.maxScopePaths} scope paths.
-- A phase holds at most ${HARNESS_BUDGET.decomposition.maxTasksPerPhase} tasks, and a phase whose single task covers more than ${HARNESS_BUDGET.decomposition.maxSingleTaskPhaseRequirements} requirements is a feature that was never decomposed.
+- A task declares at most ${HARNESS_BUDGET.decomposition.maxAcceptanceCriteria} acceptance criteria and lists at most ${HARNESS_BUDGET.decomposition.maxScopePaths} scope paths.
+- A phase holds at most ${HARNESS_BUDGET.decomposition.maxTasksPerPhase} tasks, and a phase whose single task scopes a whole area (\`src/\`, \`src/**\`) instead of naming files is a feature that was never decomposed.
+- \`Covers\` is traceability, not size. List every requirement the task genuinely proves, however many that is; a one-file quality-gate task may legitimately cover several. Never trim \`Covers\` to look smaller.
 - Never write a task such as "implement the X feature", "build the module", or "wire everything together". Name the one behavior it makes observable — a data shape, an operation, a boundary, one error path, one regression proof.
 - Split along boundaries the code already has: contract before use, storage before behavior, behavior before interface, happy path before each error path. Order them with \`Depends on\` instead of merging them.
 - More small tasks is the correct outcome. A plan with many bounded tasks is cheaper and safer to execute than a plan with a few large ones, and it never costs a completeness claim: every requirement must still be covered by some task.
