@@ -38,3 +38,9 @@ and regression boundary. Do not hide executable gates in manual prose;
 phases may validate OPERATIONS.json but never require its future RBF execution
 to pass. Preserve exact standard/dialect matrices and add independent hostile
 schema/secret cases when those are part of the finding.
+
+Visual remediation tasks use a grounded one-shot browser/visual command or
+`human:`; `manual:` and presence-only/fake-DOM checks are insufficient. Require
+a negative corruption criterion, durable screenshots at exact viewports,
+geometry/computed-style measurements, and before/after evidence for changed
+visual state.

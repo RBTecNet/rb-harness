@@ -130,6 +130,30 @@ for (const invariant of [
   );
 }
 
+const visualEvidenceConsumers = [
+  "references/execution-template.md",
+  "references/operational-template.md",
+  "skills/rb-init/SKILL.md",
+  "skills/rb-plan/SKILL.md",
+  "skills/rb-evolve/SKILL.md",
+  "skills/rb-review/SKILL.md",
+  "agents/project-documenter.md",
+  "agents/planner.md",
+  "agents/evolve-planner.md",
+  "agents/review-planner.md",
+];
+for (const path of visualEvidenceConsumers) {
+  const source = (await readFile(resolve(plugin, path), "utf8")).replace(/\s+/g, " ");
+  for (const invariant of ["human:", "negative", "screenshot"]) {
+    assert(source.toLowerCase().includes(invariant), `Visual evidence policy omits ${invariant} in ${path}`);
+  }
+  assert(/geometry|geometria|bounding[- ]box/i.test(source), `Visual evidence policy omits geometry in ${path}`);
+}
+const executionContract = await readFile(resolve(plugin, "contracts/rb-execution-v1.md"), "utf8");
+for (const invariant of ["visual acceptance", "exact numeric viewport", "geometry/computed-style", "fake DOMs"]) {
+  assert(executionContract.includes(invariant), `Execution contract omits visual invariant: ${invariant}`);
+}
+
 const reviewCommand = await readFile(resolve(plugin, "commands/review.md"), "utf8");
 const reviewSkill = await readFile(resolve(plugin, "skills/rb-review/SKILL.md"), "utf8");
 const reviewPlanner = await readFile(resolve(plugin, "agents/review-planner.md"), "utf8");

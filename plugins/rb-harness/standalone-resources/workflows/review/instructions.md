@@ -124,6 +124,10 @@ depth, not cross-boundary evidence needed to understand a critical journey.
    For responsive findings, require a falsifiable before/after check at the
    affected narrow and wide layout states, exercise the complete affected
    surface, and validate usable geometry rather than presence alone.
+   The resulting execution task must satisfy the shared visual evidence
+   contract: executable browser/visual proof or `human:`, durable screenshots
+   at exact viewports, geometry/computed-style measurements, and a negative
+   corruption criterion. `manual:` is not completion proof for rendered UI.
 4. Emit valid `rb-execution/v1` and conditional `rb-operational/v1`, validate
    both, sync the manifest, and validate the tree. Use `BLOCKED` rather than
    inventing a security, product, or design decision. Audit selected-finding

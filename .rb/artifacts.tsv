@@ -23,6 +23,17 @@ evolutions-go-plan-convergence-preservation	evolution-document	ready		.rb/evolut
 evolutions-go-plan-convergence-regression-matrix	regression-specification	ready		.rb/evolutions/go-plan-convergence/REGRESSION_MATRIX.md	01dea413864333faeb6fbc82660ca0986ee1331f462890ae3e2a6de0e36294f3
 evolutions-go-plan-convergence-source-manifest	evolution-document	ready		.rb/evolutions/go-plan-convergence/source-manifest.json	228e607b595cf7586de7034bcae46ff5d1c9bb039d41d903fc552533d5ddad1b
 evolutions-go-plan-convergence-to-be	evolution-document	ready		.rb/evolutions/go-plan-convergence/TO_BE.md	2a755ca3ba5ab2ddd9eeae068e56b9468f1153fcf6e2ae016b96640562a17856
+evolutions-visual-acceptance-evidence-as-is	evolution-document	ready		.rb/evolutions/visual-acceptance-evidence/AS_IS.md	c0cb85c0f29a3e3208806ec227fc5e5c34ef2f7437e0d470c836e1b6fdaf2c36
+evolutions-visual-acceptance-evidence-change-request	request	ready		.rb/evolutions/visual-acceptance-evidence/CHANGE_REQUEST.md	666075c35e98e2f0c2d28a9e1d617bd626eb08d26312e8657d866a81f272d419
+evolutions-visual-acceptance-evidence-impact	evolution-document	ready		.rb/evolutions/visual-acceptance-evidence/IMPACT.md	62ee50ab5306200b5c7e75855aea5363eede1ba8aa7f5d18f65b6c9d8670fe46
+evolutions-visual-acceptance-evidence-migration	evolution-document	ready		.rb/evolutions/visual-acceptance-evidence/MIGRATION.md	33aaf096073ff566e61769cf59dedb7eb3bf0412a74b105c9ee9450054788f4d
+evolutions-visual-acceptance-evidence-operations	operational-verification	ready	rb-operational/v1	.rb/evolutions/visual-acceptance-evidence/OPERATIONS.json	4d9c2815197c22905df79b899ed70d565840c55c042b387acfb6e4db682419e0
+evolution-visual-acceptance-phases	execution-plan	ready	rb-execution/v1	.rb/evolutions/visual-acceptance-evidence/PHASES.md	c0511967373ccca9259ee24867f8c2d5cf26bfcc5a40e789224237711f4b3faa
+evolutions-visual-acceptance-evidence-plan	implementation-plan	ready		.rb/evolutions/visual-acceptance-evidence/PLAN.md	87e7731e9183a4f84a5f6615e1087f542d40c9b197e3969e1be4bd1de0532a99
+evolutions-visual-acceptance-evidence-preservation	evolution-document	ready		.rb/evolutions/visual-acceptance-evidence/PRESERVATION.md	4be8d3fa448cf8887ca84754215fd28c0e2dd6e117ec2720e6dd5df99a9bfae2
+evolutions-visual-acceptance-evidence-regression-matrix	regression-specification	ready		.rb/evolutions/visual-acceptance-evidence/REGRESSION_MATRIX.md	d4881e2c69e3eeea407d33cd668552941e30da07da06f4bc8837b4ce9af3c7bd
+evolutions-visual-acceptance-evidence-source-manifest	evolution-document	ready		.rb/evolutions/visual-acceptance-evidence/source-manifest.json	d084602da0f5d0edc389c09c98200f7505a0a8816786c9d2c4c1c6e424589683
+evolutions-visual-acceptance-evidence-to-be	evolution-document	ready		.rb/evolutions/visual-acceptance-evidence/TO_BE.md	b1ec33818a6759f04889b762841888adce940c583e85af4cf7a06e1bf16143f1
 reviews-rb-harness-2026-08-26-baseline	review-baseline	ready		.rb/reviews/rb-harness-2026-08-26/BASELINE.json	5d77cf421ead7f258f661f5c346cd491c822e76faf139809cdac44be7db76bdf
 reviews-rb-harness-2026-08-26-findings	review-findings	ready		.rb/reviews/rb-harness-2026-08-26/FINDINGS.md	825d13fc68f45943c49f245c9af1c603e2b3245b78bdbf473efc2fac3dd5c127
 reviews-rb-harness-2026-08-26-journeys	review-document	ready		.rb/reviews/rb-harness-2026-08-26/JOURNEYS.md	8a660086952b87af210694eefd2d30775cd0c2ad27277ea96e6dc8f9976fd9ee

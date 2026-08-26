@@ -38,6 +38,14 @@ as a direct prompt for any capable coding LLM.
 14. Identical command text declared by multiple tasks is one executable
     validation with multiple task owners. A runner may deduplicate it while
     preserving every owner in evidence.
+15. A task with visual acceptance (visible/rendered/visual/layout/aligned/
+    responsive/viewport/screen/animation semantics) cannot use `manual:` as
+    completion proof. It must declare a one-shot browser/visual command or a
+    `human:` gate. It also includes a negative visual corruption criterion and
+    names durable screenshot evidence at an exact numeric viewport plus
+    geometry/computed-style measurements. Interaction-driven visual state
+    requires initial/before and resulting/after evidence. DOM/selector presence,
+    syntax checks, fake DOMs, and generic unit commands are insufficient.
 
 ## Execution neutrality
 

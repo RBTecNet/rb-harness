@@ -1,0 +1,52 @@
+{
+  "contract": "rb-operational/v1",
+  "cleanRoom": {
+    "exclude": ["node_modules", "packages/core/dist", "coverage", ".rb-harness"]
+  },
+  "environment": {
+    "inherit": [],
+    "set": {}
+  },
+  "scenarios": [
+    {
+      "id": "visual-plan-contract-gate",
+      "title": "Accept a safe plan and reject incident-shaped manual visual proof",
+      "platforms": ["linux", "darwin", "win32"],
+      "steps": [
+        {
+          "id": "install",
+          "kind": "command",
+          "command": { "argv": ["npm", "ci"] },
+          "expect": { "exitCode": 0 }
+        },
+        {
+          "id": "build-cli",
+          "kind": "command",
+          "command": {
+            "argv": ["npm", "run", "build", "--workspace", "@rb-harness/core"]
+          },
+          "expect": { "exitCode": 0 }
+        },
+        {
+          "id": "accept-nonvisual-plan",
+          "kind": "command",
+          "command": {
+            "argv": ["node", "packages/core/dist/cli.js", "--no-splash", "contract", "validate", "tests/fixtures/execution/valid/minimal/PHASES.md"]
+          },
+          "expect": { "exitCode": 0, "stdoutIncludes": ["OK"] }
+        },
+        {
+          "id": "reject-manual-visual-plan",
+          "kind": "command",
+          "command": {
+            "argv": ["node", "packages/core/dist/cli.js", "--no-splash", "contract", "validate", "tests/fixtures/execution/invalid/visual-manual/PHASES.md"]
+          },
+          "expect": {
+            "exitCode": 1,
+            "stdoutIncludes": ["task.validation.visual-manual", "task.validation.visual-unproven"]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -52,6 +52,14 @@ CI, or RB Ralph can execute it.
   execute a public behavior.
 - Service/API/web: start the documented process, wait through its actual
   protocol, probe a user-visible workflow, and terminate it.
+- Browser UI: use repository-owned browser automation at a declared numeric
+  viewport. Persist screenshots for the initial state and every materially
+  changed state, assert computed style and positive-area bounding boxes for
+  essential elements, and assert their intersection with the relevant
+  container and viewport. Selector presence or logical state changes alone are
+  insufficient. Add a file step for each durable screenshot when the public
+  scenario can honestly produce it; otherwise keep the criterion behind a
+  `human:` gate in PHASES instead of fabricating an operational pass.
 - Plugin/package: install into a representative disposable host and prove it
   loads and exposes the documented capability.
 - Job/worker/firmware/data product: exercise the supported trigger and verify
@@ -99,6 +107,16 @@ Do not encode a visual/manual claim as an automated pass. Keep genuinely
 manual acceptance criteria in SPEC/PLAN and call out the automation gap. An
 invalid or fictitious `OPERATIONS.json` is worse than omitting it and reporting
 the gap.
+
+For visual workflows, the durable evidence contract includes target revision,
+exact viewport, route/journey and state, screenshot paths, console errors,
+computed-style checks, and bounding-box/intersection measurements. Interactive
+proof preserves before and after screenshots. Include negative checks for
+source CSS/JavaScript exposed as text and essential elements hidden, clipped,
+overlapping, outside the viewport, or with zero area. If the product has no
+grounded executable browser entrypoint/tooling yet, omit the visual scenario
+and emit `human:` in PHASES so completion pauses rather than silently degrading
+to structural DOM proof.
 
 When a scenario crosses an untrusted or secret-bearing boundary, prefer a local
 fake/stub provider and a unique non-production sentinel. Force representative

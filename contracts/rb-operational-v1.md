@@ -13,6 +13,10 @@ O arquivo recomendado é `OPERATIONS.json`, ao lado de `PHASES.md`. O RB Ralph t
 - O ambiente é mínimo. Somente variáveis listadas em `environment.inherit` são herdadas além das variáveis básicas do sistema.
 - `${RB_VERIFY_ROOT}` aponta para a cópia e `${RB_VERIFY_PORT}` oferece uma porta local temporária.
 - O contrato deve exercitar fronteiras reais. Testes que apenas repetem mocks internos não constituem aceitação operacional.
+- Aceitação visual exercita um renderer real em viewport numérica declarada,
+  persiste screenshots, mede estilo computado e geometria positiva/interseção
+  dos elementos essenciais e cobre controles negativos como conteúdo CSS/JS
+  exposto, elementos ocultos, cortados, sobrepostos ou fora da viewport.
 
 ## Tipos de passo
 
@@ -70,4 +74,10 @@ nativa de vários sistemas exige runners correspondentes, CI multiplataforma,
 emulador ou outra evidência real declarada; uma execução Linux não finge ter
 aberto uma janela Windows ou macOS.
 
-Validação manual ou visual que não possa ser automatizada continua documentada em `SPEC.md`/`PLAN.md`. Ela não deve ser fingida como prova automática: o gerente precisa apontar a pendência ou usar evidência/automação adequada à plataforma.
+Validação visual que não possa ser automatizada continua documentada em
+`SPEC.md`/`PLAN.md` e usa `human:` em `PHASES.md`, produzindo uma pausa explícita
+em vez de `PASS`. Uma instrução `manual:`, presença de seletores, mudança de
+estado lógico ou screenshot sem viewport/geometria não é resultado visual. A
+prova automatizada preserva screenshots antes/depois quando há interação e usa
+passos `file` para tornar os artefatos duráveis quando o cenário pode produzi-los
+honestamente.

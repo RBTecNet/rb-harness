@@ -62,6 +62,11 @@ isolated from existing behavior.
     clean-room pass. Audit exact standard/dialect matrices, independent hostile
     schema/secret cases, explicit quality commands, validation capability, and
     lossless RIGID/preservation/regression traceability before returning.
+    Visual/UI deltas and preserved visual paths use grounded one-shot
+    browser/visual automation or `human:`, never `manual:` or fake-DOM
+    presence. Require a negative corruption regression, exact-viewport
+    screenshots and geometry/computed-style evidence, plus before/after proof
+    for changed visible state.
 11. Run, fix, and repeat until green:
     - `contract validate .rb/evolutions/<slug>/PHASES.md`
     - `operations validate .rb/evolutions/<slug>/OPERATIONS.json` when emitted

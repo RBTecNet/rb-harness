@@ -33,6 +33,12 @@ schema matters, require the exact dialect and complete positive/negative
 matrix, including whole-token consumption. If secrets cross a public boundary,
 include exact-value sentinel probes through success and failure paths.
 
+For visible/rendered/layout/responsive/animated UI, never emit `manual:` or
+presence-only/fake-DOM proof. Use a grounded one-shot browser/visual command or
+`human:`. Add a negative corruption criterion and require durable screenshots
+at an exact numeric viewport plus geometry/computed-style measurements;
+interactive visual state preserves before and after evidence.
+
 Implementation phases may create and validate OPERATIONS.json, but only the
 post-phase RBF audit executes it in a clean room. Never make an earlier phase
 depend on that future result. Derive scenarios for materially distinct public

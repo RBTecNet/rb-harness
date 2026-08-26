@@ -73,6 +73,12 @@ is supplied in the prompt as `rb-harness-contract-digest/v1`.
    commands separately, classify unavailable proof as external `human`
    evidence, and require exact standard/dialect matrices plus hostile
    schema/secret cases when relevant.
+   Visual/UI behavior uses a real one-shot browser/visual command with durable
+   numeric-viewport screenshots and geometry/computed-style assertions. When
+   that cannot be grounded, use `human:`; `manual:`, fake DOM, selector
+   presence, or a generic test command cannot prove visibility. Carry a
+   negative visual corruption criterion and before/after evidence for changed
+   visible state.
 10. Derive phases from a dependency DAG. Decompose every capability down to
     tasks a fresh, context-free executor can finish in one call: name the single
     behavior each task makes observable, order them with `Depends on`, and never

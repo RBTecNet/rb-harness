@@ -5,7 +5,7 @@
     "name": "rb-harness"
   },
   "artifactRoot": ".rb",
-  "generatedAt": "2026-08-26T22:59:42.764Z",
+  "generatedAt": "2026-08-26T23:44:07.112Z",
   "artifacts": [
     {
       "id": "context-evidence",
@@ -163,6 +163,85 @@
       "path": ".rb/evolutions/go-plan-convergence/TO_BE.md",
       "status": "ready",
       "sha256": "2a755ca3ba5ab2ddd9eeae068e56b9468f1153fcf6e2ae016b96640562a17856"
+    },
+    {
+      "id": "evolutions-visual-acceptance-evidence-as-is",
+      "kind": "evolution-document",
+      "path": ".rb/evolutions/visual-acceptance-evidence/AS_IS.md",
+      "status": "ready",
+      "sha256": "c0cb85c0f29a3e3208806ec227fc5e5c34ef2f7437e0d470c836e1b6fdaf2c36"
+    },
+    {
+      "id": "evolutions-visual-acceptance-evidence-change-request",
+      "kind": "request",
+      "path": ".rb/evolutions/visual-acceptance-evidence/CHANGE_REQUEST.md",
+      "status": "ready",
+      "sha256": "666075c35e98e2f0c2d28a9e1d617bd626eb08d26312e8657d866a81f272d419"
+    },
+    {
+      "id": "evolutions-visual-acceptance-evidence-impact",
+      "kind": "evolution-document",
+      "path": ".rb/evolutions/visual-acceptance-evidence/IMPACT.md",
+      "status": "ready",
+      "sha256": "62ee50ab5306200b5c7e75855aea5363eede1ba8aa7f5d18f65b6c9d8670fe46"
+    },
+    {
+      "id": "evolutions-visual-acceptance-evidence-migration",
+      "kind": "evolution-document",
+      "path": ".rb/evolutions/visual-acceptance-evidence/MIGRATION.md",
+      "status": "ready",
+      "sha256": "33aaf096073ff566e61769cf59dedb7eb3bf0412a74b105c9ee9450054788f4d"
+    },
+    {
+      "id": "evolutions-visual-acceptance-evidence-operations",
+      "kind": "operational-verification",
+      "path": ".rb/evolutions/visual-acceptance-evidence/OPERATIONS.json",
+      "status": "ready",
+      "sha256": "4d9c2815197c22905df79b899ed70d565840c55c042b387acfb6e4db682419e0",
+      "contract": "rb-operational/v1"
+    },
+    {
+      "id": "evolution-visual-acceptance-phases",
+      "kind": "execution-plan",
+      "path": ".rb/evolutions/visual-acceptance-evidence/PHASES.md",
+      "status": "ready",
+      "sha256": "c0511967373ccca9259ee24867f8c2d5cf26bfcc5a40e789224237711f4b3faa",
+      "contract": "rb-execution/v1"
+    },
+    {
+      "id": "evolutions-visual-acceptance-evidence-plan",
+      "kind": "implementation-plan",
+      "path": ".rb/evolutions/visual-acceptance-evidence/PLAN.md",
+      "status": "ready",
+      "sha256": "87e7731e9183a4f84a5f6615e1087f542d40c9b197e3969e1be4bd1de0532a99"
+    },
+    {
+      "id": "evolutions-visual-acceptance-evidence-preservation",
+      "kind": "evolution-document",
+      "path": ".rb/evolutions/visual-acceptance-evidence/PRESERVATION.md",
+      "status": "ready",
+      "sha256": "4be8d3fa448cf8887ca84754215fd28c0e2dd6e117ec2720e6dd5df99a9bfae2"
+    },
+    {
+      "id": "evolutions-visual-acceptance-evidence-regression-matrix",
+      "kind": "regression-specification",
+      "path": ".rb/evolutions/visual-acceptance-evidence/REGRESSION_MATRIX.md",
+      "status": "ready",
+      "sha256": "d4881e2c69e3eeea407d33cd668552941e30da07da06f4bc8837b4ce9af3c7bd"
+    },
+    {
+      "id": "evolutions-visual-acceptance-evidence-source-manifest",
+      "kind": "evolution-document",
+      "path": ".rb/evolutions/visual-acceptance-evidence/source-manifest.json",
+      "status": "ready",
+      "sha256": "d084602da0f5d0edc389c09c98200f7505a0a8816786c9d2c4c1c6e424589683"
+    },
+    {
+      "id": "evolutions-visual-acceptance-evidence-to-be",
+      "kind": "evolution-document",
+      "path": ".rb/evolutions/visual-acceptance-evidence/TO_BE.md",
+      "status": "ready",
+      "sha256": "b1ec33818a6759f04889b762841888adce940c583e85af4cf7a06e1bf16143f1"
     },
     {
       "id": "reviews-rb-harness-2026-08-26-baseline",

@@ -48,6 +48,25 @@ of retrying it. Never write `manual: run/execute/test ...`: declare the exact
 command, provision the required tool, or report the plan as blocked. Never
 invent a command. A phase is self-contained for a fresh session through its
 goal, context paths, tasks, criteria, and validations.
+
+Visual acceptance has a stricter proof boundary. Criteria containing concepts
+such as visible, rendered, visual, layout, aligned, responsive, viewport,
+screen/tela, or animation must use a one-shot real browser/visual command, or
+`human:` so execution pauses as `HUMAN_PENDING` when honest automation is not
+available. `manual:`, selector presence, a fake DOM, syntax checks, and generic
+unit tests do not prove rendered visibility. Every visual task must also:
+
+- include a negative acceptance criterion for representative corruption such
+  as essential elements hidden, clipped, overlapping, outside the viewport,
+  zero-area, or source CSS/JavaScript exposed as content;
+- name in Expected evidence a durable screenshot artifact, an exact numeric
+  viewport such as `1440x900`, and geometry/computed-style measurements;
+- preserve initial/before and resulting/after screenshots or measurements when
+  keyboard, pointer, transition, or animation changes visible state.
+
+These are evidence requirements, not permission to invent a product viewport
+or frontend stack. Use a supported representative viewport as a validation
+parameter and the project's existing browser tooling; otherwise emit `human:`.
 Acceptance criteria must state the observable result directly. A criterion that
 only says a task satisfies, implements, or matches an RF/RNF/UI/CT ID is
 circular and invalid, as is an undefined qualifier such as "appropriately" or

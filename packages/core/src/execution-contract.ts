@@ -160,6 +160,109 @@ function ambiguousAcceptanceCriterion(value: string): string | undefined {
   return undefined;
 }
 
+/**
+ * User-visible presentation cannot be proved by DOM presence alone.
+ *
+ * This intentionally recognizes semantics rather than a particular frontend
+ * stack. Strong visual words are sufficient; weaker "show/display" verbs only
+ * count when the criterion also names a UI surface. The latter avoids treating
+ * a CLI criterion such as "the command displays its version" as visual UI.
+ */
+const STRONG_VISUAL_CRITERION = /\b(?:visib(?:le|ility|ly|ilidade|ilidades)|vis[ií]v(?:el|eis)|visual(?:ly|mente|s)?|render(?:ed|ing|iza(?:do|da|dos|das|r|ção))?|responsive|responsiv[oa]s?|aligned?|alinhad[oa]s?|viewport|screen|tela|graphical|gr[aá]fic[oa]s?|stylesheet|css|animation|animated|anima(?:tion|ted|ção|do|da|dos|das))\b/i;
+const LAYOUT_CRITERION = /\blayout\b/i;
+const WEAK_VISUAL_VERB = /\b(?:show(?:s|n)?|display(?:s|ed)?|appear(?:s|ed)?|exib(?:e|em|ido|ida|idos|idas|ir)|aparec(?:e|em|er))\b/i;
+const UI_SURFACE = /\b(?:ui|interface|page|p[aá]gina|view|screen|tela|board|tabuleiro|button|bot[aã]o|panel|painel|dialog|modal|menu|form|formul[aá]rio|input|field|campo|message|mensagem|error|erro|image|imagem|icon|[ií]cone|vehicle|ve[ií]culo|chicken|galinha|flag|bandeirinha|element|elemento)\b/i;
+const META_VISUAL_CONTRACT = /\b(?:contract|criterion|criteria|plan|instruction|evidence|contrato|crit[eé]rio|crit[eé]rios|plano|instru[cç][aã]o|evid[eê]ncia)\b/i;
+const META_VISUAL_VALIDATOR = /\b(?:validator|validation|validador|valida[cç][aã]o)\b/i;
+const NEGATIVE_VISUAL_CONTROL = /(?:\b(?:off[- ]?screen|overflow|overlap(?:ping)?|obscured|clipped|cropped|hidden|zero[- ]area|source\s+text|stylesheet\s+text|fora\s+(?:da|do)\s+viewport|sobrepost[oa]s?|sobreposi[cç][aã]o|ocult[oa]s?|cortad[oa]s?|texto[- ]fonte|texto\s+(?:css|javascript))\b|\b(?:no|not|never|without|none|absence|absent|n[aã]o|nenhum[ao]?|sem)\b.{0,100}\b(?:hidden|obscured|clipped|cropped|outside|overflow|overlap|source\s+text|stylesheet|ocult[oa]|cortad[oa]|fora|sobrepost[oa]|texto[- ]fonte|css|javascript)\b)/i;
+const VISUAL_AUTOMATION_COMMAND = /\b(?:playwright|cypress|puppeteer|selenium|webdriver|chrom(?:e|ium)|firefox|webkit|cdp|browser|e2e|end[- ]to[- ]end|visual|screenshot|ui[-_: ]?test)\b/i;
+const DURABLE_VISUAL_ARTIFACT = /\b(?:screenshots?|screen\s+captures?|capturas?\s+de\s+tela|\.png|\.jpe?g|\.webp)\b/i;
+const EXACT_VIEWPORT = /\b[1-9][0-9]{2,3}\s*[x×]\s*[1-9][0-9]{2,3}\b/i;
+const GEOMETRY_EVIDENCE = /\b(?:getBoundingClientRect|getComputedStyle|bounding\s+boxes?|computed\s+styles?|geometry|geometria|dimens(?:ions|ões)|positive\s+area|[aá]rea\s+positiva|intersect(?:ion|s)?|interse[cç][aã]o)\b/i;
+const VISUAL_INTERACTION = /\b(?:before|after|press(?:ing|ed)?|click(?:ing|ed)?|keyboard|move(?:ment|d)?|transition|animation|initial\s+state|resulting\s+state|antes|depois|ap[oó]s|pression(?:ar|ado|ada)|clic(?:ar|ado|ada)|teclado|movimento|transi[cç][aã]o|anima[cç][aã]o|estado\s+inicial|estado\s+resultante)\b/i;
+const BEFORE_EVIDENCE = /\b(?:before|initial|baseline|antes|inicial)\b/i;
+const AFTER_EVIDENCE = /\b(?:after|resulting|final|depois|ap[oó]s|resultante)\b/i;
+
+function isVisualAcceptanceCriterion(value: string): boolean {
+  if (META_VISUAL_CONTRACT.test(value)) return false;
+  if (META_VISUAL_VALIDATOR.test(value) && !UI_SURFACE.test(value)) return false;
+  return STRONG_VISUAL_CRITERION.test(value)
+    || ((WEAK_VISUAL_VERB.test(value) || LAYOUT_CRITERION.test(value)) && UI_SURFACE.test(value));
+}
+
+function validateVisualEvidenceContract(
+  id: string,
+  acceptanceCriteria: string[],
+  validation: string[],
+  expectedEvidence: string,
+  issues: ValidationIssue[],
+  line: number,
+): void {
+  const visualCriteria = acceptanceCriteria.filter(isVisualAcceptanceCriterion);
+  if (visualCriteria.length === 0) return;
+
+  const instructions = validation
+    .map(parseValidationInstruction)
+    .filter((entry): entry is ValidationInstruction => Boolean(entry));
+  if (instructions.some((entry) => entry.kind === "manual")) {
+    issue(
+      issues,
+      "task.validation.visual-manual",
+      `${id} has visual acceptance criteria but uses manual: as if an inspection instruction were proof. `
+        + "Use an executable browser/visual validation, or human: so execution pauses for external evidence.",
+      line,
+    );
+  }
+
+  const hasHumanGate = instructions.some((entry) => entry.kind === "human");
+  const hasVisualCommand = instructions.some((entry) =>
+    entry.kind === "command" && VISUAL_AUTOMATION_COMMAND.test(entry.value));
+  if (!hasHumanGate && !hasVisualCommand) {
+    issue(
+      issues,
+      "task.validation.visual-unproven",
+      `${id} has visual acceptance criteria without an executable browser/visual command or a human: gate; `
+        + "DOM presence, syntax checks, and generic unit tests do not prove rendered visibility.",
+      line,
+    );
+  }
+
+  const missingEvidence: string[] = [];
+  if (!DURABLE_VISUAL_ARTIFACT.test(expectedEvidence)) missingEvidence.push("a durable screenshot artifact");
+  if (!EXACT_VIEWPORT.test(expectedEvidence)) missingEvidence.push("an exact viewport such as 1440x900");
+  if (!GEOMETRY_EVIDENCE.test(expectedEvidence)) missingEvidence.push("geometry/computed-style measurements");
+  if (missingEvidence.length > 0) {
+    issue(
+      issues,
+      "task.evidence.visual-contract",
+      `${id} visual Expected evidence must name ${missingEvidence.join(", ")}; `
+        + "the artifact must let a later manager distinguish visibility from selector presence.",
+      line,
+    );
+  }
+
+  if (!visualCriteria.some((criterion) => NEGATIVE_VISUAL_CONTROL.test(criterion))) {
+    issue(
+      issues,
+      "task.acceptance.visual-negative-control",
+      `${id} visual acceptance needs a negative control for corruption such as hidden/clipped/off-viewport elements, `
+        + "overlap, exposed source text, or zero-area geometry.",
+      line,
+    );
+  }
+
+  if (visualCriteria.some((criterion) => VISUAL_INTERACTION.test(criterion))
+    && !(BEFORE_EVIDENCE.test(expectedEvidence) && AFTER_EVIDENCE.test(expectedEvidence))) {
+    issue(
+      issues,
+      "task.evidence.visual-state-pair",
+      `${id} changes or observes visual state over an interaction, so Expected evidence must preserve before/initial `
+        + "and after/resulting screenshots or measurements.",
+      line,
+    );
+  }
+}
+
 function issue(
   issues: ValidationIssue[],
   code: string,
@@ -340,6 +443,14 @@ function parseTask(
       );
     }
   });
+  validateVisualEvidenceContract(
+    id,
+    acceptanceCriteria,
+    validation,
+    values.get("Expected evidence") ?? "",
+    issues,
+    offset,
+  );
   const parallel = values.get("Parallel safe")?.toLowerCase();
   if (parallel !== "true" && parallel !== "false") {
     issue(issues, "task.parallel.invalid", `${id} Parallel safe must be true or false`, offset);

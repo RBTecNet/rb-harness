@@ -1,0 +1,31 @@
+{
+  "contract": "rb-source-manifest/v1",
+  "artifactId": "evolution-visual-acceptance-source-manifest",
+  "request": {
+    "kind": "user-supplied-incident",
+    "path": "docs/incidents/2026-08-26-visual-acceptance-false-positive-harness.md",
+    "sha256": "d30f568ade186d4559ee9c65b92a24eb71784571dccff6bbe3b5ded559e937e1"
+  },
+  "sources": [
+    { "path": "packages/core/src/execution-contract.ts", "sha256": "565dbbc6bfd316ef51c3b3141073d50fb7d9d3911e88d1a24a66c5b57e54ae2b", "classification": "OBSERVED" },
+    { "path": "packages/core/test/execution-contract.test.ts", "sha256": "959d17d9733ba2dbc3e9334103a0afc6195aca898a08803f3c0273c5ac3be9c9", "classification": "OBSERVED" },
+    { "path": "tests/fixtures/execution/invalid/visual-manual/PHASES.md", "sha256": "7c3e170bbdecd30d9368aa12f43519a4bf2c3d5899286f07e8d5f85391a2efd8", "classification": "OBSERVED" },
+    { "path": "packages/core/src/harness-contract-digest.ts", "sha256": "a75ca9b4c16878bf404d2ed318580240eb2b63297dbdb60b28756b830e51b4e8", "classification": "OBSERVED" },
+    { "path": "resources/references/execution-template.md", "sha256": "daa0325cef3c1b376b88782e5277e7b46f9fd1e29e6ef35ae1debb86b8db88eb", "classification": "OBSERVED" },
+    { "path": "resources/references/operational-template.md", "sha256": "ff8c1f6990e741d8f603988f6e72341af92cac88b6d24057eea6cd4eb717888c", "classification": "OBSERVED" },
+    { "path": "contracts/RB-RALPH-CONTRACT.md", "sha256": "ab7df1b2b68be8ce298a73e383af183a40af4f098596088cb82de38af998f906", "classification": "OBSERVED" }
+  ],
+  "answers": [],
+  "assumptions": [
+    {
+      "classification": "INFERRED",
+      "text": "Uma viewport numérica representativa é parâmetro de teste FLEXIBLE e não altera o suporte de plataforma declarado pelo produto."
+    }
+  ],
+  "traceability": [
+    { "requirement": "RF-001", "impact": "PHASES.Validation", "preservation": "manual não visual", "regressions": ["RG-001", "RG-002", "RG-005", "RG-006"], "task": "T001" },
+    { "requirement": "RF-002", "impact": "PHASES.Expected evidence", "preservation": "stack-neutrality", "regressions": ["RG-003", "RG-007"], "task": "T001" },
+    { "requirement": "RF-003", "impact": "PHASES.Acceptance criteria", "preservation": "critérios não visuais", "regressions": ["RG-004", "RG-008", "RG-009"], "task": "T001" },
+    { "requirement": "RF-004", "impact": "writers/contracts/bundle", "preservation": "rb-execution/v1 grammar", "regressions": ["RG-011", "RG-012"], "task": "T002,T003" }
+  ]
+}

@@ -114,6 +114,10 @@ depth, not cross-boundary evidence needed to understand a critical journey.
    For responsive findings, require a falsifiable before/after check at the
    affected narrow and wide layout states, exercise the complete affected
    surface, and validate usable geometry rather than presence alone.
+   Remediation tasks use grounded one-shot browser/visual automation or
+   `human:`, never `manual:` or fake-DOM presence. Require a negative corruption
+   criterion, exact-viewport screenshots and geometry/computed-style evidence,
+   plus before/after proof for changed visible state.
 4. Emit valid `rb-execution/v1` and conditional `rb-operational/v1`, validate
    both, sync the manifest, and validate the tree. Use `BLOCKED` rather than
    inventing a security, product, or design decision. Audit selected-finding

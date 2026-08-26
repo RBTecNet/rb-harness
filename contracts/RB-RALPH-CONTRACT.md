@@ -286,6 +286,21 @@ Semântica:
 - `manual` é enviado ao gerente e não deve disfarçar um comando executável.
 - `human` pausa a fase antes de chamar qualquer provider e encerra com status 2.
 
+Uma linha `manual:` no plano é somente uma instrução declarada, nunca o
+resultado da inspeção. Para usá-la como prova, o índice de evidência precisa
+registrar separadamente a execução, responsável, timestamp, resultado e o
+artefato ou observação canônica. Uma lista `manual` copiada do plano sem esse
+registro permanece `UNPROVEN`.
+
+Critérios visuais (`visible`/`visível`, renderização, layout, alinhamento,
+responsividade, viewport, tela ou animação) não usam `manual:`. Eles exigem um
+comando one-shot de navegador/renderizador real ou `human:`, que pausa. A prova
+automatizada declara viewport numérica, persiste screenshots, mede estilo
+computado e geometria/interseção de elementos essenciais, inclui controle
+negativo de corrupção visual e preserva estados antes/depois quando há
+interação. Presença de seletor, DOM falso, mudança de estado lógico ou teste
+unitário genérico não prova visibilidade.
+
 Um comando não pode esconder falha com `|| true`, `; true` ou `exit 0`. Ele
 deve ser não interativo, não destrutivo para o projeto/estado externo e retornar
 o exit code real.
@@ -968,7 +983,11 @@ Antes de declarar um pacote “Ralph-ready”, o gerador deve provar:
 - [ ] critérios binários, observáveis, sem linguagem vaga ou circular;
 - [ ] validações exatas, não interativas e sem mascarar falha;
 - [ ] `manual:` reservado a inspeção real do gerente;
+- [ ] instrução `manual:` sem registro separado de execução permanece
+  `UNPROVEN`;
 - [ ] `human:` usado deliberadamente, sabendo que pausa antes do provider;
+- [ ] critérios visuais usam navegador/renderizador real ou `human:`, com
+  screenshot, viewport, geometria e controle negativo duráveis;
 - [ ] nenhuma task normal depende do resultado futuro da fase RBF;
 - [ ] `OPERATIONS.json` válido quando o produto possui um entrypoint
   automatizável;

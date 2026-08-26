@@ -93,7 +93,7 @@ const EXECUTION_GRAMMAR = `## rb-execution/v1 — PHASES.md grammar (exact)
     - AC-T001-01: <binary observable result>
   - **Validation:**
     - \`npm test -- thing\`
-  - **Expected evidence:** <files, tests, or command output>
+  - **Expected evidence:** <files, tests, command output, or visual proof contract>
 \`\`\`
 
 Mechanical rules enforced by the validator:
@@ -106,6 +106,8 @@ Mechanical rules enforced by the validator:
 - Acceptance criteria are \`AC-<taskId>-NN: <criterion>\` and must state an observable result. A criterion that only says a task "satisfies RF-001" is rejected as circular, and vague words (appropriate, adequate, correctly, fast, as needed, when applicable, when possible, where valid, etc.) are rejected.
 - Never copy a vague source phrase such as \`when applicable\` or \`quando aplicável\` into acceptance. If the uncertainty is FLEXIBLE, keep it in the decision/specification documents and omit it from task acceptance. Otherwise replace it with the finite conditions and observable outcomes already fixed by the closed decisions; never invent a condition during authoring.
 - Validation entries are a backtick command, \`manual: <manager-observable inspection>\`, or \`human: <external evidence>\`. \`manual: run ...\` is rejected — declare the real command. Never append \`|| true\` or \`; exit 0\`.
+- Visual acceptance is stricter: words such as visible, rendered, visual, layout, aligned, responsive, viewport, screen/tela, or animation may not be proved by \`manual:\`, selector presence, a fake DOM, syntax checks, or a generic unit command. Use a one-shot browser/visual command (for example an existing Playwright/Cypress/Puppeteer/Selenium/CDP or repository-owned visual test), or use \`human:\` so Ralph pauses with \`HUMAN_PENDING\` when honest automation is unavailable.
+- Every visual task includes a negative acceptance criterion that rejects representative corruption: essential elements hidden, clipped, overlapping, outside the viewport, zero-area, or source CSS/JavaScript exposed as content. Its Expected evidence names a durable screenshot, an exact numeric viewport such as \`1440x900\`, and geometry/computed-style measurements. A visual state changed by keyboard, pointer, transition, or animation preserves both initial/before and resulting/after evidence.
 - A validation is judged by its exit code, so it is never a service or watcher: \`npm start\`, \`npm run dev\`, \`vite\`, \`nodemon\`, \`uvicorn\` and \`--watch\` never exit. Prove a service task by importing its entrypoint in a test or invoking it once; leave the running service to \`OPERATIONS.json\`.
 - Never put \`manual:\` or \`human:\` inside backticks: backticks mean execute, and no \`manual:\` program exists. Write \`- manual: inspect ...\` bare.
 - Point a checker at the format it parses. \`node --check\` reads JavaScript, so against a \`.json\` or \`.yaml\` it fails on a valid file. To prove \`OPERATIONS.json\`, use \`rb-harness operations validate <path>\`.

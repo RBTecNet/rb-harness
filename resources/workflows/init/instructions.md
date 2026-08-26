@@ -68,6 +68,11 @@ is supplied in the prompt as `rb-harness-contract-digest/v1`.
    order them with `Depends on`, and never write a task that builds a whole
    capability. The decomposition ceilings in the contract digest are validated
    mechanically, so respect them while writing.
+   For every visual/UI criterion, apply the visual evidence contract from the
+   digest. A greenfield project with no grounded browser tooling or entrypoint
+   uses `human:` and remains pending; never degrade visible/rendered/layout
+   behavior to `manual:` or fake-DOM presence. Include a negative visual
+   corruption criterion and durable viewport/screenshot/geometry evidence.
    Also derive `.rb/init/OPERATIONS.json` from the confirmed product form,
    claimed platforms, and primary consumer workflow. It must use
    `rb-operational/v1`, remain usable without RB Ralph, and must not assume web

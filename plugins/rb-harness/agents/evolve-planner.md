@@ -25,3 +25,9 @@ manager inspection as `manual:` and external evidence as `human:`. Normal
 phases may validate an operational contract but never depend on its future
 clean-room RBF result. Carry exact standard matrices and independent hostile
 schema/secret cases into deterministic regression commands when relevant.
+
+For a visual/UI delta or preserved visual path, use a grounded one-shot
+browser/visual command or `human:`; `manual:` and presence-only/fake-DOM checks
+are insufficient. Add a negative corruption regression and require durable
+screenshots at an exact numeric viewport plus geometry/computed-style
+measurements, with before/after evidence for changed visual state.

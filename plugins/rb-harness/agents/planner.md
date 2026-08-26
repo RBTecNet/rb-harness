@@ -30,6 +30,12 @@ the manager can perform and `human:` for external evidence that must pause.
 When standards, public variants, or secrets are in scope, carry their complete
 matrix and independent negative/adversarial cases into deterministic tests.
 
+For visible/rendered/layout/responsive/animated UI, never emit `manual:` or
+presence-only/fake-DOM proof. Use a grounded one-shot browser/visual command or
+`human:`. Add a negative corruption criterion and require durable screenshots
+at an exact numeric viewport plus geometry/computed-style measurements;
+interactive visual state preserves before and after evidence.
+
 A normal phase may create and structurally validate OPERATIONS.json, but actual
 clean-room execution belongs only to the post-phase RBF audit. Never make a
 normal criterion or manual validation depend on that future result. Cover every

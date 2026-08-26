@@ -78,6 +78,11 @@ isolated from existing behavior.
     Scope/Change. Only the post-phase RBF audit owns the clean-room pass. Audit exact standard/dialect matrices, independent hostile
     schema/secret cases, explicit quality commands, validation capability, and
     lossless RIGID/preservation/regression traceability before returning.
+    For a visual/UI delta or preserved visual path, require the digest's durable
+    viewport/screenshot/geometry contract and a negative corruption regression.
+    Use grounded browser automation or `human:`; never use `manual:` or
+    presence-only/fake-DOM checks as proof of visibility. Preserve before/after
+    evidence whenever interaction changes visible state.
 11. The orchestrator runs every deterministic validator after assembly; produce document parts that assemble into compliant artifacts, and never claim to have run a command. They cover `rb-execution/v1`, `rb-operational/v1`, the manifest, and
     the whole tree.
 12. State freshness, changed/preserved/deprecated/unknown counts, impact and

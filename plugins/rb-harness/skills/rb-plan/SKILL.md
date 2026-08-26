@@ -59,6 +59,10 @@ Read these files completely before writing artifacts:
    commands separately, classify unavailable proof as external `human`
    evidence, and require exact standard/dialect matrices plus hostile
    schema/secret cases when relevant.
+   Visual/UI behavior uses grounded one-shot browser/visual automation or
+   `human:`, never `manual:` or fake-DOM presence. Require a negative corruption
+   criterion, exact-viewport screenshots and geometry/computed-style evidence,
+   plus before/after proof for changed visible state.
 10. Derive phases from a dependency DAG. `Parallel safe` is descriptive; no
     executor or provider is required to parallelize.
 11. Run, fix, and repeat until green:

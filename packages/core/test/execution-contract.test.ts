@@ -314,3 +314,109 @@ describe("a syntax checker aimed at a format it cannot parse", () => {
     }
   });
 });
+
+describe("visual acceptance evidence", () => {
+  const visualCriterion = "The rendered board keeps every required element visible in the viewport.";
+  const negativeCriterion = "No required visual element is hidden, clipped, overlapping, or outside the viewport.";
+  const durableEvidence = "Screenshots at viewport 1440x900 plus getBoundingClientRect geometry with positive area and viewport intersection.";
+
+  function visualPlan(source: string, validation: string, evidence = durableEvidence, criterion = visualCriterion): string {
+    return source
+      .replace(
+        "    - AC-T001-01: Running the version command exits with code 0 and prints `0.1.0`.",
+        `    - AC-T001-01: ${criterion}\n    - AC-T001-02: ${negativeCriterion}`,
+      )
+      .replace("    - `npm test`", `    - ${validation}`)
+      .replace(
+        "  - **Expected evidence:** Source changes, regression tests, and passing validation output.",
+        `  - **Expected evidence:** ${evidence}`,
+      );
+  }
+
+  it("rejects a manual instruction as proof of rendered visibility", async () => {
+    const source = visualPlan(await fixture("valid", "minimal"), "manual: inspect the rendered board");
+    const result = validateExecutionMarkdown(source);
+    expect(result.issues.map((entry) => entry.code)).toEqual(expect.arrayContaining([
+      "task.validation.visual-manual",
+      "task.validation.visual-unproven",
+    ]));
+  });
+
+  it("rejects the incident-shaped stylesheet/fake-DOM fixture", async () => {
+    const result = validateExecutionMarkdown(await fixture("invalid", "visual-manual"));
+    expect(result.issues.map((entry) => entry.code)).toEqual(expect.arrayContaining([
+      "task.validation.visual-manual",
+      "task.validation.visual-unproven",
+    ]));
+  });
+
+  it("rejects DOM or generic test commands that cannot prove rendering", async () => {
+    const source = visualPlan(await fixture("valid", "minimal"), "`npm test -- fake-dom`");
+    const result = validateExecutionMarkdown(source);
+    expect(result.issues.map((entry) => entry.code)).toContain("task.validation.visual-unproven");
+  });
+
+  it("requires durable screenshots, an exact viewport, geometry, and a negative control", async () => {
+    const source = visualPlan(
+      await fixture("valid", "minimal"),
+      "`npm run test:e2e -- board`",
+      "Browser test output.",
+      visualCriterion,
+    ).replace(`\n    - AC-T001-02: ${negativeCriterion}`, "");
+    const result = validateExecutionMarkdown(source);
+    expect(result.issues.map((entry) => entry.code)).toEqual(expect.arrayContaining([
+      "task.evidence.visual-contract",
+      "task.acceptance.visual-negative-control",
+    ]));
+  });
+
+  it("accepts executable visual proof with a durable evidence contract", async () => {
+    const source = visualPlan(await fixture("valid", "minimal"), "`npm run test:e2e -- board-visual`");
+    const result = validateExecutionMarkdown(source);
+    expect(result.issues.filter((entry) => entry.code.includes("visual"))).toEqual([]);
+    expect(result.valid).toBe(true);
+  });
+
+  it("accepts a human gate when visual automation is unavailable", async () => {
+    const source = visualPlan(
+      await fixture("valid", "minimal"),
+      "human: capture and approve the board at the declared viewport",
+    );
+    const result = validateExecutionMarkdown(source);
+    expect(result.issues.filter((entry) => entry.code.includes("visual"))).toEqual([]);
+    expect(result.valid).toBe(true);
+  });
+
+  it("requires before and after evidence for an interactive visual state", async () => {
+    const source = visualPlan(
+      await fixture("valid", "minimal"),
+      "`npx playwright test board-visual`",
+      durableEvidence,
+      "After pressing ArrowUp, the rendered chicken visibly moves inside the viewport.",
+    );
+    const result = validateExecutionMarkdown(source);
+    expect(result.issues.map((entry) => entry.code)).toContain("task.evidence.visual-state-pair");
+
+    const withStatePair = source.replace(
+      durableEvidence,
+      `${durableEvidence} Initial/before and resulting/after screenshots are preserved.`,
+    );
+    expect(validateExecutionMarkdown(withStatePair).issues.filter((entry) => entry.code.includes("visual"))).toEqual([]);
+  });
+
+  it("does not classify ordinary CLI output as visual UI", async () => {
+    const source = (await fixture("valid", "minimal")).replace(
+      "Running the version command exits with code 0 and prints `0.1.0`.",
+      "The command displays version `0.1.0` on stdout.",
+    );
+    expect(validateExecutionMarkdown(source).issues.filter((entry) => entry.code.includes("visual"))).toEqual([]);
+  });
+
+  it("does not classify a contract about visual criteria as rendered UI", async () => {
+    const source = (await fixture("valid", "minimal")).replace(
+      "Running the version command exits with code 0 and prints `0.1.0`.",
+      "The validator rejects visual acceptance criteria that rely only on `manual:`.",
+    );
+    expect(validateExecutionMarkdown(source).issues.filter((entry) => entry.code.includes("visual"))).toEqual([]);
+  });
+});

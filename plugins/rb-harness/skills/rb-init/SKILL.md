@@ -47,6 +47,10 @@ Read these files completely before writing artifacts:
    intent; unresolved material meaning stays out of RIGID requirements.
 8. Derive `PLAN.md`, then derive `PHASES.md` 1:1. `PHASES.md` must not introduce
    requirements or implementation choices absent from the richer artifacts.
+   Visual/UI criteria use the shared visual evidence contract: grounded
+   one-shot browser/visual automation or `human:`, never `manual:` or fake-DOM
+   presence; a negative corruption criterion; exact-viewport screenshots and
+   geometry/computed-style evidence; and before/after proof for changed state.
    Also derive `.rb/init/OPERATIONS.json` from the confirmed product form,
    claimed platforms, and primary consumer workflow. It must use
    `rb-operational/v1`, remain usable without RB Ralph, and must not assume web
