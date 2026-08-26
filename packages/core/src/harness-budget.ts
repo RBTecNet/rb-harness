@@ -41,9 +41,15 @@ export const HARNESS_BUDGET = {
     /** Safety ceiling on questions asked across the whole run. */
     maxQuestions: 40,
   },
-  /** Incremental authoring plus at most one localized structural repair. */
+  /** Incremental authoring plus a small bounded structural-convergence loop. */
   generation: {
-    structuralRepairs: 1,
+    /**
+     * Independent localized repairs allowed while deterministic findings keep
+     * changing. Three passes let the writer fix a primary contract defect and
+     * the cross-document consequences it exposed without turning recovery into
+     * an unbounded provider loop.
+     */
+    structuralRepairs: 3,
     /**
      * Replans of the document plan after a substance defect.
      *

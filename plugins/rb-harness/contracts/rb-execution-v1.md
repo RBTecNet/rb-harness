@@ -81,3 +81,8 @@ Consumers must reject unknown major versions before starting an LLM. Additive
 minor revisions may introduce optional syntax such as `human:` while preserving
 existing meanings. Breaking grammar changes
 require a new major contract and migration tooling.
+
+Task `Scope` and `Change` own implementation paths only. `.rb`, `.rb/**`, and
+all generated planning artifacts are immutable control-plane authority: a task
+may read them from phase `Context` or pass them to a read-only validator, but
+must never create, modify, remove, move, or glob them.

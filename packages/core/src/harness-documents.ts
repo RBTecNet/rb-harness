@@ -77,7 +77,7 @@ export function normalizeGeneratedDocumentPath(value: unknown, index: number): s
  * habit. Those three backticks then land *inside* the published file: an
  * observed run wrote `.rb/init/OPERATIONS.json` beginning with ```` ```json ````
  * and ending with ```` ``` ````, which failed the operational contract, forced
- * the single structural repair, and the repair took the rest of the tree down
+ * a structural correction, and the malformed correction took the rest of the tree down
  * with it.
  *
  * The strip is deliberately narrow, following CommonMark: the opening fence
@@ -353,7 +353,7 @@ export async function materializeDocuments(
   return written;
 }
 
-/** Bundle excerpts for the single structural repair; only affected files travel. */
+/** Bundle excerpts for one bounded structural correction; only affected files travel. */
 export function documentExcerpts(bundle: DocumentBundle, paths: Iterable<string>): GeneratedDocument[] {
   const wanted = new Set(paths);
   return bundle.documents.filter((document) => wanted.has(document.path));

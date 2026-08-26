@@ -63,9 +63,9 @@ is supplied in the prompt as `rb-harness-contract-digest/v1`.
    product form and claimed platforms (desktop, CLI, library, service, web, or
    otherwise), not a presumed HTTP boundary. Reuse verified project-level
    operations only when their exact contract and configuration mode still
-   apply, and specialize only what this change affects. Normal phases may
-   validate the contract structure but cannot require its future RBF clean-room
-   result.
+   apply, and specialize only what this change affects. Harness generation owns
+   this contract and its structural validation. Never place `.rb` or a
+   descendant in task Scope/Change; only RBF owns its clean-room execution.
 9. Trace every RIGID requirement to acceptance criteria and tasks. Verify every
    code-shaped literal in RIGID against code/config or mark it unresolved.
    Trace further to one observable validation and expected evidence. Audit

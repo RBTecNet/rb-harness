@@ -231,7 +231,7 @@ describe("an oversized segment is re-authored, not re-formatted", () => {
       status: "complete" as const,
       summary: "s",
       coordination: "c",
-      documents: [{ path: ".rb/init/REQUIREMENTS.md", purpose: "Requirements", parts: [{ id: "requirements-rigid", purpose: "RIGID section" }] }],
+      documents: [{ path: ".rb/init/REQUIREMENTS.md", purpose: "Requirements", dependsOn: [], parts: [{ id: "requirements-rigid", purpose: "RIGID section" }] }],
       blocked: [],
     };
     const defect = "document part .rb/init/REQUIREMENTS.md#requirements-rigid is 13000 bytes, above the 12288-byte limit for one segment";
@@ -313,7 +313,7 @@ describe("an oversized part is diagnosed as a planning defect", () => {
       status: "complete" as const,
       summary: "s",
       coordination: "c",
-      documents: [{ path: ".rb/init/PHASES.md", purpose: "Plan", parts: [{ id: "phases-p01-p04", purpose: "Phases" }] }],
+      documents: [{ path: ".rb/init/PHASES.md", purpose: "Plan", dependsOn: [], parts: [{ id: "phases-p01-p04", purpose: "Phases" }] }],
       blocked: [],
     };
     const prompt = buildDocumentPartPrompt(

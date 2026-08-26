@@ -30,6 +30,24 @@ function stringArray(value: unknown, issues: ValidationIssue[], path: string): v
   }
 }
 
+/**
+ * Inline interpreter programs hide implementation paths and behavior inside an
+ * opaque string. The verifier cannot relate those references back to PHASES
+ * scopes, and quoting differs by platform. Operational proof must invoke a
+ * public executable or a repository-owned script instead.
+ */
+function isInlineProgram(argv: string[]): boolean {
+  const executable = argv[0]!.replace(/\\/g, "/").split("/").at(-1)!.toLowerCase().replace(/\.exe$/, "");
+  const option = argv[1]?.toLowerCase();
+  if (["node", "nodejs"].includes(executable)) return ["-e", "--eval", "-p", "--print"].includes(option ?? "");
+  if (["python", "python2", "python3", "ruby", "perl", "sh", "bash", "dash", "zsh", "fish"].includes(executable)) {
+    return option === "-c" || (["ruby", "perl"].includes(executable) && option === "-e");
+  }
+  if (executable === "php") return option === "-r";
+  if (["powershell", "pwsh"].includes(executable)) return ["-c", "-command", "--command"].includes(option ?? "");
+  return false;
+}
+
 function command(value: unknown, issues: ValidationIssue[], path: string): void {
   if (!object(value)) {
     issue(issues, "operational.command", "Command must be an object", path);
@@ -38,6 +56,13 @@ function command(value: unknown, issues: ValidationIssue[], path: string): void 
   onlyKeys(value, ["argv", "cwd", "env"], issues, path);
   if (!Array.isArray(value.argv) || value.argv.length === 0 || value.argv.some((entry) => !nonEmpty(entry))) {
     issue(issues, "operational.command.argv", "Command argv must be a non-empty string array", `${path}.argv`);
+  } else if (isInlineProgram(value.argv as string[])) {
+    issue(
+      issues,
+      "operational.command.inline-program",
+      "Inline interpreter programs are not portable or cross-artifact-verifiable; invoke a public executable or repository-owned script",
+      `${path}.argv`,
+    );
   }
   if (value.cwd !== undefined && !nonEmpty(value.cwd)) issue(issues, "operational.command.cwd", "Command cwd must be a non-empty string", `${path}.cwd`);
   if (value.env !== undefined && !object(value.env)) issue(issues, "operational.command.env", "Command env must be an object", `${path}.env`);

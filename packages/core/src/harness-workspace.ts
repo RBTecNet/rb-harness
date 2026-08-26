@@ -1,6 +1,7 @@
 import { copyFile, lstat, mkdir, readdir, readFile, rename, rm, chmod } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { assessDecomposition } from "./harness-granularity.js";
+import { validateArtifactConsistency } from "./artifact-consistency.js";
 import { initializeProject, loadManifest, slugify, syncManifest, validateManifestTree } from "./manifest.js";
 import type { StructuralError } from "./harness-generator.js";
 import type { HarnessRunState, HarnessWorkflow } from "./standalone-types.js";
@@ -146,13 +147,24 @@ export interface StagedValidation {
  * Deterministic validation of the staged tree. Manifest, hashes, IDs, and the
  * TSV projection are derived here by code; what remains is the document
  * content the writer owns, reported as an ordered, machine-generated error
- * list the single repair can consume.
+ * list a bounded localized correction can consume.
  */
-export async function validateStagedTree(staging: string, workflow: HarnessWorkflow): Promise<StagedValidation> {
+export async function validateStagedTree(
+  staging: string,
+  workflow: HarnessWorkflow,
+  projectRoot = staging,
+): Promise<StagedValidation> {
   await assertNoEnvironmentSecrets(staging);
   const manifest = await syncManifest(staging);
   const validation = await validateManifestTree(staging);
   const errors = validation.issues.map(structuralError);
+  if (validation.valid) {
+    errors.push(...(await validateArtifactConsistency({
+      projectRoot,
+      artifactRoot: resolve(staging, ".rb"),
+      manifest,
+    })).map(structuralError));
+  }
   errors.push(...await decompositionErrors(staging, manifest));
   if (validation.valid && !workflowArtifactReady(workflow, manifest.artifacts)) {
     const declaredBlockers = manifest.artifacts
@@ -208,6 +220,16 @@ async function uniquePreviousPath(runRoot: string): Promise<string> {
   throw new Error("too many preserved artifact revisions in one Harness run");
 }
 
+async function uniqueFailedPublicationPath(runRoot: string): Promise<string> {
+  const base = resolve(runRoot, "failed-publication");
+  if (!(await exists(base))) return base;
+  for (let index = 2; index < 100; index += 1) {
+    const candidate = resolve(runRoot, `failed-publication-${index}`);
+    if (!(await exists(candidate))) return candidate;
+  }
+  throw new Error("too many failed publications in one Harness run");
+}
+
 export async function publishStagedArtifacts(state: HarnessRunState, runRoot: string, staging: string): Promise<string | undefined> {
   const target = safeArtifactTarget(state.projectRoot, state.artifactDirectory);
   const staged = resolve(staging, ".rb");
@@ -237,6 +259,44 @@ export async function publishStagedArtifacts(state: HarnessRunState, runRoot: st
     }
     throw error;
   }
+}
+
+/**
+ * Quarantine a publication that failed its closing verification and restore
+ * the prior revision without deleting either set of bytes.
+ */
+export async function rollbackPublishedArtifacts(
+  state: HarnessRunState,
+  runRoot: string,
+  previous?: string,
+): Promise<string> {
+  const target = safeArtifactTarget(state.projectRoot, state.artifactDirectory);
+  if (!(await exists(target))) {
+    if (previous && await exists(previous)) {
+      await mkdir(dirname(target), { recursive: true });
+      await rename(previous, target);
+    }
+    throw new Error("published artifact target disappeared before rollback");
+  }
+  if (previous && !(await exists(previous))) throw new Error("previous artifact revision disappeared before rollback");
+
+  if (previous && state.artifactDirectory === ".rb") {
+    const currentRuns = resolve(target, "runs");
+    const previousRuns = resolve(previous, "runs");
+    if (await exists(currentRuns) && !(await exists(previousRuns))) await rename(currentRuns, previousRuns);
+  }
+
+  const failed = await uniqueFailedPublicationPath(runRoot);
+  await rename(target, failed);
+  if (previous) {
+    try {
+      await rename(previous, target);
+    } catch (error) {
+      if (!(await exists(target))) await rename(failed, target).catch(() => undefined);
+      throw error;
+    }
+  }
+  return failed;
 }
 
 export async function recoverInterruptedPublication(state: HarnessRunState, runRoot: string): Promise<boolean> {

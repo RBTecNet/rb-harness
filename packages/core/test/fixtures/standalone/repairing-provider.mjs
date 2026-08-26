@@ -30,7 +30,7 @@ if (process.env.RB_HARNESS_MODE === "interview") {
   process.exit(0);
 }
 
-function phases(valid) {
+function phases(valid, controlPlaneScope = false) {
   return `# RB Execution Plan: Structural repair
 
 <!-- rb-execution-contract: rb-execution/v1 -->
@@ -46,7 +46,7 @@ function phases(valid) {
 - \`.rb/features/structural-repair/PLAN.md\`
 
 - [ ] T001 — Implement the typed scope gate
-  - **Scope:** \`src/\`, \`tests/\`
+  - **Scope:** ${controlPlaneScope ? "\`.rb/features/structural-repair/PHASES.md\`" : "\`src/\`, \`tests/\`"}
   - **Change:** Enforce RF-001 using the declared request field and matrix.
   - **Covers:** RF-001
   - **Depends on:** none
@@ -64,12 +64,15 @@ function phases(valid) {
 // The repair prompt carries the ordered deterministic errors; their presence is
 // what tells the fixture which pass it is running.
 const repairing = process.env.RB_HARNESS_MODE === "repair" || prompt.includes("DETERMINISTIC ERRORS");
+const needsSecondRepair = process.env.RB_HARNESS_TEST_TWO_REPAIRS === "1"
+  && repairing
+  && !prompt.includes("task.scope.control-plane");
 const bundle = repairing
   ? {
     contract: "rb-harness-documents/v1",
     status: "complete",
     summary: "Repaired the ambiguous acceptance criterion in place.",
-    documents: [{ path: ".rb/features/structural-repair/PHASES.md", content: phases(true) }],
+    documents: [{ path: ".rb/features/structural-repair/PHASES.md", content: phases(true, needsSecondRepair) }],
     blocked: [],
   }
   : {

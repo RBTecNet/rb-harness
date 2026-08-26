@@ -53,6 +53,56 @@ describe("rb-execution/v1", () => {
     expect(projectWide.issues.map((entry) => entry.code)).toContain("task.scope.ambiguous");
   });
 
+  it("rejects immutable planning artifacts in task Scope", async () => {
+    const source = await fixture("valid", "minimal");
+    for (const protectedScope of [
+      "`.rb`",
+      "`.rb/`",
+      "`./.rb/init/OPERATIONS.json`",
+      "`.rb/features/example/**`",
+      "`.rb\\init\\OPERATIONS.json`",
+    ]) {
+      const result = validateExecutionMarkdown(source.replace("`src/`, `tests/`", protectedScope));
+      const controlPlane = result.issues.find((entry) => entry.code === "task.scope.control-plane");
+      expect(controlPlane?.message, protectedScope).toContain("T001");
+      expect(controlPlane?.message, protectedScope).toContain("immutable planning artifacts");
+    }
+  });
+
+  it("allows planning artifacts as read-only Context and Validation input", async () => {
+    const source = (await fixture("valid", "minimal"))
+      .replace("`.rb/init/PROJECT.md`", "`.rb/init/OPERATIONS.json`")
+      .replace("`npm test`", "`rb-harness operations validate .rb/init/OPERATIONS.json`");
+    const result = validateExecutionMarkdown(source);
+    expect(result.issues.filter((entry) => entry.code === "task.scope.control-plane")).toEqual([]);
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects control-plane globs and Change instructions even when another field looks safe", async () => {
+    const source = await fixture("valid", "minimal");
+    const globbed = validateExecutionMarkdown(source.replace("`src/`, `tests/`", "`.r*/**`"));
+    expect(globbed.issues.map((entry) => entry.code)).toContain("task.scope.control-plane");
+
+    const changed = validateExecutionMarkdown(source.replace(
+      "Implement the documented foundation without unrelated changes.",
+      "Implement the foundation and update `.rb/init/OPERATIONS.json`.",
+    ));
+    expect(changed.issues.map((entry) => entry.code)).toContain("task.change.control-plane");
+
+    for (const defensiveDescription of [
+      "Reject `.rb`, `.rb/`, and every `.rb/**` descendant from task scope.",
+      "Ensure generated tasks never own `.rb/**`.",
+      "Prevent providers from writing to `.rb/**` during execution.",
+    ]) {
+      const defensive = validateExecutionMarkdown(source.replace(
+        "Implement the documented foundation without unrelated changes.",
+        defensiveDescription,
+      ));
+      expect(defensive.issues.map((entry) => entry.code), defensiveDescription)
+        .not.toContain("task.change.control-plane");
+    }
+  });
+
   it("rejects acceptance criteria that delegate meaning to a requirement ID", async () => {
     const source = (await fixture("valid", "minimal")).replace(
       "Running the version command exits with code 0 and prints `0.1.0`.",

@@ -1,4 +1,5 @@
 import type { HarnessRunState } from "./standalone-types.js";
+import { HARNESS_BUDGET } from "./harness-budget.js";
 import type { ProviderMode } from "./harness-provider.js";
 import {
   HARNESS_STAGE_LABELS,
@@ -167,7 +168,7 @@ export function renderHarnessDashboard(view: ViewState, requestedWidth?: number)
   lines.push(border("PIPELINE DOCUMENTAL", width));
   lines.push(row(PIPELINE.map((stage) => `${stageMark(stageState(state?.status, view.stage, stage))} ${COMPACT_LABEL[stage]}`).join("  "), width));
   const activeLabel = view.stage ? HARNESS_STAGE_LABELS[view.stage] : "inicializando";
-  lines.push(row(`${C.cyan}etapa${C.reset} ${C.white}${activeLabel}${C.reset}    ${C.cyan}status${C.reset} ${C.white}${clean(state?.status || "inicializando")}${C.reset}    ${C.cyan}respostas${C.reset} ${state?.answers.length ?? 0}    ${C.cyan}correções${C.reset} ${state?.repairsUsed ?? 0}/1`, width));
+  lines.push(row(`${C.cyan}etapa${C.reset} ${C.white}${activeLabel}${C.reset}    ${C.cyan}status${C.reset} ${C.white}${clean(state?.status || "inicializando")}${C.reset}    ${C.cyan}respostas${C.reset} ${state?.answers.length ?? 0}    ${C.cyan}correções${C.reset} ${state?.repairsUsed ?? 0}/${HARNESS_BUDGET.generation.structuralRepairs}`, width));
   lines.push(row(`${C.cyan}gate${C.reset} contrato determinístico · sem gerente ou auditor LLM`, width));
   lines.push(border("", width, true));
   lines.push("");

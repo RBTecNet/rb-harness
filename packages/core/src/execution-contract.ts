@@ -154,7 +154,7 @@ function ambiguousAcceptanceCriterion(value: string): string | undefined {
   }
   if (/\bOPERATIONS\.json\b/i.test(body)
     && /\b(?:pass(?:es|ed)?|succeed(?:s|ed)?|run(?:s)? successfully|clean[- ]room|passes? in|executad[oa]|passa|sucesso|ambiente limpo)\b/i.test(body)) {
-    return "requires future final-audit evidence; a normal task may require a valid operational contract, while execution of that contract belongs to the post-phase operational audit";
+    return "requires future final-audit evidence; Harness generation owns the valid operational contract, while its execution belongs to the post-phase operational audit";
   }
   return undefined;
 }
@@ -176,8 +176,48 @@ function parseList(value: string): string[] {
     .filter(Boolean);
 }
 
+export function taskScopeTokens(value: string): string[] {
+  return [...value.matchAll(/`([^`]+)`/g)]
+    .map((match) => match[1]?.trim())
+    .filter((path): path is string => Boolean(path));
+}
+
+/**
+ * Planning artifacts are immutable execution input.
+ *
+ * The manifest always uses the logical `.rb/` namespace, including when the
+ * operator publishes it to a custom physical directory such as `.spec`.
+ * Scope is write authority, so matching the logical namespace here keeps the
+ * rule provider-, runner-, and output-directory-neutral.
+ */
+export function scopeTokenOwnsPlanningArtifacts(value: string): boolean {
+  const normalized = value.trim().replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/{2,}/g, "/");
+  if (normalized === ".rb" || normalized.startsWith(".rb/")) return true;
+  const firstSegment = normalized.split("/")[0] ?? "";
+  if (!/[*?]/.test(firstSegment)) return false;
+  const pattern = firstSegment
+    .replace(/[\\^$.*+?()[\]{}|]/g, "\\$&")
+    .replaceAll("\\*", ".*")
+    .replaceAll("\\?", ".");
+  return new RegExp(`^${pattern}$`).test(".rb");
+}
+
+function changeReferencesPlanningArtifacts(value: string): boolean {
+  // Scope is the primary write-authority boundary. Change adds a second guard
+  // for an explicit mutation instruction, but must still allow a task to
+  // describe the protection itself (for example, "reject `.rb/**`" or
+  // "ensure tasks never own `.rb/**`"). Keep the mutation verb adjacent to
+  // the protected path so explanatory references do not become false
+  // positives.
+  const mutation = "(?:update|edit|write(?:\s+to)?|create|delete|remove|replace|overwrite|patch|modify|regenerate|sync|publish|mutate|"
+    + "atualizar|editar|escrever(?:\s+em)?|criar|excluir|remover|substituir|sobrescrever|corrigir|modificar|regenerar|sincronizar|publicar)";
+  const optionalTarget = "(?:\\s+(?:the|a|an|o|a|os|as))?(?:\\s+(?:file|directory|artifact|manifest|arquivo|diret[oó]rio|artefato|manifesto))?";
+  const planningPath = "\\s+[`'\"]?(?:\\./)?\\.rb(?:[\\\\/][^`'\"\\s,;]*)?[`'\"]?";
+  return new RegExp(`\\b${mutation}${optionalTarget}${planningPath}`, "i").test(value);
+}
+
 function ambiguousTaskScope(value: string): string | undefined {
-  const paths = [...value.matchAll(/`([^`]+)`/g)].map((match) => match[1]?.trim()).filter(Boolean);
+  const paths = taskScopeTokens(value);
   if (paths.length === 0) return "must declare at least one project-relative file, directory, or bounded glob in backticks";
   if (paths.some((path) => [".", "./", "/", "*", "**", "**/*"].includes(path!))) {
     return "must not use an unbounded project-wide path; split the task into concrete owned paths";
@@ -305,6 +345,25 @@ function parseTask(
   }
   const scopeAmbiguity = ambiguousTaskScope(values.get("Scope") ?? "");
   if (scopeAmbiguity) issue(issues, "task.scope.ambiguous", `${id} Scope ${scopeAmbiguity}`, offset);
+  const protectedScopes = taskScopeTokens(values.get("Scope") ?? "").filter(scopeTokenOwnsPlanningArtifacts);
+  if (protectedScopes.length) {
+    issue(
+      issues,
+      "task.scope.control-plane",
+      `${id} Scope must not own immutable planning artifacts: ${protectedScopes.join(", ")}. `
+        + "Reference them through phase Context or a read-only Validation instead.",
+      offset,
+    );
+  }
+  if (changeReferencesPlanningArtifacts(values.get("Change") ?? "")) {
+    issue(
+      issues,
+      "task.change.control-plane",
+      `${id} Change must not direct edits to immutable .rb planning artifacts. `
+        + "Move the artifact to phase Context and describe only the implementation change.",
+      offset,
+    );
+  }
 
   return {
     id,

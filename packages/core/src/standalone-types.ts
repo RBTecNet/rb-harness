@@ -185,8 +185,10 @@ export interface HarnessRunState {
   generationCheckpoint?: GenerationCheckpoint;
   checkpoints?: RunCheckpoints;
   bundle?: BundleCheckpoint;
-  /** Structural repairs already spent; the budget is exactly one. */
+  /** Localized structural repairs already spent. */
   repairsUsed?: number;
+  /** Last automatic deterministic verification report for the published tree. */
+  verificationReport?: string;
   telemetry?: unknown;
   inventory: ProjectInventory;
   createdAt: string;

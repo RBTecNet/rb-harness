@@ -48,4 +48,21 @@ describe("rb-operational/v1", () => {
       "operational.scenario.id.duplicate",
     ]));
   });
+
+  it("rejects opaque inline interpreter programs", () => {
+    for (const argv of [
+      ["node", "-e", "require('./src/game.js')"],
+      ["python3", "-c", "from app import main"],
+      ["bash", "-c", "./bin/app --version"],
+      ["pwsh", "-Command", "./app.exe"],
+    ]) {
+      const result = validateOperationalValue({
+        contract: "rb-operational/v1",
+        scenarios: [{ id: "opaque", title: "Opaque proof", steps: [
+          { id: "run", kind: "command", command: { argv }, expect: { exitCode: 0 } },
+        ] }],
+      });
+      expect(result.issues.map((entry) => entry.code)).toContain("operational.command.inline-program");
+    }
+  });
 });

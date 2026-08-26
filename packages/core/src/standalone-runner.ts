@@ -3,8 +3,8 @@
  *
  * inventory → adaptive gap analysis (1 batch, then focused rounds until it
  * converges) → closed decision checkpoint → bounded incremental authoring →
- * materialization → deterministic validation → at most one localized structural
- * repair → atomic publication.
+ * materialization → deterministic validation → bounded localized structural
+ * convergence → atomic publication → automatic artifact verification.
  *
  * The graph is acyclic apart from those two explicitly counted allowances. The
  * interview loop is bounded by declared safety ceilings rather than a fixed
@@ -21,6 +21,7 @@ import { basename, resolve } from "node:path";
 import { createInterface, type Interface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { HARNESS_BUDGET } from "./harness-budget.js";
+import { verifyArtifacts } from "./artifact-verifier.js";
 import { inspectProjectInventory } from "./harness-inventory.js";
 import { requestInterviewAnalysis } from "./harness-interview.js";
 import {
@@ -42,6 +43,7 @@ import {
   prepareStagingTree,
   publishStagedArtifacts,
   recoverInterruptedPublication,
+  rollbackPublishedArtifacts,
   validateStagedTree,
 } from "./harness-workspace.js";
 import {
@@ -357,7 +359,7 @@ async function materializeAndValidate(
   telemetry?.beginStage("validation");
   state.status = "validating";
   await writeRunState(state);
-  return validateStagedTree(staging, state.workflow);
+  return validateStagedTree(staging, state.workflow, state.projectRoot);
 }
 
 async function generate(
@@ -397,12 +399,11 @@ async function generate(
     throw new Error(state.diagnostic);
   }
 
-  let validation = await materializeAndValidate(state, runRoot, bundle);
-  if (!validation.valid) {
+  const repair = async (errors: StructuralError[]): Promise<void> => {
     const repairsUsed = state.repairsUsed ?? 0;
-    if (!validation.repairable || repairsUsed >= HARNESS_BUDGET.generation.structuralRepairs) {
+    if (repairsUsed >= HARNESS_BUDGET.generation.structuralRepairs) {
       state.status = "generation-failed";
-      state.diagnostic = `generated artifact tree is invalid: ${formatStructuralErrors(validation.errors)}`;
+      state.diagnostic = `artifact correction did not converge after ${repairsUsed} localized pass(es): ${formatStructuralErrors(errors)}`;
       await writeRunState(state);
       throw new Error(state.diagnostic);
     }
@@ -411,44 +412,118 @@ async function generate(
     state.repairsUsed = repairsUsed + 1;
     state.diagnostic = undefined;
     await writeRunState(state);
-    process.stdout.write(`[rb-harness] ${validation.errors.length} erro(s) estrutural(is); executando a única correção localizada.\n`);
+    process.stdout.write(
+      `[rb-harness] ${errors.length} falha(s) determinística(s); correção localizada `
+      + `${state.repairsUsed}/${HARNESS_BUDGET.generation.structuralRepairs}.\n`,
+    );
     bundle = await requestStructuralRepair({
       state,
-      bundle,
-      errors: validation.errors,
+      bundle: bundle!,
+      errors,
       runRoot,
       evidenceRoot,
       timeoutSeconds: options.timeoutSeconds,
       firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
       streamOutput: false,
+      repairPass: state.repairsUsed,
     });
     await persistBundle(state, runRoot, bundle, true);
-    validation = await materializeAndValidate(state, runRoot, bundle);
+  };
+
+  let publicationIntegrityRetries = 0;
+  while (true) {
+    const validation = await materializeAndValidate(state, runRoot, bundle);
     if (!validation.valid) {
+      if (!validation.repairable) {
+        state.status = "generation-failed";
+        state.diagnostic = `generated artifact tree has an unrepairable integrity failure: ${formatStructuralErrors(validation.errors)}`;
+        await writeRunState(state);
+        throw new Error(state.diagnostic);
+      }
+      await repair(validation.errors);
+      continue;
+    }
+
+    checkpoints(state).validatedAt = new Date().toISOString();
+    await writeRunState(state);
+    process.stdout.write(`[rb-harness] validação de staging verde: ${validation.artifacts} artefatos, ${validation.readyPlans} plano(s) pronto(s).\n`);
+
+    telemetry?.beginStage("publication");
+    state.status = "publishing";
+    await writeRunState(state);
+    const previous = await publishStagedArtifacts(state, runRoot, resolve(runRoot, "staging"));
+    state.previousArtifacts = previous;
+
+    // Context and review workflows intentionally do not promise a Ralph-ready
+    // execution plan. Their staged tree has already passed manifest/tree and
+    // workflow-specific readiness validation; the full artifacts verifier is
+    // the closing gate for workflows that publish executable plans.
+    if (!["init", "plan", "evolve"].includes(state.workflow)) {
+      state.status = "complete";
+      state.generationCheckpoint = undefined;
+      state.publishedAt = new Date().toISOString();
+      checkpoints(state).publishedAt = state.publishedAt;
+      state.diagnostic = undefined;
+      await writeRunState(state);
+      process.stdout.write("[rb-harness] publicação verificada automaticamente: tree validate verde.\n");
+      process.stdout.write(`[rb-harness] artefatos publicados em ${state.artifactDirectory}.\n`);
+      if (previous) process.stdout.write(`[rb-harness] revisão anterior preservada em ${previous}.\n`);
+      break;
+    }
+
+    const verification = await verifyArtifacts({
+      projectRoot: state.projectRoot,
+      artifactDirectory: state.artifactDirectory,
+      authorityRunId: state.id,
+    });
+    state.verificationReport = verification.reportPath;
+    if (verification.readyForRalph) {
+      state.status = "complete";
+      state.generationCheckpoint = undefined;
+      state.publishedAt = new Date().toISOString();
+      checkpoints(state).publishedAt = state.publishedAt;
+      state.diagnostic = undefined;
+      await writeRunState(state);
+      process.stdout.write(
+        `[rb-harness] publicação verificada automaticamente: contract validate, tree validate e artifacts verify verdes; `
+        + `relatório ${verification.reportPath}.\n`,
+      );
+      process.stdout.write(`[rb-harness] artefatos publicados em ${state.artifactDirectory}.\n`);
+      if (previous) process.stdout.write(`[rb-harness] revisão anterior preservada em ${previous}.\n`);
+      break;
+    }
+
+    const failedPublication = await rollbackPublishedArtifacts(state, runRoot, previous);
+    state.previousArtifacts = undefined;
+    state.publishedAt = undefined;
+    checkpoints(state).publishedAt = undefined;
+    await writeRunState(state);
+    process.stdout.write(
+      `[rb-harness] verificação automática rejeitou a publicação; bytes falhos preservados em ${failedPublication} `
+      + "e revisão anterior restaurada quando disponível.\n",
+    );
+
+    const materialFindings = verification.findings.filter((finding) => finding.severity !== "minor");
+    if (materialFindings.length > 0 && materialFindings.every((finding) => finding.criterion === "artifact.stale")) {
+      publicationIntegrityRetries += 1;
+      if (publicationIntegrityRetries <= 1) {
+        process.stdout.write("[rb-harness] divergência ocorreu após staging; republicando o bundle validado uma vez sem nova autoria.\n");
+        continue;
+      }
+    }
+    const repairErrors: StructuralError[] = materialFindings.map((finding) => ({
+      code: finding.criterion,
+      message: `${finding.evidence} Required change: ${finding.requiredChange}`,
+      ...(finding.artifact ? { path: finding.artifact } : {}),
+    }));
+    if (!repairErrors.length) {
       state.status = "generation-failed";
-      state.diagnostic = `structural repair did not converge: ${formatStructuralErrors(validation.errors)}`;
+      state.diagnostic = "automatic artifact verification rejected readiness without a material repair finding";
       await writeRunState(state);
       throw new Error(state.diagnostic);
     }
+    await repair(repairErrors);
   }
-
-  checkpoints(state).validatedAt = new Date().toISOString();
-  await writeRunState(state);
-  process.stdout.write(`[rb-harness] validação determinística verde: ${validation.artifacts} artefatos, ${validation.readyPlans} plano(s) pronto(s).\n`);
-
-  telemetry?.beginStage("publication");
-  state.status = "publishing";
-  await writeRunState(state);
-  const previous = await publishStagedArtifacts(state, runRoot, resolve(runRoot, "staging"));
-  state.previousArtifacts = previous;
-  state.status = "complete";
-  state.generationCheckpoint = undefined;
-  state.publishedAt = new Date().toISOString();
-  checkpoints(state).publishedAt = state.publishedAt;
-  state.diagnostic = undefined;
-  await writeRunState(state);
-  process.stdout.write(`[rb-harness] artefatos publicados em ${state.artifactDirectory}.\n`);
-  if (previous) process.stdout.write(`[rb-harness] revisão anterior preservada em ${previous}.\n`);
 }
 
 function optionsFromState(state: HarnessRunState, current: Partial<StandaloneRunOptions> = {}): StandaloneRunOptions {

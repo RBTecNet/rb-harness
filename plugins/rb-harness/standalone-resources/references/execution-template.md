@@ -99,12 +99,12 @@ passed through every configured secret/input channel. Exact configured secret
 values must be absent from public responses, logs, evidence, and error chains;
 regex redaction is only defense in depth.
 
-`OPERATIONS.json` has one execution owner. A normal phase may require that the
-contract exists, validates, and matches documentation/configuration modes, but
-must not require the scenario to pass. Clean-room execution is the post-phase
-operational audit (`RBF`) and therefore cannot be an acceptance dependency of a
-preceding task. This prevents a forward dependency where a phase can only pass
-after a gate that cannot start until that phase passes.
+The Harness owns creation and deterministic validation of `OPERATIONS.json`.
+No implementation task may include `.rb`, `.rb/**`, or any generated planning
+artifact in `Scope` or `Change`; those files are immutable execution authority.
+Tasks may read them through `Context` and invoke read-only validators. Clean-room
+execution is the post-phase operational audit (`RBF`) and therefore cannot be
+an acceptance dependency of a preceding task.
 
 ## Task granularity
 

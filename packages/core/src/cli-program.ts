@@ -755,7 +755,7 @@ artifacts
     if (options.remediate) {
       throw new Error(
         "--remediate was removed with the semantic documentation manager. Verification is deterministic and never repairs artifacts. "
-        + "Re-run the workflow (rb-harness plan/evolve/init/review ...) to regenerate documentation; a single bounded structural repair now happens inside generation.",
+        + "Re-run the workflow (rb-harness plan/evolve/init/review ...) to regenerate documentation; bounded localized structural correction now happens inside generation.",
       );
     }
     if (options.fromReport) {

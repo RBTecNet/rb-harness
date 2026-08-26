@@ -16,7 +16,7 @@ retomáveis em vez de exigir um pacote monolítico do modelo.
 
 ## Instalação do executável
 
-O RB Harness 0.5.16 exige Node.js 20 ou superior. No clone do repositório:
+O RB Harness 0.5.17 exige Node.js 20 ou superior. No clone do repositório:
 
 ```bash
 npm install
@@ -35,7 +35,7 @@ Confira a versão instalada:
 ```bash
 rb-harness --version
 rb-harness --ver
-# 0.5.16
+# 0.5.17
 ```
 
 Executar apenas `rb-harness` abre o assistente interativo. O splash com a
@@ -96,8 +96,8 @@ só vem das ferramentas documentais confinadas ao projeto-alvo.
 O fluxo é: inventário → análise adaptativa de lacunas (1 lote e quantas rodadas
 focadas a convergência exigir) → checkpoint fechado de decisões → plano
 documental compacto → partes de no máximo 12 KiB → montagem → materialização →
-validação determinística → no máximo uma correção estrutural localizada →
-publicação atômica. Fora dessas permissões contadas, o grafo é acíclico e
+validação determinística → até três correções estruturais localizadas →
+publicação e verificação automática. Fora dessas permissões contadas, o grafo é acíclico e
 nenhuma etapa pode se reiniciar
 sozinha.
 
@@ -129,10 +129,11 @@ decisões e autoria não são refeitas para corrigir JSON, marcadores ou campos 
 apresentação. Respostas brutas concluídas são recuperadas dos logs privados
 após interrupções.
 
-A correção estrutural recebe apenas a lista ordenada de erros mecânicos e os
+Cada correção estrutural recebe apenas a lista ordenada de erros mecânicos e os
 trechos afetados, e precisa preservar byte a byte todo conteúdo não relacionado.
 Ela não reabre a entrevista, não reexplora o repositório e não reemite a árvore.
-Uma segunda falha é reportada ao operador com o diagnóstico exato; não há loop.
+Uma falha pode expor outra inconsistência dependente, por isso há até três
+passagens; a não convergência termina com diagnóstico e checkpoint preservado.
 
 ## Decomposição verificada do plano
 
@@ -174,7 +175,7 @@ validação, o código faz somente normalizações sem perda: move asserções H
 formato legado para os campos exatos de `rb-operational/v1` e remove da task a
 referência redundante à dependência da fase que a contém. Um plano inválido
 preserva seu ID declarado no manifesto, impedindo que um erro real gere também
-um falso `artifact.id.mismatch`. O plano da única correção estrutural roda
+um falso `artifact.id.mismatch`. Cada plano de correção estrutural roda
 fechado e sem ferramentas; todos os validadores e a exigência de um plano
 `rb-execution/v1` pronto permanecem inalterados.
 
@@ -678,8 +679,8 @@ qualidade.
 As opções que existiam apenas para acioná-los falham com erro orientativo, em
 vez de serem silenciosamente reinterpretadas:
 
-- `--remediate` e `--from-report` — execute o workflow novamente; hoje existe uma
-  única correção estrutural limitada dentro da própria geração;
+- `--remediate` e `--from-report` — execute o workflow novamente; hoje existe
+  correção estrutural localizada e limitada dentro da própria geração;
 - `--answers` e `--non-interactive` no `artifacts verify` — a verificação
   determinística não faz perguntas.
 
@@ -713,6 +714,14 @@ mensagem explícita.
 Quando uma nova árvore é publicada, a anterior é movida para
 `.rb-harness/runs/<run-id>/previous-artifacts`. O Harness nunca apaga
 silenciosamente a documentação anterior.
+
+Os artefatos `.rb` são autoridade imutável do plano durante a execução: nenhuma
+task pode possuí-los em `Scope` ou `Change`. Depois da publicação atômica, os
+workflows com plano executável rodam automaticamente os equivalentes
+determinísticos de `contract validate`, validação da árvore e `artifacts verify`.
+Se o fechamento reprovar, a publicação é colocada em quarentena, a revisão
+anterior é restaurada e o Harness tenta até três correções localizadas. O estado
+`complete` só é gravado quando todos esses gates estão verdes.
 
 ## CLI determinística
 
@@ -800,7 +809,7 @@ operador. Até lá, nenhuma afirmação de superação da linha de base é feita
 
 - O Harness gera documentação; não implementa a aplicação.
 - O `verify` é determinístico e somente leitura; nunca inicia um provider.
-- Existe no máximo uma correção estrutural localizada por execução.
+- Existem no máximo três correções estruturais localizadas por execução.
 - Não existe gerente, auditor semântico nem correção automática ilimitada.
 - O RB Ralph não é alterado por este produto; ele apenas consome o contrato.
 - Credenciais não pertencem aos artefatos.

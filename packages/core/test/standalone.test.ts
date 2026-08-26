@@ -18,7 +18,9 @@ import {
 import {
   assertNoEnvironmentSecrets,
   prepareStagingTree,
+  publishStagedArtifacts,
   recoverInterruptedPublication,
+  rollbackPublishedArtifacts,
   validateStagedTree,
 } from "../src/harness-workspace.js";
 import { materializeDocuments, parseDocumentBundle } from "../src/harness-documents.js";
@@ -416,11 +418,31 @@ describe("standalone RB Harness", () => {
       expect(state.status).toBe("complete");
       expect(state.artifactAudits).toBeUndefined();
       expect(state.repairsUsed).toBe(0);
+      expect(state.verificationReport).toBeTruthy();
+      expect(JSON.parse(await readFile(state.verificationReport!, "utf8"))).toMatchObject({
+        deterministic: { passed: true },
+        readyForRalph: true,
+      });
       expect((await readFile(modes, "utf8")).trim().split("\n"))
         .toEqual(["interview", "interview", "generation"]);
     } finally {
       delete process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE;
     }
+  }, 60_000);
+
+  it("quarantines a rejected publication and restores the prior artifact revision", async () => {
+    const { project, answers } = await fixtureProject("rb-harness-publication-rollback-");
+    const state = await runStandaloneWorkflow(baseOptions(project, answers));
+    const runRoot = resolve(project, ".rb-harness/runs", state.id);
+    await writeFile(resolve(project, ".rb/prior-marker.txt"), "prior\n", "utf8");
+    const staging = await prepareStagingTree(state, runRoot);
+    await writeFile(resolve(staging, ".rb/new-marker.txt"), "rejected\n", "utf8");
+
+    const previous = await publishStagedArtifacts(state, runRoot, staging);
+    const failed = await rollbackPublishedArtifacts(state, runRoot, previous);
+
+    expect(await readFile(resolve(project, ".rb/prior-marker.txt"), "utf8")).toBe("prior\n");
+    expect(await readFile(resolve(failed, "new-marker.txt"), "utf8")).toBe("rejected\n");
   }, 60_000);
 
   it("formats prose-only CLI interviews in closed passes instead of repeating discovery", async () => {
@@ -492,6 +514,32 @@ describe("standalone RB Harness", () => {
     } finally {
       delete process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE;
       delete process.env.RB_HARNESS_TEST_PROVIDER_CWD_FILE;
+    }
+  }, 60_000);
+
+  it("keeps correcting when one generated fix exposes a second deterministic defect", async () => {
+    const project = await mkdtemp(resolve(tmpdir(), "rb-harness-multi-repair-"));
+    await writeFile(resolve(project, "package.json"), '{"name":"repair-fixture"}\n', "utf8");
+    const answers = resolve(project, "answers.json");
+    await writeFile(answers, "{}\n", "utf8");
+    await chmod(repairingProvider, 0o755);
+    const modes = resolve(project, "provider-modes.log");
+    process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE = modes;
+    process.env.RB_HARNESS_TEST_TWO_REPAIRS = "1";
+    try {
+      const state = await runStandaloneWorkflow({
+        ...baseOptions(project, answers, repairingProvider),
+        request: "Plan a deterministic scope gate and correct generated defects until valid.",
+      });
+      expect(state.status).toBe("complete");
+      expect(state.repairsUsed).toBe(2);
+      expect((await readFile(modes, "utf8")).trim().split("\n"))
+        .toEqual(["interview", "generation", "repair", "repair"]);
+      expect(await readFile(resolve(project, ".rb/features/structural-repair/PHASES.md"), "utf8"))
+        .not.toContain("**Scope:** `.rb/");
+    } finally {
+      delete process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE;
+      delete process.env.RB_HARNESS_TEST_TWO_REPAIRS;
     }
   }, 60_000);
 

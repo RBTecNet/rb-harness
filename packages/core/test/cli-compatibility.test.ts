@@ -77,8 +77,8 @@ describe("public CLI compatibility", () => {
 
 describe("bounded state graph", () => {
   /**
-   * The documentation graph is acyclic except for the single counted interview
-   * follow-up and the single counted structural repair. No stage may restart
+   * The documentation graph is acyclic except for the counted interview
+   * follow-up and bounded counted structural corrections. No stage may restart
    * itself, and no stage may return to an earlier one.
    */
   const TRANSITIONS: Readonly<Record<RunStatus, RunStatus[]>> = {
@@ -92,7 +92,7 @@ describe("bounded state graph", () => {
     "validating": ["repairing", "publishing", "generation-failed"],
     "repairing": ["materializing", "generation-failed"],
     "auditing": [],
-    "publishing": ["complete"],
+    "publishing": ["complete", "repairing", "generation-failed"],
     "complete": [],
   };
 
@@ -121,12 +121,13 @@ describe("bounded state graph", () => {
 
   it("counts both allowances explicitly and finitely", () => {
     // The interview loops until it converges, so its allowance is a declared
-    // finite ceiling rather than a fixed round count; the repair stays single.
+    // finite ceiling rather than a fixed round count; corrections also have a
+    // small explicit ceiling so one generated defect does not abort the run.
     expect(Number.isInteger(HARNESS_BUDGET.interview.maxRounds)).toBe(true);
     expect(HARNESS_BUDGET.interview.maxRounds).toBeGreaterThan(0);
     expect(Number.isInteger(HARNESS_BUDGET.interview.maxQuestions)).toBe(true);
     expect(HARNESS_BUDGET.interview.maxQuestions).toBeGreaterThan(0);
-    expect(HARNESS_BUDGET.generation.structuralRepairs).toBe(1);
+    expect(HARNESS_BUDGET.generation.structuralRepairs).toBe(3);
     expect(TRANSITIONS.auditing).toEqual([]);
   });
 });

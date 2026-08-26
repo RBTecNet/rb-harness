@@ -14,6 +14,7 @@ import { dirname, extname, relative, resolve, sep } from "node:path";
 import { walkFiles } from "./fs-utils.js";
 import { sha256File } from "./hash.js";
 import { assessDecomposition } from "./harness-granularity.js";
+import { validateArtifactConsistency } from "./artifact-consistency.js";
 import { inspectProjectInventory } from "./harness-inventory.js";
 import { listRunStates } from "./harness-state.js";
 import { loadManifest, validateManifestTree } from "./manifest.js";
@@ -85,6 +86,8 @@ const DETERMINISTIC_CHECKS = [
   "requirement-coverage",
   "portable-paths",
   "task-decomposition",
+  "artifact-authority",
+  "cross-artifact-consistency",
 ];
 
 function logicalPhysicalPath(projectRoot: string, artifactDirectory: string, logicalPath: string): string {
@@ -285,6 +288,11 @@ async function deterministicVerification(
     return { manifest: tree.manifest, findings, artifactCount: tree.manifest?.artifacts.length ?? 0, readyPlanCount: 0 };
   }
   const manifest = await loadManifest(projectRoot, artifactDirectory);
+  findings.push(...(await validateArtifactConsistency({
+    projectRoot,
+    artifactRoot: resolve(projectRoot, artifactDirectory),
+    manifest,
+  })).map(deterministicFinding));
   const planArtifacts = manifest.artifacts.filter((artifact) => artifact.kind === "execution-plan");
   const readyPlans = planArtifacts.filter((artifact) => artifact.status === "ready" && artifact.contract === "rb-execution/v1");
   if (!readyPlans.length) {
@@ -341,8 +349,10 @@ async function authorityState(
   manifest: ArtifactManifest | undefined,
 ): Promise<{ state: HarnessRunState; authority: ArtifactVerificationReport["authority"]; missing: boolean }> {
   const generatedAt = manifest ? Date.parse(manifest.generatedAt) : Number.NaN;
-  const completedRuns = (await listRunStates(options.projectRoot))
-    .filter((state) => state.status === "complete" && state.artifactDirectory === options.artifactDirectory);
+  const allRuns = (await listRunStates(options.projectRoot))
+    .filter((state) => state.artifactDirectory === options.artifactDirectory);
+  const completedRuns = allRuns
+    .filter((state) => state.status === "complete");
   const runs = completedRuns
     .filter((state) => {
       if (!state.publishedAt) return false;
@@ -354,7 +364,10 @@ async function authorityState(
     })
     .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
   const existing = options.authorityRunId
-    ? completedRuns.find((state) => state.id === options.authorityRunId)
+    // The generating run is deliberately still `publishing` here: completion
+    // is a consequence of this verification, never a prerequisite for binding
+    // the report to the original request and accepted decisions.
+    ? allRuns.find((state) => state.id === options.authorityRunId)
     : runs.at(-1);
   let request: string | undefined;
   let path: string | undefined;

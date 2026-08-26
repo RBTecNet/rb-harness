@@ -42,7 +42,7 @@ function phases(context = "`.rb/features/verification/REQUEST.md`"): string {
 
 async function project(
   request: string,
-  extra: { specification?: string; phases?: string } = {},
+  extra: { specification?: string; phases?: string; operations?: Record<string, unknown> } = {},
 ): Promise<{ root: string; authority: string }> {
   const root = await mkdtemp(resolve(tmpdir(), "rb-artifact-verify-"));
   await initializeProject(root, "Verification fixture", "verification-fixture");
@@ -51,6 +51,13 @@ async function project(
   await writeFile(resolve(root, ".rb/features/verification/PHASES.md"), extra.phases ?? phases(), "utf8");
   if (extra.specification) {
     await writeFile(resolve(root, ".rb/features/verification/SPEC.md"), extra.specification, "utf8");
+  }
+  if (extra.operations) {
+    await writeFile(
+      resolve(root, ".rb/features/verification/OPERATIONS.json"),
+      `${JSON.stringify(extra.operations, null, 2)}\n`,
+      "utf8",
+    );
   }
   const authority = resolve(root, "original-request.md");
   await writeFile(authority, "Implement RF-001 through one bounded task.\n", "utf8");
@@ -112,6 +119,79 @@ describe("deterministic artifact verifier", () => {
     expect(report.status).toBe("fail");
     expect(report.semantic.executed).toBe(false);
     expect(report.findings.some((finding) => finding.criterion === "artifact.stale")).toBe(true);
+  });
+
+  it("rejects an operational future path that its sibling plan does not own", async () => {
+    const fixture = await project("# Request\n\nRF-001 is implemented and verified by T001.\n", {
+      operations: {
+        contract: "rb-operational/v1",
+        cleanRoom: { exclude: ["dist"] },
+        scenarios: [{
+          id: "consumer",
+          title: "Exercise the planned entrypoint",
+          steps: [{ id: "entrypoint", kind: "file", path: "src/other.ts", exists: true }],
+        }],
+      },
+    });
+    const report = await verifyArtifacts({
+      projectRoot: fixture.root,
+      artifactDirectory: ".rb",
+      againstFile: fixture.authority,
+    });
+    const finding = report.findings.find((entry) => entry.criterion === "artifact.cross-reference.unowned-operational-path");
+    expect(finding?.evidence).toContain("src/other.ts");
+    expect(finding?.evidence).toContain("PHASES.md");
+    expect(report.readyForRalph).toBe(false);
+  });
+
+  it("rejects a future script path hidden in command argv when PHASES owns another path", async () => {
+    const fixture = await project("# Request\n\nRF-001 is implemented and verified by T001.\n", {
+      operations: {
+        contract: "rb-operational/v1",
+        scenarios: [{
+          id: "consumer",
+          title: "Run the planned entrypoint",
+          steps: [{
+            id: "run",
+            kind: "command",
+            command: { argv: ["node", "src/other.ts"] },
+            expect: { exitCode: 0 },
+          }],
+        }],
+      },
+    });
+    const report = await verifyArtifacts({
+      projectRoot: fixture.root,
+      artifactDirectory: ".rb",
+      againstFile: fixture.authority,
+    });
+    const finding = report.findings.find((entry) => entry.criterion === "artifact.cross-reference.unowned-operational-path");
+    expect(finding?.evidence).toContain("argv[1]");
+    expect(finding?.evidence).toContain("src/other.ts");
+  });
+
+  it("accepts operational paths owned by the plan, already present, or generated below an excluded root", async () => {
+    const fixture = await project("# Request\n\nRF-001 is implemented and verified by T001.\n", {
+      operations: {
+        contract: "rb-operational/v1",
+        cleanRoom: { exclude: ["dist"] },
+        scenarios: [{
+          id: "consumer",
+          title: "Exercise the planned entrypoint",
+          steps: [
+            { id: "owned", kind: "file", path: "src/fixture.ts", exists: true },
+            { id: "generated", kind: "file", path: "dist/fixture.js", exists: true },
+          ],
+        }],
+      },
+    });
+    const report = await verifyArtifacts({
+      projectRoot: fixture.root,
+      artifactDirectory: ".rb",
+      againstFile: fixture.authority,
+    });
+    expect(report.findings.filter((entry) => entry.criterion.startsWith("artifact.cross-reference"))).toEqual([]);
+    expect(report.readyForRalph).toBe(true);
   });
 
   it("requires every declared requirement to be covered by a task", async () => {

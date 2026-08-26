@@ -63,7 +63,8 @@ const CODE_OWNED = `## Owned by the orchestrator — never write these
 
 - \`.rb/rb-manifest.json\` and \`.rb/artifacts.tsv\` are generated after your call.
 - Artifact IDs, SHA-256 hashes, \`generatedAt\`, statuses, and kinds are derived from your files.
-- Directory creation, atomic publication, and the previous-revision backup are code.
+- The whole \`.rb/\` tree is generated planning authority, not implementation scope. No PHASES task may create, modify, delete, move, or glob any \`.rb\` path; tasks may only read declared \`.rb\` Context and run read-only validators against it.
+- Directory creation, dependency-ordered authoring, deterministic validation, automatic contract/tree/artifact verification, atomic publication, rollback, and the previous-revision backup are code.
 - Do not compute, restate, or "verify" any of the above. Spend your output on documentation content only.`;
 
 const EXECUTION_GRAMMAR = `## rb-execution/v1 — PHASES.md grammar (exact)
@@ -108,10 +109,10 @@ Mechanical rules enforced by the validator:
 - A validation is judged by its exit code, so it is never a service or watcher: \`npm start\`, \`npm run dev\`, \`vite\`, \`nodemon\`, \`uvicorn\` and \`--watch\` never exit. Prove a service task by importing its entrypoint in a test or invoking it once; leave the running service to \`OPERATIONS.json\`.
 - Never put \`manual:\` or \`human:\` inside backticks: backticks mean execute, and no \`manual:\` program exists. Write \`- manual: inspect ...\` bare.
 - Point a checker at the format it parses. \`node --check\` reads JavaScript, so against a \`.json\` or \`.yaml\` it fails on a valid file. To prove \`OPERATIONS.json\`, use \`rb-harness operations validate <path>\`.
-- Scope lists concrete project-relative paths or bounded globs in backticks. \`.\`, \`/\`, \`*\`, \`**\`, \`**/*\` are rejected; shared paths between tasks make them not parallel-safe.
+- Scope lists concrete project-relative implementation paths or bounded globs in backticks. \`.\`, \`/\`, \`*\`, \`**\`, \`**/*\`, \`.rb\`, and every descendant of \`.rb/\` are rejected; shared paths between tasks make them not parallel-safe. Generated planning artifacts may appear only as read-only Context or validator inputs.
 - Phase context paths that start with \`.rb/\` must name a document you actually publish in this bundle.
 - A phase must be self-contained for a cold context: goal, context paths, tasks, criteria, and validations only. Never depend on chat history, this conversation, the Harness installation, or an undeclared external file.
-- Every clean-room operational scenario belongs to the post-phase audit; a normal task may require that \`OPERATIONS.json\` exists and validates, never that it passed.
+- Harness generation owns \`OPERATIONS.json\` creation and deterministic validation. No implementation task owns that artifact. Every clean-room operational scenario belongs to the post-phase audit.
 
 ## Task granularity — enforced deterministically
 
@@ -176,7 +177,7 @@ const OPERATIONAL_GRAMMAR = `## rb-operational/v1 — OPERATIONS.json shape
 - **A process lives only inside its own step.** The runner starts it, waits for \`ready\`, runs that step's \`checks\`, then stops it. Every assertion that needs the service alive belongs in that step's \`checks\` array. A sibling \`http\`/\`tcp\` step placed after the process step runs against a closed port, and a scenario that probes a local address without starting a process never had a server at all. Both shapes are structurally valid, always fail execution, and cannot be repaired by the executor, which may not edit generated specifications.
 - Use \`\${RB_VERIFY_PORT}\` for the local port instead of a fixed one such as 3000, and make the product read it (\`PORT\`/\`process.env\`). The runner allocates a free port per verification; a hard-coded port can collide with something already running on the machine and prove nothing.
 - An HTTP probe puts assertions directly on the probe: \`{ "kind": "http", "url": "http://127.0.0.1:3000/", "status": 200, "bodyIncludes": ["expected text"] }\`. Never put an \`expect\` object inside \`ready\`, \`checks\`, or another probe; \`expect\` exists only on a \`command\` step.
-- Commands are \`argv\` arrays; never a shell string, never an invented executable, path, port, or route.
+- Commands are \`argv\` arrays; never a shell string, an inline interpreter program (\`node -e\`, \`python -c\`, \`sh -c\`, etc.), or an invented executable, path, port, or route. Invoke a public executable or repository-owned script so paths and behavior remain cross-artifact-verifiable.
 - Never write a secret value. Inherit only the named non-secret variables the scenario needs.
 - Identify the real product form (desktop, mobile, CLI, service, library, plugin, job, firmware, mixed). Never default to web. Omit the file entirely rather than inventing a scenario.`;
 
@@ -285,11 +286,11 @@ export function interviewRoundDirective(round: number, askedQuestions = 0): stri
   ].filter(Boolean).join("\n");
 }
 
-/** Compact contract handed to the single localized structural repair. */
+/** Compact contract handed to each bounded localized structural correction. */
 export function repairContractDigest(workflow: HarnessWorkflow): string {
   return [
     `# ${HARNESS_CONTRACT_DIGEST_VERSION} · structural repair · workflow ${workflow}`,
-    `This is the only repair. It is mechanical, not editorial.
+    `This is one pass in a bounded correction sequence. It is mechanical, not editorial.
 
 - Fix exactly the listed deterministic errors, in the order given.
 - Plan only the documents an error actually requires: the ones named as affected, plus any new document an error requires. Never replan a document no error names.

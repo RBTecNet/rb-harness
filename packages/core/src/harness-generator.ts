@@ -45,6 +45,7 @@ import {
 import { assertPromptWithinBudget, serializeInputPackage, type HarnessInputPackage } from "./harness-input-package.js";
 import { runProvider } from "./harness-provider.js";
 import { sha256Text } from "./hash.js";
+import { validateExecutionMarkdown } from "./execution-contract.js";
 import { loadWorkflowResources, requestNeedsHeadlessContracts } from "./standalone-resources.js";
 import type { HarnessRunState, ProviderConfiguration } from "./standalone-types.js";
 
@@ -56,6 +57,7 @@ const PLAN_SHAPE = JSON.stringify({
   documents: [{
     path: ".rb/<directory>/<FILE>.md",
     purpose: "what this document must prove",
+    dependsOn: ["finalized sibling documents this writer must use"],
     parts: [{ id: "stable-part-id", purpose: "bounded contiguous section, at most 12 KiB" }],
   }],
   blocked: ["only when status is blocked: the exact missing developer decision"],
@@ -102,6 +104,7 @@ export function buildGenerationPrompt(
     `Keep the entire plan below ${HARNESS_BUDGET.documents.maxPlanBytes} UTF-8 bytes and target 12 KiB. Be concise, but never try to count bytes in an individual prose field; RB Harness enforces the total response budget deterministically.`,
     "The plan is a compact index, never documentation prose. Do not repeat the request, rationale, acceptance criteria, evidence, or decisions inside every purpose. Put shared decisions and stable IDs once in the coordination ledger; a part purpose names only its boundary, required sections, and referenced IDs.",
     "Part writers receive the complete authority prefix, closed decision checkpoint, coordination ledger, and whole plan. They do not need duplicated facts in each purpose and cannot inspect the project again.",
+    "Declare dependsOn for every document whose finalized decisions, paths, interfaces, or IDs constrain this document. The orchestrator adds mandatory workflow edges, rejects missing/cyclic dependencies, and authors in topological order.",
     "For PHASES.md, allocate the final globally unique T### sequence in the coordination ledger and every part purpose now. Never use phase-local task numbering, never restart T001 in a later phase, and never use P##-T### as a substitute ID.",
     "A legacy adapter may return a complete rb-harness-documents/v1 bundle for backward compatibility, but a normal writer must return the plan.",
     protocolDefect ? `A prior plan response was rejected. Do not repeat it: ${protocolDefect}` : "",
@@ -120,11 +123,13 @@ export function buildDocumentPartPrompt(
   previousPart?: DocumentPart,
   repairContext?: string,
   defect?: string,
+  dependencyProjection?: string,
 ): string {
   const prompt = [
     prefix,
     `\n===== AUTHORING PLAN (${plan.contract}) =====\n${JSON.stringify(plan)}`,
     repairContext ? `\n===== REPAIR AUTHORITY =====\n${repairContext}` : "",
+    dependencyProjection ? `\n===== FINALIZED DOCUMENT DEPENDENCIES — READ-ONLY AUTHORITY =====\n${dependencyProjection}` : "",
     `\n===== TARGET DOCUMENT PART =====\n${JSON.stringify({
       path: document.path,
       documentPurpose: document.purpose,
@@ -142,7 +147,7 @@ export function buildDocumentPartPrompt(
     })}` : "",
     "Return only the raw UTF-8 content of the requested document segment. Do not wrap it in JSON, protocol markers, commentary, or a Markdown code fence.",
     "Write only the requested contiguous segment. The first part begins the file; every later part continues exactly after the previous segment; concatenation must produce one complete document without omitted or duplicated text.",
-    "This is a closed authoring step. Do not inspect files, call tools, rediscover evidence, or change the plan. All authority needed for this segment is in the plan, coordination ledger, target brief, and previous segment above.",
+    "This is a closed authoring step. Do not inspect files, call tools, rediscover evidence, or change the plan. All authority needed for this segment is in the plan, coordination ledger, finalized dependency projection, target brief, and previous segment above.",
     `The content must not exceed ${HARNESS_BUDGET.documents.maxPartBytes} UTF-8 bytes. If the plan assigned too much to this part, be concise while preserving every RIGID fact and contract requirement; never spill into another response.`,
     defect ? `A prior attempt at this exact segment was rejected: ${defect}. Author the same span again and make it fit: the limit is ${HARNESS_BUDGET.documents.maxPartBytes} UTF-8 bytes, so remove clearly more than the overflow rather than trimming to the edge. Keep every RIGID fact, ID, and contract requirement; cut restatement, rationale, and examples that repeat what the plan or an earlier segment already says.` : "",
   ].filter(Boolean).join("\n");
@@ -151,7 +156,7 @@ export function buildDocumentPartPrompt(
 }
 
 interface IncrementalCheckpoint {
-  contract: "rb-harness-incremental-generation/v1";
+  contract: "rb-harness-incremental-generation/v2";
   authoritySha256: string;
   plan: DocumentPlan;
   parts: Array<DocumentPart & { sha256: string }>;
@@ -189,7 +194,9 @@ async function loadCheckpoint(runRoot: string, name: string, authoritySha256: st
   catch { throw new Error(`incremental checkpoint ${name} is malformed`); }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`incremental checkpoint ${name} is invalid`);
   const value = parsed as Record<string, unknown>;
-  if (value.contract !== "rb-harness-incremental-generation/v1") throw new Error(`incremental checkpoint ${name} has an unsupported contract`);
+  if (value.contract !== "rb-harness-incremental-generation/v2") {
+    throw new Error(`incremental checkpoint ${name} predates dependency-aware authoring; restart document generation from its preserved provider logs`);
+  }
   if (value.authoritySha256 !== authoritySha256) throw new Error(`incremental checkpoint ${name} is stale for the current authoring authority`);
   const plan = parseDocumentPlan(planEnvelope(value.plan as DocumentPlan));
   if (!Array.isArray(value.parts)) throw new Error(`incremental checkpoint ${name} has no parts array`);
@@ -215,7 +222,7 @@ async function loadCheckpoint(runRoot: string, name: string, authoritySha256: st
     if (sha256 !== sha256Text(part.content)) throw new Error(`incremental checkpoint ${name} contains a stale part ${part.path}#${part.part}`);
     return { ...part, sha256 };
   });
-  return { contract: "rb-harness-incremental-generation/v1", authoritySha256, plan, parts };
+  return { contract: "rb-harness-incremental-generation/v2", authoritySha256, plan, parts };
 }
 
 function parsePartOrLegacyDocument(output: string, expected: { path: string; part: string }): DocumentPart {
@@ -249,7 +256,7 @@ function planFormattingContract(): string {
     `Return exactly ${DOCUMENT_PLAN_BEGIN}, one JSON object, and ${DOCUMENT_PLAN_END}.`,
     `The exact JSON shape is ${PLAN_SHAPE}`,
     "Allowed root fields: contract, status, summary, coordination, documents, blocked.",
-    "Allowed document fields: path, purpose, parts. Allowed part fields: id, purpose. No other field is permitted.",
+    "Allowed document fields: path, purpose, dependsOn, parts. Allowed part fields: id, purpose. No other field is permitted.",
     "Keep every original path, purpose, part ID, decision, and blocker unchanged; remove presentation-only or explanatory keys instead of translating them into new authority.",
   ].join("\n");
 }
@@ -279,6 +286,79 @@ interface IncrementalAuthoringOptions {
   /** Rebuild the plan prompt after a defect the formatter cannot repair. */
   replanPrompt: (defect: string) => string;
   repairContext?: string;
+}
+
+const MAX_DEPENDENCY_PROJECTION_BYTES = 96 * 1024;
+const MAX_DEPENDENCY_DOCUMENT_BYTES = 16 * 1024;
+
+function completedDocumentContent(
+  document: PlannedDocument,
+  completed: ReadonlyMap<string, DocumentPart>,
+): string | undefined {
+  const parts: string[] = [];
+  for (const part of document.parts) {
+    const completedPart = completed.get(`${document.path}\0${part.id}`);
+    if (!completedPart) return undefined;
+    parts.push(completedPart.content);
+  }
+  return parts.join("");
+}
+
+function boundedUtf8(source: string, maximum: number): string {
+  const bytes = Buffer.from(source, "utf8");
+  if (bytes.byteLength <= maximum) return source;
+  return `${bytes.subarray(0, maximum).toString("utf8")}\n[projection truncated at ${maximum} bytes]`;
+}
+
+function executionAuthorityProjection(content: string): unknown {
+  const parsed = validateExecutionMarkdown(content);
+  if (!parsed.valid || !parsed.document) return undefined;
+  return {
+    contract: parsed.document.contract,
+    artifactId: parsed.document.artifactId,
+    phases: parsed.document.phases.map((phase) => ({
+      id: phase.id,
+      goal: phase.goal,
+      tasks: phase.tasks.map((task) => ({
+        id: task.id,
+        scope: task.scope,
+        change: task.change,
+        validation: task.validation,
+      })),
+    })),
+  };
+}
+
+function proseAuthorityProjection(content: string): string {
+  const selected = content.replace(/\r\n/g, "\n").split("\n").filter((line) =>
+    /^#{1,6}\s/.test(line)
+    || /\b(?:RF|RNF|UI|CT)-\d+\b/.test(line)
+    || /\b(?:RIGID|FLEXIBLE|OBSERVED|CONFIRMED|UNKNOWN|CONFLICT)\b/i.test(line)
+    || /`[^`/]*(?:\/|\.[A-Za-z0-9]+)[^`]*`/.test(line)
+    || /\b(?:entrypoint|launcher|command|argv|route|path|file|directory|contract|interface|scope)\b/i.test(line),
+  );
+  return boundedUtf8(selected.join("\n"), MAX_DEPENDENCY_DOCUMENT_BYTES);
+}
+
+function dependencyProjection(
+  plan: DocumentPlan,
+  target: PlannedDocument,
+  completed: ReadonlyMap<string, DocumentPart>,
+): string | undefined {
+  if (!target.dependsOn.length) return undefined;
+  const sourceManifest = target.path.toLowerCase().endsWith("/source-manifest.json");
+  const documents = target.dependsOn.map((path) => {
+    const dependency = plan.documents.find((document) => document.path === path);
+    if (!dependency) throw new Error(`planned dependency disappeared: ${path}`);
+    const content = completedDocumentContent(dependency, completed);
+    if (content === undefined) throw new Error(`planned dependency was not finalized before ${target.path}: ${path}`);
+    if (sourceManifest) return { path, sha256: sha256Text(content) };
+    const execution = path.toUpperCase().endsWith("/PHASES.MD") ? executionAuthorityProjection(content) : undefined;
+    return execution
+      ? { path, kind: "execution-authority", projection: execution }
+      : { path, kind: "decision-authority", projection: proseAuthorityProjection(content) };
+  });
+  return boundedUtf8(JSON.stringify({ target: target.path, documents }), MAX_DEPENDENCY_PROJECTION_BYTES);
 }
 
 async function authorIncrementally(options: IncrementalAuthoringOptions): Promise<DocumentBundle> {
@@ -372,7 +452,7 @@ async function authorIncrementally(options: IncrementalAuthoringOptions): Promis
     if (!planned) throw new Error(`${label} could not be planned`);
     if (planned.kind === "bundle") return planned.bundle;
     checkpoint = {
-      contract: "rb-harness-incremental-generation/v1",
+      contract: "rb-harness-incremental-generation/v2",
       authoritySha256,
       plan: planned.plan,
       parts: [],
@@ -423,6 +503,8 @@ async function authorIncrementally(options: IncrementalAuthoringOptions): Promis
               partIndex,
               previousPart,
               options.repairContext,
+              undefined,
+              dependencyProjection(checkpoint.plan, document, completed),
             ),
             logPath,
             timeoutSeconds: options.timeoutSeconds,
@@ -459,6 +541,7 @@ async function authorIncrementally(options: IncrementalAuthoringOptions): Promis
                 previousPart,
                 options.repairContext,
                 error.message,
+                dependencyProjection(checkpoint.plan, document, completed),
               ),
               logPath: retryLog,
               timeoutSeconds: options.timeoutSeconds,
@@ -557,6 +640,7 @@ export function buildRepairPrompt(
   bundle: DocumentBundle,
   errors: StructuralError[],
   affected: string[],
+  dependencies: string[] = [],
   protocolDefect?: string,
 ): string {
   const prompt = [
@@ -567,6 +651,9 @@ export function buildRepairPrompt(
     repairContractDigest(state.workflow),
     `\n===== DETERMINISTIC ERRORS =====\n${JSON.stringify(errors.map((error, index) => ({ order: index + 1, ...error })))}`,
     `\n===== AFFECTED DOCUMENTS =====\n${JSON.stringify(documentExcerpts(bundle, affected))}`,
+    dependencies.length
+      ? `\n===== FINALIZED READ-ONLY DEPENDENCIES =====\n${JSON.stringify(documentExcerpts(bundle, dependencies))}`
+      : "",
     `\n===== DOCUMENTS THAT MUST NOT CHANGE =====\n${JSON.stringify(bundle.documents.map((document) => document.path).filter((path) => !affected.includes(path)))}`,
     `Plan only replacements or additions required by those errors. Existing documents outside AFFECTED DOCUMENTS are forbidden.`,
     `Every document you plan is rewritten in full from its parts, so plan parts that cover the whole corrected document — not just the fragment that changes. Split it into parts of at most ${HARNESS_BUDGET.documents.maxPartBytes} UTF-8 bytes, and state in each part purpose which span of the original it reproduces and what, if anything, changes inside it. The part writer cannot inspect files; it sees the original under REPAIR AUTHORITY and must reproduce its span byte for byte apart from the listed error.`,
@@ -585,6 +672,7 @@ export interface RepairRequestOptions {
   timeoutSeconds: number;
   firstOutputTimeoutSeconds: number;
   streamOutput?: boolean;
+  repairPass?: number;
 }
 
 /**
@@ -624,7 +712,14 @@ export async function requestStructuralRepair(options: RepairRequestOptions): Pr
   const known = new Set(options.bundle.documents.map((document) => document.path));
   const affected = [...new Set(options.errors.map((error) => error.path).filter((path): path is string => Boolean(path && known.has(path))))]
     .sort((left, right) => left.localeCompare(right));
-  const planPrompt = buildRepairPrompt(options.state, options.bundle, options.errors, affected);
+  const affectedDirectories = new Set(affected.map((path) => path.slice(0, path.lastIndexOf("/"))));
+  const dependencies = options.bundle.documents
+    .map((document) => document.path)
+    .filter((path) => !affected.includes(path)
+      && affectedDirectories.has(path.slice(0, path.lastIndexOf("/")))
+      && /\/(?:PHASES\.md|OPERATIONS\.json|SPEC\.md|REQUIREMENTS\.md|PLAN\.md)$/i.test(path))
+    .sort((left, right) => left.localeCompare(right));
+  const planPrompt = buildRepairPrompt(options.state, options.bundle, options.errors, affected, dependencies);
   const repaired = await authorIncrementally({
     state: options.state,
     runRoot: options.runRoot,
@@ -634,15 +729,19 @@ export async function requestStructuralRepair(options: RepairRequestOptions): Pr
     streamOutput: options.streamOutput,
     mode: "repair",
     stage: "structural-repair",
-    checkpointName: "incremental-structural-repair",
-    logPrefix: "structural-repair",
+    checkpointName: `incremental-structural-repair-${options.repairPass ?? 1}`,
+    logPrefix: `structural-repair-${options.repairPass ?? 1}`,
     prefix: [
       "You are the RB Harness structural repair writer. Write documentation only and change only the authorized affected documents.",
       repairContractDigest(options.state.workflow),
     ].join("\n"),
     planPrompt,
-    replanPrompt: (defect) => buildRepairPrompt(options.state, options.bundle, options.errors, affected, defect),
-    repairContext: JSON.stringify({ errors: options.errors, affected: documentExcerpts(options.bundle, affected) }),
+    replanPrompt: (defect) => buildRepairPrompt(options.state, options.bundle, options.errors, affected, dependencies, defect),
+    repairContext: JSON.stringify({
+      errors: options.errors,
+      affected: documentExcerpts(options.bundle, affected),
+      dependencies: documentExcerpts(options.bundle, dependencies),
+    }),
   });
   const originals = new Map(options.bundle.documents.map((document) => [document.path, document.content]));
   for (const document of repaired.documents) {

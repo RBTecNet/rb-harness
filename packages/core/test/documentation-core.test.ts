@@ -67,7 +67,7 @@ describe("operational budget", () => {
     expect(HARNESS_BUDGET.documents.maxPartBytes).toBeGreaterThanOrEqual(48 * 1024);
     expect(HARNESS_BUDGET.documents.maxPartBytes).toBeLessThanOrEqual(HARNESS_BUDGET.documents.maxDocumentBytes);
     expect(HARNESS_BUDGET.documents.maxPartEnvelopeBytes).toBeGreaterThan(HARNESS_BUDGET.documents.maxPartBytes);
-    expect(HARNESS_BUDGET.generation.structuralRepairs).toBe(1);
+    expect(HARNESS_BUDGET.generation.structuralRepairs).toBe(3);
   });
 
   it("bounds the documentation tool surface", () => {

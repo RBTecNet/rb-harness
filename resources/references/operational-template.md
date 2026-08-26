@@ -23,6 +23,9 @@ CI, or RB Ralph can execute it.
 4. Use commands as `argv` arrays. Never invent a command, executable, path,
    port, route, window, package, or output. Ground it in current evidence or a
    confirmed TO BE decision.
+   Do not hide programs in interpreter arguments such as `node -e`, `python -c`,
+   or `sh -c`; invoke a public executable or repository-owned script so every
+   referenced path remains portable and cross-artifact-verifiable.
 5. Exclude dependency trees, build products, caches, local state, and secrets
    in `cleanRoom.exclude`. Keep only `.env.example`-style templates.
 6. Inherit only named non-secret variables that the scenario genuinely needs.
@@ -104,11 +107,11 @@ responses and captured evidence. A readiness probe is not success if the
 process later times out, is force-terminated, exits incorrectly, or fails its
 declared cleanup; record those outcomes as failures.
 
-Normal implementation phases own contract creation and deterministic
-`operations validate`. Actual clean-room execution is owned by the post-phase
-operational audit (`RBF`). Do not add "the OPERATIONS scenario passes" to a
-normal phase acceptance criterion or manual validation: that creates a gate
-which cannot run until the phase it gates is accepted.
+Harness generation owns contract creation and deterministic `operations
+validate`. `.rb` is immutable execution authority and must never appear in an
+implementation task's `Scope` or `Change`. Actual clean-room execution is owned
+by the post-phase operational audit (`RBF`). Do not add "the OPERATIONS scenario
+passes" to a normal phase acceptance criterion or manual validation.
 
 Validate every emitted document with the bundled CLI before syncing the tree:
 

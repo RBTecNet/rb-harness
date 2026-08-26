@@ -227,6 +227,10 @@ Regras:
 
 Regras estruturais:
 
+- `Scope` cobre somente caminhos de implementação. `.rb`, `.rb/**` e qualquer
+  artefato gerado são autoridade imutável: podem ser lidos via `Context` ou por
+  um validador read-only, nunca criados ou alterados por uma task;
+
 - O heading corresponde exatamente a
   `- [ ] TNNN — <título>` ou `- [x] TNNN — <título>`.
 - O travessão é `—`; hífen comum não substitui o delimitador no contrato
@@ -262,9 +266,9 @@ São rejeitados, entre outros:
 - “adequado”, “apropriado”, “razoável”, “conforme necessário”, `etc.`;
 - exigir que `OPERATIONS.json` já tenha passado durante uma fase normal.
 
-Uma fase normal pode exigir que `OPERATIONS.json` exista e seja válido. A
-execução clean-room desse contrato pertence exclusivamente à fase final RBF,
-criada em runtime.
+O Harness cria e valida `OPERATIONS.json` antes de publicar. Nenhuma task normal
+é dona desse arquivo. A execução clean-room do contrato pertence exclusivamente
+à fase final RBF, criada em runtime.
 
 ### 4.5 Validações
 
@@ -964,6 +968,7 @@ Validar o contrato operacional:
 
 ```bash
 rb-harness operations validate .rb/init/OPERATIONS.json
+rb-harness artifacts verify --project .
 ```
 
 Sincronizar e validar a árvore:

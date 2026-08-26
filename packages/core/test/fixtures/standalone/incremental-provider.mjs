@@ -35,6 +35,17 @@ const plan = {
   blocked: [],
 };
 
+if (process.env.RB_HARNESS_TEST_DOCUMENT_DEPENDENCIES === "1") {
+  // Deliberately place OPERATIONS first. The orchestrator must derive and
+  // enforce PROJECT -> PHASES -> OPERATIONS rather than trusting response
+  // order or asking the operations writer to rediscover another document.
+  plan.documents.unshift({
+    path: ".rb/init/OPERATIONS.json",
+    purpose: "Operational acceptance grounded in the final execution paths.",
+    parts: [{ id: "whole", purpose: "Complete operational contract." }],
+  });
+}
+
 if (prompt.includes("===== EXACT OUTPUT CONTRACT =====")) {
   let priorCalls = "";
   if (process.env.RB_HARNESS_TEST_INCREMENTAL_CALLS) {
@@ -88,13 +99,27 @@ if (start < 0) process.exit(2);
 const line = prompt.slice(start + marker.length).split("\n", 1)[0];
 const target = JSON.parse(line);
 await record(`${target.path}#${target.part}`);
+if (target.path.endsWith("OPERATIONS.json") && (
+  !prompt.includes("FINALIZED DOCUMENT DEPENDENCIES")
+  || !prompt.includes('"scope":"`src/`"')
+)) process.exit(7);
 if (process.env.RB_HARNESS_TEST_INCREMENTAL_FAIL_PART === target.part) {
   process.stdout.write(`RB_HARNESS_DOCUMENT_PART_JSON_BEGIN\n{"contract":"rb-harness-document-part/v1","path":${JSON.stringify(target.path)},"part":${JSON.stringify(target.part)},"content":"Recovered "quoted" content."}\nRB_HARNESS_DOCUMENT_PART_JSON_END\n`);
   process.exit(0);
 }
 if (process.env.RB_HARNESS_TEST_INCREMENTAL_EXIT_PART === target.part) process.exit(1);
 
-const content = target.path.endsWith("PROJECT.md")
+const content = target.path.endsWith("OPERATIONS.json")
+  ? `${JSON.stringify({
+      contract: "rb-operational/v1",
+      cleanRoom: { exclude: ["dist"] },
+      scenarios: [{
+        id: "consumer",
+        title: "Exercise the finalized entrypoint",
+        steps: [{ id: "entrypoint", kind: "file", path: "src/index.js", exists: true }],
+      }],
+    }, null, 2)}\n`
+  : target.path.endsWith("PROJECT.md")
   ? "# Incremental project\n\nGenerated one bounded document at a time.\n"
   : target.part === "header"
     ? "# RB Execution Plan: incremental-fixture\n\n<!-- rb-execution-contract: rb-execution/v1 -->\n<!-- rb-artifact-id: incremental-fixture-plan -->\n\n"
@@ -105,5 +130,5 @@ const part = {
   part: target.part,
   content,
 };
-if (target.path.endsWith("PROJECT.md")) process.stdout.write(content);
+if (target.path.endsWith("PROJECT.md") || target.path.endsWith("OPERATIONS.json")) process.stdout.write(content);
 else process.stdout.write(`RB_HARNESS_DOCUMENT_PART_JSON_BEGIN\n${JSON.stringify(part)}\nRB_HARNESS_DOCUMENT_PART_JSON_END\n`);

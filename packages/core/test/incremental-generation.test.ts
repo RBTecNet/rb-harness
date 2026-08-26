@@ -24,6 +24,7 @@ const originalCalls = process.env.RB_HARNESS_TEST_INCREMENTAL_CALLS;
 const originalFailure = process.env.RB_HARNESS_TEST_INCREMENTAL_FAIL_PART;
 const originalExitPart = process.env.RB_HARNESS_TEST_INCREMENTAL_EXIT_PART;
 const originalFormatFailures = process.env.RB_HARNESS_TEST_FORMAT_INVALID_ATTEMPTS;
+const originalDocumentDependencies = process.env.RB_HARNESS_TEST_DOCUMENT_DEPENDENCIES;
 
 afterEach(() => {
   if (originalCalls === undefined) delete process.env.RB_HARNESS_TEST_INCREMENTAL_CALLS;
@@ -34,6 +35,8 @@ afterEach(() => {
   else process.env.RB_HARNESS_TEST_INCREMENTAL_EXIT_PART = originalExitPart;
   if (originalFormatFailures === undefined) delete process.env.RB_HARNESS_TEST_FORMAT_INVALID_ATTEMPTS;
   else process.env.RB_HARNESS_TEST_FORMAT_INVALID_ATTEMPTS = originalFormatFailures;
+  if (originalDocumentDependencies === undefined) delete process.env.RB_HARNESS_TEST_DOCUMENT_DEPENDENCIES;
+  else process.env.RB_HARNESS_TEST_DOCUMENT_DEPENDENCIES = originalDocumentDependencies;
 });
 
 function envelope(begin: string, end: string, value: unknown): string {
@@ -147,6 +150,37 @@ describe("incremental document contracts", () => {
     }))).toThrow("unsupported planned document field: outputPath");
   });
 
+  it("derives and topologically orders load-bearing document dependencies", () => {
+    const value = samplePlan();
+    value.documents = [
+      { path: ".rb/init/OPERATIONS.json", purpose: "Operations", parts: [{ id: "whole", purpose: "Whole" }] },
+      { path: ".rb/init/PHASES.md", purpose: "Execution", parts: [{ id: "whole", purpose: "Whole" }] },
+      { path: ".rb/init/PROJECT.md", purpose: "Intent", parts: [{ id: "whole", purpose: "Whole" }] },
+    ];
+    const plan = parseDocumentPlan(envelope(DOCUMENT_PLAN_BEGIN, DOCUMENT_PLAN_END, value));
+    expect(plan.documents.map((document) => document.path)).toEqual([
+      ".rb/init/PROJECT.md",
+      ".rb/init/PHASES.md",
+      ".rb/init/OPERATIONS.json",
+    ]);
+    expect(plan.documents[1]?.dependsOn).toContain(".rb/init/PROJECT.md");
+    expect(plan.documents[2]?.dependsOn).toEqual([".rb/init/PHASES.md"]);
+  });
+
+  it("rejects missing and cyclic document dependencies as substance defects", () => {
+    expect(() => parseDocumentPlan(envelope(DOCUMENT_PLAN_BEGIN, DOCUMENT_PLAN_END, {
+      ...samplePlan(),
+      documents: [{ ...samplePlan().documents[0], dependsOn: [".rb/init/MISSING.md"] }],
+    }))).toThrow("depends on missing document");
+    expect(() => parseDocumentPlan(envelope(DOCUMENT_PLAN_BEGIN, DOCUMENT_PLAN_END, {
+      ...samplePlan(),
+      documents: [
+        { path: ".rb/init/A.md", purpose: "A", dependsOn: [".rb/init/B.md"], parts: [{ id: "a", purpose: "A" }] },
+        { path: ".rb/init/B.md", purpose: "B", dependsOn: [".rb/init/A.md"], parts: [{ id: "b", purpose: "B" }] },
+      ],
+    }))).toThrow("dependency graph contains a cycle");
+  });
+
   it("preserves a document part whose JSON string contains literal streamed line breaks", () => {
     const malformedByStrictJson = [
       DOCUMENT_PART_BEGIN,
@@ -177,6 +211,26 @@ describe("provider-neutral incremental authoring", () => {
       ".rb/init/PROJECT.md#whole",
       ".rb/init/PHASES.md#header",
       ".rb/init/PHASES.md#phase-01",
+    ]);
+  }, 60_000);
+
+  it("authors OPERATIONS only after PHASES and passes its finalized execution projection", async () => {
+    await chmod(fixture, 0o755);
+    const project = await mkdtemp(resolve(tmpdir(), "rb-incremental-dependencies-"));
+    const runRoot = resolve(project, ".rb-harness/runs/test");
+    const calls = resolve(await mkdtemp(resolve(tmpdir(), "rb-incremental-dependency-calls-")), "calls.log");
+    process.env.RB_HARNESS_TEST_INCREMENTAL_CALLS = calls;
+    process.env.RB_HARNESS_TEST_DOCUMENT_DEPENDENCIES = "1";
+    await writeFile(resolve(project, "README.md"), "fixture\n", "utf8");
+    const bundle = await requestFixture(project, runRoot);
+    expect(bundle.documents.find((document) => document.path.endsWith("OPERATIONS.json"))?.content)
+      .toContain('"path": "src/index.js"');
+    expect((await readFile(calls, "utf8")).trim().split("\n")).toEqual([
+      "plan",
+      ".rb/init/PROJECT.md#whole",
+      ".rb/init/PHASES.md#header",
+      ".rb/init/PHASES.md#phase-01",
+      ".rb/init/OPERATIONS.json#whole",
     ]);
   }, 60_000);
 

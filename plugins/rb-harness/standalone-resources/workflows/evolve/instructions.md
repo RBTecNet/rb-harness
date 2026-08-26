@@ -73,9 +73,9 @@ isolated from existing behavior.
     name the AS IS/TO BE delta, preserve legitimate behavior, and own focused
     binary validation. The decomposition ceilings in the contract digest are
     validated mechanically, so respect them while writing. Derive `OPERATIONS.json` when an honest consumer-level
-    scenario can validate the evolution and its key preserved path. Normal
-    phases validate its structure; only the post-phase RBF audit owns the
-    clean-room pass. Audit exact standard/dialect matrices, independent hostile
+    scenario can validate the evolution and its key preserved path. Harness
+    generation owns its structure; `.rb` and descendants never belong in task
+    Scope/Change. Only the post-phase RBF audit owns the clean-room pass. Audit exact standard/dialect matrices, independent hostile
     schema/secret cases, explicit quality commands, validation capability, and
     lossless RIGID/preservation/regression traceability before returning.
 11. The orchestrator runs every deterministic validator after assembly; produce document parts that assemble into compliant artifacts, and never claim to have run a command. They cover `rb-execution/v1`, `rb-operational/v1`, the manifest, and

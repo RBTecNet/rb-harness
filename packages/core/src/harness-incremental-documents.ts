@@ -8,6 +8,7 @@
  */
 
 import { HARNESS_BUDGET } from "./harness-budget.js";
+import { basename, dirname } from "node:path/posix";
 import {
   DOCUMENT_BUNDLE_CONTRACT,
   DocumentSubstanceError,
@@ -34,6 +35,8 @@ export interface DocumentPlanPart {
 export interface PlannedDocument {
   path: string;
   purpose: string;
+  /** Documents whose finalized authority this writer must receive. */
+  dependsOn: string[];
   parts: DocumentPlanPart[];
 }
 
@@ -144,6 +147,65 @@ function allowedKeys(record: Record<string, unknown>, allowed: readonly string[]
   }
 }
 
+const EXECUTION_AUTHORITIES = new Set([
+  "REQUEST.MD",
+  "SPEC.MD",
+  "REQUIREMENTS.MD",
+  "PROJECT.MD",
+  "ARCHITECTURE.MD",
+  "PLAN.MD",
+  "DECISIONS.MD",
+  "NON_FUNCTIONAL.MD",
+  "WORKFLOWS.MD",
+  "TO_BE.MD",
+  "IMPACT.MD",
+  "PRESERVATION.MD",
+  "MIGRATION.MD",
+  "REGRESSION_MATRIX.MD",
+]);
+
+function codeOwnedDependencies(path: string, allPaths: readonly string[]): string[] {
+  const name = basename(path).toUpperCase();
+  const directory = dirname(path);
+  const siblings = allPaths.filter((candidate) => candidate !== path && dirname(candidate) === directory);
+  if (name === "PHASES.MD") {
+    return siblings.filter((candidate) => EXECUTION_AUTHORITIES.has(basename(candidate).toUpperCase()));
+  }
+  if (name === "OPERATIONS.JSON") {
+    return siblings.filter((candidate) => basename(candidate).toUpperCase() === "PHASES.MD");
+  }
+  if (name === "SOURCE-MANIFEST.JSON") return allPaths.filter((candidate) => candidate !== path);
+  return [];
+}
+
+function orderDocuments(documents: PlannedDocument[]): PlannedDocument[] {
+  const byPath = new Map(documents.map((document) => [document.path, document]));
+  for (const document of documents) {
+    for (const dependency of document.dependsOn) {
+      if (dependency === document.path) throw new DocumentSubstanceError(`planned document ${document.path} depends on itself`);
+      if (!byPath.has(dependency)) {
+        throw new DocumentSubstanceError(`planned document ${document.path} depends on missing document ${dependency}`);
+      }
+    }
+  }
+  const pending = new Map(documents.map((document, index) => [document.path, { document, index }]));
+  const completed = new Set<string>();
+  const ordered: PlannedDocument[] = [];
+  while (pending.size) {
+    const ready = [...pending.values()]
+      .filter(({ document }) => document.dependsOn.every((dependency) => completed.has(dependency)))
+      .sort((left, right) => left.index - right.index)[0];
+    if (!ready) {
+      const cycle = [...pending.values()].map(({ document }) => `${document.path} -> ${document.dependsOn.join(", ")}`).join("; ");
+      throw new DocumentSubstanceError(`document dependency graph contains a cycle: ${cycle}`);
+    }
+    pending.delete(ready.document.path);
+    completed.add(ready.document.path);
+    ordered.push(ready.document);
+  }
+  return ordered;
+}
+
 export function parseDocumentPlan(output: string): DocumentPlan {
   const value = jsonEnvelope(output, DOCUMENT_PLAN_BEGIN, DOCUMENT_PLAN_END, "document plan", HARNESS_BUDGET.documents.maxPlanBytes);
   allowedKeys(value, ["contract", "status", "summary", "coordination", "documents", "blocked"], "document plan");
@@ -161,9 +223,9 @@ export function parseDocumentPlan(output: string): DocumentPlan {
   }
   const seenPaths = new Set<string>();
   let totalParts = 0;
-  const documents = value.documents.map((entry, documentIndex): PlannedDocument => {
+  let documents = value.documents.map((entry, documentIndex): PlannedDocument => {
     const record = object(entry, `planned document ${documentIndex + 1}`);
-    allowedKeys(record, ["path", "purpose", "parts"], "planned document");
+    allowedKeys(record, ["path", "purpose", "dependsOn", "parts"], "planned document");
     const path = normalizeGeneratedDocumentPath(record.path, documentIndex);
     if (seenPaths.has(path)) throw new Error(`document plan declares ${path} twice`);
     seenPaths.add(path);
@@ -185,7 +247,7 @@ export function parseDocumentPlan(output: string): DocumentPlan {
       return { id, purpose: text(part.purpose, `part ${id} purpose`) };
     });
     totalParts += parts.length;
-    return { path, purpose, parts };
+    return { path, purpose, dependsOn: stringArray(record.dependsOn, `planned document ${path} dependsOn`), parts };
   });
   if (totalParts > HARNESS_BUDGET.documents.maxPlannedParts) {
     throw new Error(`document plan exceeds ${HARNESS_BUDGET.documents.maxPlannedParts} total parts`);
@@ -194,6 +256,12 @@ export function parseDocumentPlan(output: string): DocumentPlan {
   if (value.status === "blocked" && !blocked.length) throw new Error("a blocked document plan must name the missing decision");
   if (value.status === "complete" && !documents.length) throw new Error("a complete document plan must contain documents");
   if (value.status === "complete" && blocked.length) throw new Error("a complete document plan cannot retain blockers");
+  const allPaths = documents.map((document) => document.path);
+  documents = documents.map((document) => ({
+    ...document,
+    dependsOn: [...new Set([...document.dependsOn, ...codeOwnedDependencies(document.path, allPaths)])].sort(),
+  }));
+  documents = orderDocuments(documents);
   return { contract: DOCUMENT_PLAN_CONTRACT, status: value.status, summary, coordination, documents, blocked };
 }
 

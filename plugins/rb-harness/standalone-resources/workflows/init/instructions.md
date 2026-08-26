@@ -73,9 +73,10 @@ is supplied in the prompt as `rb-harness-contract-digest/v1`.
    `rb-operational/v1`, remain usable without RB Ralph, and must not assume web
    or any stack. If no honest executable scenario can be defined, omit it and
    record the blocking operational gap instead of inventing proof.
-   Normal phases own creation and structural validation of the operational
-   contract; its clean-room pass is owned only by Ralph's post-phase RBF audit.
-   Never make a preceding task depend on that future result.
+   Harness generation owns creation and structural validation of the operational
+   contract. Never put `.rb` or a descendant in a task Scope/Change; generated
+   artifacts are immutable execution authority. Its clean-room pass is owned
+   only by Ralph's post-phase RBF audit.
 9. The orchestrator runs every deterministic validator after assembly; produce document parts that assemble into compliant artifacts, and never claim to have run a command. They cover `rb-execution/v1`, `rb-operational/v1`, the manifest, and
    the whole tree. Before returning, audit lossless requirement/cross-cutting traceability, explicit quality
    commands, validation capability (`command`, manager `manual`, or external

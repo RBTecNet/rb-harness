@@ -28,7 +28,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.5.16 is an executable rather than a workflow that must run inside
+RB Harness 0.5.17 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -49,7 +49,7 @@ the current shell. Verify the exact installed build with:
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.5.16
+# Both print 0.5.17
 ```
 
 Run without arguments to start the wizard:
@@ -282,13 +282,21 @@ request. Part calls return raw document content by default: path and ID already
 belong to the validated checkpoint, so a redundant JSON envelope adds no write
 authority. Correct legacy part envelopes remain accepted for compatibility.
 
-If deterministic validation finds repairable structural errors, exactly one
-localized repair runs. It receives the ordered, machine-generated error list and
+If deterministic validation finds repairable structural errors, up to three
+localized correction passes may run. Each receives the ordered, machine-generated error list and
 only the affected documents, and must preserve everything else byte for byte. It
 cannot reopen the interview, re-explore the repository, or re-emit the tree. A
-second failure is reported with its diagnostic; there is no loop. Apart from
-that single repair and the counted interview rounds — both bounded by declared
-ceilings — the state graph is acyclic, and no stage can restart itself.
+non-convergent third correction is reported with its diagnostic. Apart from
+that bounded correction edge and the counted interview rounds, the state graph
+is acyclic, and no stage can restart itself.
+
+Generated `.rb` artifacts are immutable control-plane authority for execution:
+PHASES task scopes cannot own them. After atomic publication, executable-plan
+workflows automatically run the deterministic equivalents of `contract
+validate`, tree validation, and `artifacts verify`. A rejected publication is
+quarantined, the prior revision is restored, and a localized correction is
+attempted within the same finite budget; completion is recorded only after all
+closing gates are green.
 
 Providers are read-only in every documentation role. Codex runs with
 `--sandbox read-only`, Claude with `--permission-mode plan`, OpenCode with edit,
@@ -726,7 +734,7 @@ US$ 1.84 here without publishing anything.
   ceilings that report a failure to converge as BLOCKED;
 - one writer role returns a compact plan followed by independently bounded,
   checkpointed document parts that the Harness assembles and materializes;
-  at most one localized structural repair may follow;
+  up to three localized structural correction passes may follow;
 - the LLM manager, the semantic auditor, and audit-driven remediation are gone;
 - providers are read-only in every documentation role and their whole process
   tree is torn down and confirmed quiescent on cancellation, timeout, overflow,

@@ -68,8 +68,8 @@ await writeFile(resolve(output, ".rb", "init", "PHASES.md"), `# RB Execution Pla
 - \`.rb/init/PROJECT.md\`
 
 - [ ] T001 — Define the foundation
-  - **Scope:** \`.rb/init/\`
-  - **Change:** Define the generated declarative foundation.
+  - **Scope:** \`src/foundation.ts\`
+  - **Change:** Implement the generated declarative foundation.
   - **Covers:** RF-001
   - **Depends on:** none
   - **Parallel safe:** false
