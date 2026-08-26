@@ -220,7 +220,8 @@ describe("an oversized segment is re-authored, not re-formatted", () => {
     const envelope = `${DOCUMENT_PART_BEGIN}\n${JSON.stringify(oversized)}\n${DOCUMENT_PART_END}`;
     const expected = { path: ".rb/init/REQUIREMENTS.md", part: "requirements-rigid" };
     expect(() => parseDocumentPart(envelope, expected)).toThrow(DocumentSubstanceError);
-    expect(() => parseDocumentPart(envelope, expected)).toThrow(/above the 12288-byte limit/);
+    expect(() => parseDocumentPart(envelope, expected))
+      .toThrow(new RegExp(`above the ${HARNESS_BUDGET.documents.maxPartBytes}-byte limit`));
   });
 
   it("tells the writer exactly what to shorten on the retry", () => {
@@ -327,9 +328,9 @@ describe("an oversized part is diagnosed as a planning defect", () => {
     };
     const prompt = buildDocumentPartPrompt(
       "prefix", plan, plan.documents[0]!, plan.documents[0]!.parts[0]!, 0, 0, undefined, undefined,
-      "document part .rb/init/PHASES.md#phases-p01-p04 is 12941 bytes, above the 12288-byte limit for one segment",
+      `document part .rb/init/PHASES.md#phases-p01-p04 is 99999 bytes, above the ${HARNESS_BUDGET.documents.maxPartBytes}-byte limit for one segment`,
     );
     expect(prompt).toContain("remove clearly more than the overflow rather than trimming to the edge");
-    expect(prompt).toContain("12288 UTF-8 bytes");
+    expect(prompt).toContain(`${HARNESS_BUDGET.documents.maxPartBytes} UTF-8 bytes`);
   });
 });

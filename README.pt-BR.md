@@ -16,7 +16,7 @@ retomáveis em vez de exigir um pacote monolítico do modelo.
 
 ## Instalação do executável
 
-O RB Harness 0.5.11 exige Node.js 20 ou superior. No clone do repositório:
+O RB Harness 0.5.12 exige Node.js 20 ou superior. No clone do repositório:
 
 ```bash
 npm install
@@ -35,7 +35,7 @@ Confira a versão instalada:
 ```bash
 rb-harness --version
 rb-harness --ver
-# 0.5.11
+# 0.5.12
 ```
 
 Executar apenas `rb-harness` abre o assistente interativo. O splash com a

@@ -61,7 +61,12 @@ describe("operational budget", () => {
     expect(interviewQuestionBudget(2)).toBe(3);
     expect(interviewQuestionBudget(HARNESS_BUDGET.interview.maxRounds)).toBe(3);
     expect(HARNESS_BUDGET.formatting.maxAttempts).toBe(3);
-    expect(HARNESS_BUDGET.documents.maxPartBytes).toBeLessThanOrEqual(16 * 1024);
+    // A part must fit a provider's output window; the ceiling is generous
+    // enough for a real phase and still bounded, so a truncated segment cannot
+    // reach assembly.
+    expect(HARNESS_BUDGET.documents.maxPartBytes).toBeGreaterThanOrEqual(48 * 1024);
+    expect(HARNESS_BUDGET.documents.maxPartBytes).toBeLessThanOrEqual(HARNESS_BUDGET.documents.maxDocumentBytes);
+    expect(HARNESS_BUDGET.documents.maxPartEnvelopeBytes).toBeGreaterThan(HARNESS_BUDGET.documents.maxPartBytes);
     expect(HARNESS_BUDGET.generation.structuralRepairs).toBe(1);
   });
 

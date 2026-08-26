@@ -7,6 +7,20 @@
  * an explicit diagnostic instead of silently buying more provider work.
  */
 
+/**
+ * Largest authored segment one provider response may carry.
+ *
+ * An operator can raise it for a model with a wider output window; it is never
+ * lowered below the default, because a smaller ceiling would reject work the
+ * shipped contract text tells the writer it may produce.
+ */
+function partByteCeiling(): number {
+  const declared = Number(process.env.RB_HARNESS_MAX_PART_BYTES);
+  const fallback = 48 * 1024;
+  if (!Number.isFinite(declared) || declared <= 0) return fallback;
+  return Math.max(fallback, Math.floor(declared));
+}
+
 export const HARNESS_BUDGET = {
   /**
    * Adaptive interview.
@@ -131,15 +145,31 @@ export const HARNESS_BUDGET = {
   /** Documents assembled from independently bounded authoring parts. */
   documents: {
     maxDocuments: 120,
-    maxDocumentBytes: 512 * 1024,
+    maxDocumentBytes: Math.max(512 * 1024, partByteCeiling() * 16),
     maxBundleBytes: 8 * 1024 * 1024,
     /** The plan is intentionally small enough for conservative CLI/model output windows. */
     maxPlanBytes: 20 * 1024,
     /** A plan is an index, not documentation prose. */
     maxPlannedDocuments: 48,
     maxPlannedParts: 128,
-    /** One provider response never carries more document body than this. */
-    maxPartBytes: 12 * 1024,
+    /**
+     * Document body one provider response carries.
+     *
+     * Raised from 12 KiB after real runs kept failing on it: an observed
+     * `PHASES.md` segment came back at 12941 bytes, and a later one at 15420
+     * even after the writer was asked to shorten it. A single phase carrying
+     * five tasks with scope, criteria, validation, and expected evidence simply
+     * does not fit in 12 KiB, so the ceiling was rejecting correct work.
+     *
+     * It is raised rather than removed. A part must still fit the provider's
+     * own output window; without a ceiling an oversized segment comes back
+     * silently truncated, and a document assembled from a cut-off part fails
+     * later and less legibly than one rejected here. 48 KiB is roughly 12k
+     * output tokens — comfortable for current models and still an honest bound.
+     * `RB_HARNESS_MAX_PART_BYTES` raises it further for a model that can do
+     * more, without waiting on a release.
+     */
+    maxPartBytes: partByteCeiling(),
     /**
      * Ceiling on the JSON envelope that transports one part.
      *
@@ -148,7 +178,7 @@ export const HARNESS_BUDGET = {
      * `maxPartBytes` rather than borrowed from the plan's, which describes a
      * different document entirely.
      */
-    maxPartEnvelopeBytes: 32 * 1024,
+    maxPartEnvelopeBytes: partByteCeiling() * 3,
     maxPartsPerDocument: 64,
     maxTotalParts: 512,
   },
