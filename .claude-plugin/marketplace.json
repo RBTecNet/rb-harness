@@ -10,7 +10,7 @@
       "name": "rb-harness",
       "source": "./plugins/rb-harness",
       "description": "Provider-neutral project context, product review, evolution, specification, and execution-plan documentation.",
-      "version": "0.5.14"
+      "version": "0.5.15"
     }
   ]
 }

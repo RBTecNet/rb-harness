@@ -101,7 +101,9 @@ describe("task decomposition gate", () => {
   const substantial = HARNESS_BUDGET.decomposition.undecomposedFeatureCriteria;
 
   it("rejects a lone area-scoped task that also proves substantial work", () => {
-    for (const scope of ["`src/`", "`src/**`", "`src`, `tests`"]) {
+    // Only an explicit directory or glob counts as an area. A bare `src` is
+    // ambiguous with a real extensionless file, so it is deliberately not one.
+    for (const scope of ["`src/`", "`src/**`", "`src/`, `tests/`"]) {
       const issues = assessDecomposition(document(plan([task({ id: "T001", scope, criteria: substantial })])));
       expect(issues.map((issue) => issue.code), scope).toContain("execution.phase.undecomposed-feature");
     }
@@ -112,6 +114,13 @@ describe("task decomposition gate", () => {
    * contract's own minimal example is one task scoped to `src/`, `tests/` with
    * a single criterion, and an earlier version of this gate rejected it.
    */
+  it("reads an extensionless project file as a file, not an area", () => {
+    for (const scope of ["`Makefile`", "`Dockerfile`", "`LICENSE`, `CODEOWNERS`"]) {
+      const issues = assessDecomposition(document(plan([task({ id: "T001", scope, criteria: substantial })])));
+      expect(issues.map((issue) => issue.code), scope).not.toContain("execution.phase.undecomposed-feature");
+    }
+  });
+
   it("accepts a lone area-scoped task that is genuinely small", () => {
     expect(assessDecomposition(document(plan([
       task({ id: "T001", scope: "`src/`, `tests/`", criteria: substantial - 1 }),

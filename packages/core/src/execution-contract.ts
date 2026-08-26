@@ -39,6 +39,20 @@ export function parseValidationInstruction(value: string): ValidationInstruction
  */
 const LONG_RUNNING_COMMAND = new RegExp(
   "^(?:"
+  // JVM, BEAM, PHP, Ruby, and Python service entrypoints. This is a list, not
+  // a proof: it recognizes the common ones across ecosystems and will miss a
+  // service it has never seen. A miss costs one validation timeout, which is
+  // why the contract text also tells the writer the rule.
+  + "(?:mvn|\\./mvnw)\\s+[^|;&]*(?:spring-boot:run|jetty:run|tomcat7?:run|quarkus:dev)"
+  + "|(?:gradle|\\./gradlew)\\s+[^|;&]*(?:bootRun|run|quarkusDev)(?=\\s|$)"
+  + "|mix\\s+(?:phx\\.server|run\\s+--no-halt)"
+  + "|(?:php\\s+)?artisan\\s+serve(?=\\s|$)"
+  + "|php\\s+-S(?=\\s|$)"
+  + "|(?:bundle\\s+exec\\s+)?(?:puma|unicorn|thin|rackup|passenger\\s+start)(?=\\s|$)"
+  + "|(?:bundle\\s+exec\\s+)?rails\\s+(?:s|server)(?=\\s|$)"
+  + "|sbt\\s+[^|;&]*\\brun(?=\\s|$)"
+  + "|(?:air|watchexec|entr|reflex|fswatch|caddy\\s+run|nginx(?:\\s|$))"
+  + "|"
   // The script name must end here: `npm run start:check` is a one-shot check,
   // not the dev server, and rejecting it would be a false positive.
   + "(?:npm|pnpm|yarn|bun)\\s+(?:run\\s+)?(?:start|dev|serve|preview|watch)(?=\\s|$)"

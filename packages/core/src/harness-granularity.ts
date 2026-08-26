@@ -53,9 +53,15 @@ const SPLIT_INSTRUCTION =
  *
  * `src/` or `src/**` is what "implement the feature" looks like in a Scope
  * field; `src/server/routes.ts` is what a bounded task looks like.
+ *
+ * Only an explicit directory or glob counts. Treating "has no extension" as a
+ * directory looked reasonable and was wrong for every project that names a real
+ * file without one — `Makefile`, `Dockerfile`, `Rakefile`, `LICENSE`,
+ * `CODEOWNERS`, `Procfile`. A task scoped to those is bounded, and rejecting it
+ * would have been a false positive outside JavaScript.
  */
 function wholeAreaToken(token: string): boolean {
-  return /(?:^|\/)\*{1,2}$/.test(token) || token.endsWith("/") || !/\.[A-Za-z0-9]+$/.test(token);
+  return token.endsWith("/") || token.includes("*");
 }
 
 function issue(code: string, message: string, line: number): ValidationIssue {
