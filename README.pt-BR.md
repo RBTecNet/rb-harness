@@ -16,7 +16,7 @@ retomáveis em vez de exigir um pacote monolítico do modelo.
 
 ## Instalação do executável
 
-O RB Harness 0.5.15 exige Node.js 20 ou superior. No clone do repositório:
+O RB Harness 0.5.16 exige Node.js 20 ou superior. No clone do repositório:
 
 ```bash
 npm install
@@ -35,7 +35,7 @@ Confira a versão instalada:
 ```bash
 rb-harness --version
 rb-harness --ver
-# 0.5.15
+# 0.5.16
 ```
 
 Executar apenas `rb-harness` abre o assistente interativo. O splash com a
@@ -261,6 +261,11 @@ Duas falhas observadas contra providers reais são corrigidas junto:
   gerente envolta em crases, que o runner tenta executar como um programa
   inexistente. As duas passam a ser rejeitadas antes da publicação, nomeando a
   linha e a forma que a entrada deveria ter;
+- um checador apontado para um formato que ele não interpreta. A mesma execução
+  provava o contrato operacional com `node --check .rb/init/OPERATIONS.json`, e
+  o `node --check` interpreta JavaScript: ele sai com código diferente de zero
+  para um JSON válido e não distingue um arquivo bom de um quebrado. Passa a ser
+  rejeitado, nomeando o comando correto;
 - `Parallel safe` passa a ser uma decisão que o contrato pede ao escritor, com os
   critérios de `true` explicitados. Uma fase só roda concorrente quando todas as
   tasks pendentes declaram `true`, então um plano que marcou as 25 tasks como

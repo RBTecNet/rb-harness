@@ -107,6 +107,7 @@ Mechanical rules enforced by the validator:
 - Validation entries are a backtick command, \`manual: <manager-observable inspection>\`, or \`human: <external evidence>\`. \`manual: run ...\` is rejected — declare the real command. Never append \`|| true\` or \`; exit 0\`.
 - A validation is judged by its exit code, so it is never a service or watcher: \`npm start\`, \`npm run dev\`, \`vite\`, \`nodemon\`, \`uvicorn\` and \`--watch\` never exit. Prove a service task by importing its entrypoint in a test or invoking it once; leave the running service to \`OPERATIONS.json\`.
 - Never put \`manual:\` or \`human:\` inside backticks: backticks mean execute, and no \`manual:\` program exists. Write \`- manual: inspect ...\` bare.
+- Point a checker at the format it parses. \`node --check\` reads JavaScript, so against a \`.json\` or \`.yaml\` it fails on a valid file. To prove \`OPERATIONS.json\`, use \`rb-harness operations validate <path>\`.
 - Scope lists concrete project-relative paths or bounded globs in backticks. \`.\`, \`/\`, \`*\`, \`**\`, \`**/*\` are rejected; shared paths between tasks make them not parallel-safe.
 - Phase context paths that start with \`.rb/\` must name a document you actually publish in this bundle.
 - A phase must be self-contained for a cold context: goal, context paths, tasks, criteria, and validations only. Never depend on chat history, this conversation, the Harness installation, or an undeclared external file.

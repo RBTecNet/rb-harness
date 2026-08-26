@@ -28,7 +28,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.5.15 is an executable rather than a workflow that must run inside
+RB Harness 0.5.16 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -49,7 +49,7 @@ the current shell. Verify the exact installed build with:
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.5.15
+# Both print 0.5.16
 ```
 
 Run without arguments to start the wizard:
@@ -842,6 +842,11 @@ Two failures observed against real providers are fixed with them:
   wrapped in backticks, which the runner tries to execute as a program that does
   not exist. Both are now rejected before publication, naming the line and the
   form the entry should have taken;
+- a checker aimed at a format it cannot parse. The same run proved the
+  operational contract with `node --check .rb/init/OPERATIONS.json`, and
+  `node --check` parses JavaScript: it exits non-zero for a valid JSON file
+  and cannot tell one from a broken one. It is now rejected with the right
+  command named;
 - `Parallel safe` is now a decision the contract asks the writer to make, with
   the criteria for `true` spelled out. A phase runs concurrently only when every
   pending task declares `true`, so a plan that marked all 25 tasks `false` — as

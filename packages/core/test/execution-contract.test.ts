@@ -221,3 +221,46 @@ describe("a validation command must be able to pass", () => {
     }
   });
 });
+
+/**
+ * A third impossible shape, from the same family as the service command and the
+ * backticked prose: the right tool aimed at the wrong format. An observed plan
+ * used `node --check .rb/init/OPERATIONS.json` to prove the operational
+ * contract. `node --check` parses JavaScript, so it exits 1 for a valid JSON
+ * file and cannot tell one from a broken one — that phase could never complete.
+ */
+describe("a syntax checker aimed at a format it cannot parse", () => {
+  const withValidation = (source: string, validation: string) =>
+    source.replace("    - `npm test`", `    - ${validation}`);
+
+  it("rejects node --check against data and markup", async () => {
+    const source = await fixture("valid", "minimal");
+    for (const target of ["config.json", "docker-compose.yaml", "notes.md", "site.html", "Cargo.lock"]) {
+      const result = validateExecutionMarkdown(withValidation(source, `\`node --check ${target}\``));
+      const issue = result.issues.find((entry) => entry.code === "task.validation.ambiguous");
+      expect(issue?.message, target).toContain("parses JavaScript");
+    }
+  });
+
+  it("names the operational validator when that is what was meant", async () => {
+    const source = await fixture("valid", "minimal");
+    const result = validateExecutionMarkdown(withValidation(source, "`node --check .rb/init/OPERATIONS.json`"));
+    const issue = result.issues.find((entry) => entry.code === "task.validation.ambiguous");
+    expect(issue?.message).toContain("rb-harness operations validate .rb/init/OPERATIONS.json");
+  });
+
+  it("leaves node --check on JavaScript alone", async () => {
+    const source = await fixture("valid", "minimal");
+    for (const command of [
+      "`node --check src/index.js`", "`node --check bin/cli.mjs`", "`node --check lib/thing.cjs`",
+      // Type stripping decides whether this passes, so the gate must not guess.
+      "`node --check src/index.ts`",
+      // A different tool with a JSON argument is not this defect.
+      "`rb-harness operations validate .rb/init/OPERATIONS.json`",
+      "`jq empty config.json`", "`npm test -- config.json`",
+    ]) {
+      const result = validateExecutionMarkdown(withValidation(source, command));
+      expect(result.issues.filter((entry) => entry.code === "task.validation.ambiguous"), command).toEqual([]);
+    }
+  });
+});

@@ -68,6 +68,34 @@ const LONG_RUNNING_COMMAND = new RegExp(
 /** A `--watch`-style flag turns any command into one that never returns. */
 const WATCH_FLAG = /(^|\s)--watch(?:=(?:true|always))?(\s|$)|(^|\s)-w(\s|$)/i;
 
+/**
+ * A syntax checker aimed at a format it cannot parse.
+ *
+ * `node --check` validates JavaScript. Pointed at JSON it reads the object as a
+ * labelled block and fails on the first comma, so it exits non-zero for a
+ * perfectly valid file — it cannot distinguish a good one from a broken one.
+ * An observed plan used exactly `node --check .rb/init/OPERATIONS.json` to prove
+ * the operational contract, which meant that phase could never complete.
+ *
+ * Only data and markup formats are listed. `.ts` is deliberately absent: whether
+ * `node --check` accepts it depends on the runtime's type stripping, so
+ * rejecting it could be wrong on a project that has it enabled.
+ */
+const NON_JAVASCRIPT_TARGET = /\.(?:json|jsonc|ya?ml|toml|ini|md|markdown|html?|css|xml|csv|txt|lock)(?=\s|$)/i;
+
+function impossibleChecker(command: string): string | undefined {
+  const nodeCheck = command.match(/^node\s+(?:[^|;&]*\s)?--check\s+(\S+)/i);
+  if (nodeCheck?.[1] && NON_JAVASCRIPT_TARGET.test(nodeCheck[1])) {
+    const target = nodeCheck[1];
+    const suggestion = /operations?\.json$/i.test(target)
+      ? ` Use \`rb-harness operations validate ${target}\` instead.`
+      : " Use a checker for that format instead.";
+    return `runs \`node --check\`, which parses JavaScript, against ${target}; it exits non-zero for a valid file `
+      + `and cannot tell one from a broken one, so this validation can never pass.${suggestion}`;
+  }
+  return undefined;
+}
+
 function ambiguousValidationInstruction(instruction: ValidationInstruction): string | undefined {
   if (instruction.kind === "command") {
     if (/(^|\s)(?:\|\|\s*true|;\s*(?:true|exit\s+0))(?:\s|$)/i.test(instruction.value)) {
@@ -83,6 +111,8 @@ function ambiguousValidationInstruction(instruction: ValidationInstruction): str
         kind === "manual" ? "manager as an inspection" : "operator as external evidence"
       }`;
     }
+    const impossible = impossibleChecker(instruction.value);
+    if (impossible) return impossible;
     if (LONG_RUNNING_COMMAND.test(instruction.value) || WATCH_FLAG.test(instruction.value)) {
       return "starts a long-running service or watcher and never exits; a validation must run to completion "
         + "and return its real exit code, so prove the running service through OPERATIONS.json instead";
