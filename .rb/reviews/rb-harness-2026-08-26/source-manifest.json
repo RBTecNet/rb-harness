@@ -1,0 +1,67 @@
+{
+  "contract": "rb-review-source-manifest/v1",
+  "artifactId": "source-manifest-rb-harness-2026-08-26",
+  "reviewId": "rb-harness-2026-08-26",
+  "targetRevision": "94411d1a64e64db5542bf63eba1c6f0509aa0e21",
+  "inspectedSources": [
+    { "path": "package.json", "sha256": "e2d305557661c5feae0fa9262a145441a4f4d92e789a61f91c65e1d548b5e3cc", "knowledge": "OBSERVED" },
+    { "path": "package-lock.json", "sha256": "891f42631efa69a61d41fe58f4b1fcf55be88db8aaf035817ce8286bbddb7436", "knowledge": "OBSERVED" },
+    { "path": "README.md", "sha256": "7a78cf0dcedeb69d4413cb97d6e1a4c9501c2e9680aa8b990ae4fc38758c6255", "knowledge": "OBSERVED" },
+    { "path": "docs/architecture.md", "sha256": "05bd290b45451a842910b4b718518727c6f69e90539f5f7b063e9ed4b3ce70f5", "knowledge": "OBSERVED" },
+    { "path": "docs/how-to-use.md", "sha256": "0161e7e90234c19ea1a1a32ac4a70e10352568cbeaf9e2f621f4e4276a6daeb9", "knowledge": "OBSERVED" },
+    { "path": "packages/core/package.json", "sha256": "b5d972fe7666e892bad189df5ee7415533224290f3c01e09bcd0054413a1e907", "knowledge": "OBSERVED" },
+    { "path": "packages/core/src/path-policy.ts", "sha256": "0862e14ec7936630747bdf8f5692fa2f9a6afeb0903a274a412abff8694c2b03", "knowledge": "OBSERVED" },
+    { "path": "packages/core/src/api-agent-tools.ts", "sha256": "e9e9ce68a9253ec4fb5cabc84568d3c47d5acdbf53d6c08aa3e687fc123edfcc", "knowledge": "OBSERVED" },
+    { "path": "packages/core/src/harness-evidence.ts", "sha256": "84f2d3cb96464d4b44c394c9d6f6573b6fe9ce8a1caaef2812afd73f6889eac0", "knowledge": "OBSERVED" },
+    { "path": "packages/core/src/harness-workspace.ts", "sha256": "d6e87502eb8543727ae1ea69adfd65c3491f11c104d369bdd6e6fb6adb5a0a0f", "knowledge": "OBSERVED" },
+    { "path": "packages/core/src/credential-store.ts", "sha256": "4ab0fb4fdee670b7b7bc5db7d091e63705f09ad1e18fdd1d1591ad9bc40deaa0", "knowledge": "OBSERVED" },
+    { "path": "packages/core/src/headless-interview-runner.ts", "sha256": "15aa127ce3e62d73d8c47f8368c6b9c4f8dd73283ae230afad7a4ae580646cc6", "knowledge": "OBSERVED" },
+    { "path": "packages/core/src/process-tree.ts", "sha256": "c9a35988a8d874af6d63b1df5c88aff6db600b3114760562b94260affe450f69", "knowledge": "OBSERVED" },
+    { "path": "packages/core/test/provider-runtime.test.ts", "sha256": "636550140ffb1c3859599780e78955b13a90380a9fdbb5392b089d31f6687656", "knowledge": "OBSERVED" },
+    { "path": "packages/core/test/process-tree.test.ts", "sha256": "f1347b6f851c0df82860e70ac8049a8b29b3c05be69fceed09de5c9e59eaa2c5", "knowledge": "OBSERVED" },
+    { "path": "packages/core/test/headless-interview.test.ts", "sha256": "b222c420bbc72ddb5d85d047f2c7506846b3a35dec00392dd60cb7a889b8e0fb", "knowledge": "OBSERVED" },
+    { "path": "packages/core/test/documentation-core.test.ts", "sha256": "0bd3c7005895283763d3175bd2823a29dd44896536ab296e794b9a0a90b86832", "knowledge": "OBSERVED" },
+    { "path": "contracts/rb-headless-interview-v1.md", "sha256": "f6701117783dc4aa4530192b8759e6e4f2d01418edc6d3c90fbc00783ed682c9", "knowledge": "OBSERVED" }
+  ],
+  "commands": [
+    { "command": "node <plugin-root>/scripts/rb-harness.cjs --no-splash inspect .", "exitCode": 0, "outcome": "evidence written" },
+    { "command": "npm run check", "exitCode": 0, "outcome": "27 test files and 375 tests passed; build, typecheck, package, Bash and plugin checks passed" },
+    { "command": "npm run test:coverage", "exitCode": 0, "outcome": "statements 72.46%; branches 64.75%; functions 76.52%; lines 78%" },
+    { "command": "npm audit --json", "exitCode": 0, "outcome": "0 vulnerabilities; 96 dependencies accounted" },
+    { "command": "temporary esbuild bundle plus Node sentinel reproductions", "exitCode": 0, "outcome": "secretFileReadable=true; oneSecondTimeoutElapsedMs=2534; headless timeout elapsed 2632ms with late write; 12 credential saves retained 1 record" },
+    { "command": "node <plugin-root>/scripts/rb-harness.cjs --no-splash manifest sync .", "exitCode": 0, "outcome": "6 artifacts indexed" },
+    { "command": "node <plugin-root>/scripts/rb-harness.cjs --no-splash tree validate .", "exitCode": 0, "outcome": "artifact tree valid" }
+  ],
+  "runtimeEvidence": [
+    { "id": "runtime-official-check", "provenance": "local workspace, Node 24.19.0, npm project scripts", "findingIds": [] },
+    { "id": "runtime-secret-path-sentinel", "provenance": "temporary directory and artificial .npmrc sentinel; no real secret", "findingIds": ["RV-SEC-001"] },
+    { "id": "runtime-stubborn-process-sentinel", "provenance": "temporary workspace, local Node child ignoring SIGTERM", "findingIds": ["RV-OPS-001"] },
+    { "id": "runtime-credential-concurrency-sentinel", "provenance": "temporary RB_CREDENTIAL_HOME with artificial values", "findingIds": ["RV-DATA-001"] },
+    { "id": "runtime-coverage", "provenance": "Vitest v8 coverage from current workspace", "findingIds": ["RV-TEST-001"] }
+  ],
+  "findingEvidence": {
+    "RV-SEC-001": ["packages/core/src/path-policy.ts", "packages/core/src/api-agent-tools.ts", "packages/core/src/harness-evidence.ts", "packages/core/src/harness-workspace.ts", "runtime-secret-path-sentinel"],
+    "RV-OPS-001": ["packages/core/src/api-agent-tools.ts", "packages/core/src/headless-interview-runner.ts", "packages/core/src/process-tree.ts", "runtime-stubborn-process-sentinel"],
+    "RV-DATA-001": ["packages/core/src/credential-store.ts", "runtime-credential-concurrency-sentinel"],
+    "RV-TEST-001": ["package.json", "packages/core/package.json", "runtime-coverage"]
+  },
+  "developerAnswers": [],
+  "exclusions": [
+    { "path": "ajuste_harness.md", "reason": "untracked developer-owned intent document; not current implementation evidence" },
+    { "path": ".git/", "reason": "Git internals excluded; only read-only git commands were used" },
+    { "path": "node_modules/ and packages/core/node_modules/", "reason": "dependency trees excluded except execution through declared project commands" },
+    { "path": "dist/build/coverage outputs", "reason": "generated outputs not used as source truth" },
+    { "path": "credentials and environment-secret values", "reason": "never read; reproductions used artificial sentinels" },
+    { "path": "live paid providers and real OAuth", "reason": "not required for safe local review" },
+    { "path": "UI/responsive evidence", "reason": "target has no first-party graphical UI" }
+  ],
+  "generatedArtifacts": [
+    "review-rb-harness-2026-08-26",
+    "findings-rb-harness-2026-08-26",
+    "journeys-rb-harness-2026-08-26",
+    "baseline-rb-harness-2026-08-26",
+    "source-manifest-rb-harness-2026-08-26"
+  ],
+  "responsiveInventory": null,
+  "selectionPolicy": null
+}

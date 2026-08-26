@@ -1,0 +1,19 @@
+# rb-artifacts-index: rb-manifest/v1
+# generated-from: .rb/rb-manifest.json
+id	kind	status	contract	path	sha256
+context-evidence	evidence	ready		.rb/context/evidence.json	ddf0f113a05b26fa818d9803a0a1d0ee3df6d0b93ca83fc22363bff375ec2cbf
+evolutions-artifact-generation-integrity-as-is	evolution-document	ready		.rb/evolutions/artifact-generation-integrity/AS_IS.md	6b892bbc91d08b0f19f025faed012d1d2085d59a0f52761a9fd6ffe563d43b3a
+evolutions-artifact-generation-integrity-change-request	request	ready		.rb/evolutions/artifact-generation-integrity/CHANGE_REQUEST.md	2f2dcb438868b5e0e975c9a3815b9e1c76d7e18615568b8c29c2e5e88358f2e7
+evolutions-artifact-generation-integrity-impact	evolution-document	ready		.rb/evolutions/artifact-generation-integrity/IMPACT.md	40f4e97eb773deadd2e8d93a1c4f697954f526c42591e8536a1657f13ef80241
+evolutions-artifact-generation-integrity-migration	evolution-document	ready		.rb/evolutions/artifact-generation-integrity/MIGRATION.md	111e6f0b50f304ae96dcb92b2b41807e5c78655b95a0856ee1dd79912bf568f5
+execution-artifact-generation-integrity	execution-plan	ready	rb-execution/v1	.rb/evolutions/artifact-generation-integrity/PHASES.md	1f06ef1c41278052bc732e8dc3bd72d33910ec0cc58e3c9792b38abebd626095
+evolutions-artifact-generation-integrity-plan	implementation-plan	ready		.rb/evolutions/artifact-generation-integrity/PLAN.md	9abfaa6407b87558f46c7f8ccfbadfe5b971996445b0b33869fd780b4f2fd220
+evolutions-artifact-generation-integrity-preservation	evolution-document	ready		.rb/evolutions/artifact-generation-integrity/PRESERVATION.md	83007309615dc989a22a917eca261e7640cc32a991dd71a766fbcd6e0dbb031c
+evolutions-artifact-generation-integrity-regression-matrix	regression-specification	ready		.rb/evolutions/artifact-generation-integrity/REGRESSION_MATRIX.md	9ffd3c7f6e7386ceacb2fddcb26f3d0a71633125be476df7ad7e51faf9caaf01
+evolutions-artifact-generation-integrity-source-manifest	evolution-document	ready		.rb/evolutions/artifact-generation-integrity/source-manifest.json	649602c51a3872c001e9ff6d3fc59c03c44a477686179463c91f196a79dd8f90
+evolutions-artifact-generation-integrity-to-be	evolution-document	ready		.rb/evolutions/artifact-generation-integrity/TO_BE.md	122d140a97b2856b1d7d960fcf08cf5991c66492d293c888da6bb2babb430a1e
+reviews-rb-harness-2026-08-26-baseline	review-baseline	ready		.rb/reviews/rb-harness-2026-08-26/BASELINE.json	7020084ceb62154ae04b20a722a36eac5b57f75a655bc9993609bd9be1f5b58e
+reviews-rb-harness-2026-08-26-findings	review-findings	ready		.rb/reviews/rb-harness-2026-08-26/FINDINGS.md	a72b157cf713f795d655fe97ced50f1dde63fc53a0faffd12076af3810031e9c
+reviews-rb-harness-2026-08-26-journeys	review-document	ready		.rb/reviews/rb-harness-2026-08-26/JOURNEYS.md	7922ea39e9bd798dd44449398db550825dd19b521a6e2466eb9728ec8bd293a5
+reviews-rb-harness-2026-08-26-review	review-document	ready		.rb/reviews/rb-harness-2026-08-26/REVIEW.md	0f1f0842446d5784b4861ef1b69b9e56de2e221d5dff7d71a2579f7bb6e05eb6
+reviews-rb-harness-2026-08-26-source-manifest	review-document	ready		.rb/reviews/rb-harness-2026-08-26/source-manifest.json	386140f6dfe71fd580f76c8926bc7f75930efc29e6564d3b7cf312d006c0aee4

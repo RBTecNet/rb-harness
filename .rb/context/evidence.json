@@ -1,0 +1,115 @@
+{
+  "evidenceVersion": "rb-evidence/v1",
+  "generatedAt": "2026-08-26T11:07:11.259Z",
+  "target": "/home/bruno/Documentos/Projetos/IA/rb-harness/.release-work/rb-harness",
+  "limitations": [
+    "Static repository evidence only; business intent requires confirmation."
+  ],
+  "git": {
+    "head": "94411d1a64e64db5542bf63eba1c6f0509aa0e21",
+    "branch": "release/0.5.8",
+    "dirty": true
+  },
+  "inventory": {
+    "fileCount": 233,
+    "topLevel": [
+      ".claude-plugin",
+      ".gitignore",
+      "LICENSE",
+      "README.md",
+      "README.pt-BR.md",
+      "ajuste_harness.md",
+      "contracts",
+      "docs",
+      "package-lock.json",
+      "package.json",
+      "packages",
+      "plugins",
+      "resources",
+      "scripts",
+      "tests"
+    ]
+  },
+  "languages": [
+    {
+      "language": "TypeScript",
+      "files": 80
+    }
+  ],
+  "manifests": [
+    {
+      "path": "package.json",
+      "sha256": "e2d305557661c5feae0fa9262a145441a4f4d92e789a61f91c65e1d548b5e3cc",
+      "facts": {
+        "name": "rb-harness",
+        "version": "0.5.16",
+        "engines": {
+          "node": ">=20"
+        },
+        "scripts": {
+          "build": "npm run build --workspaces --if-present",
+          "typecheck": "npm run typecheck --workspaces --if-present",
+          "check": "npm run build && npm run typecheck && npm run check:package && npm test && bash scripts/test-bash-compat.sh && node scripts/check-plugin.mjs",
+          "check:package": "node scripts/check-standalone-package.mjs",
+          "test": "npm run test --workspaces --if-present",
+          "test:coverage": "npm run test:coverage --workspaces --if-present",
+          "install:user": "npm install --global --prefix \"$HOME/.local\" ./packages/core"
+        }
+      }
+    },
+    {
+      "path": "packages/core/package.json",
+      "sha256": "b5d972fe7666e892bad189df5ee7415533224290f3c01e09bcd0054413a1e907",
+      "facts": {
+        "name": "@rb-harness/core",
+        "version": "0.5.16",
+        "engines": {
+          "node": ">=20"
+        },
+        "scripts": {
+          "build": "node ./scripts/build.mjs && tsc --emitDeclarationOnly --project tsconfig.build.json",
+          "typecheck": "tsc --noEmit",
+          "test": "vitest run",
+          "test:coverage": "vitest run --coverage",
+          "prepack": "npm run build"
+        },
+        "dependencies": {
+          "commander": "^14.0.0"
+        },
+        "devDependencies": {
+          "@types/node": "^24.0.0",
+          "@vitest/coverage-v8": "^4.1.11",
+          "esbuild": "^0.28.2",
+          "typescript": "^5.9.2",
+          "vite": "^8.2.1",
+          "vitest": "^4.1.11"
+        }
+      }
+    }
+  ],
+  "configs": [
+    "packages/core/tsconfig.build.json",
+    "packages/core/tsconfig.json"
+  ],
+  "documentation": [
+    "README.md",
+    "README.pt-BR.md",
+    "docs/architecture.md",
+    "docs/benchmarks/README.md"
+  ],
+  "envVariableNames": [],
+  "evidencePolicy": {
+    "classifications": [
+      "OBSERVED",
+      "CONFIRMED",
+      "INFERRED",
+      "UNKNOWN",
+      "CONFLICT"
+    ],
+    "excluded": [
+      ".env",
+      "credentials",
+      "ignored dependency/build directories"
+    ]
+  }
+}

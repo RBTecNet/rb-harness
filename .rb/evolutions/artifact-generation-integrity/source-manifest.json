@@ -1,0 +1,72 @@
+{
+  "contract": "rb-evolve-source-manifest/v1",
+  "artifactId": "evolutions-artifact-generation-integrity-source-manifest",
+  "evolutionId": "artifact-generation-integrity",
+  "targetRevision": "94411d1a64e64db5542bf63eba1c6f0509aa0e21",
+  "request": {
+    "source": "conversation",
+    "language": "pt-BR",
+    "normalizedObjective": "Eliminar sistemicamente deriva contratual e mutação pós-publicação dos artefatos, sem correções específicas por projeto."
+  },
+  "sourceRoots": {
+    "repository": ".",
+    "user-supplied-example": "external/Atravessar_a_rua",
+    "consumer-inspection": "external/rb-ralph"
+  },
+  "inspectedSources": [
+    { "path": "packages/core/src/execution-contract.ts", "sha256": "90f8c2063926e9fc2c72f076cc2719ea3ba3730c69f8c1861c0ad91fcc313a92", "knowledge": "OBSERVED" },
+    { "path": "packages/core/src/artifact-verifier.ts", "sha256": "4b3e1fb814cd32e5e9bbaabb15a90f8f9a822aaf2f850a46d81e61534a1afe96", "knowledge": "OBSERVED" },
+    { "path": "packages/core/src/harness-contract-digest.ts", "sha256": "6bcb2e51e25170460a3b3b30e894328b9d2bf49fcedf55902c7d771e10432f1f", "knowledge": "OBSERVED" },
+    { "path": "packages/core/src/harness-incremental-documents.ts", "sha256": "b0ded4ce4945c64569518f71ca9a0484640b905d4e760e530787465775e0d08d", "knowledge": "OBSERVED" },
+    { "path": "packages/core/src/harness-generator.ts", "sha256": "02508d4d12a9a88424c4bdf1cabda723a5e1c9c599989d8b773d5f50c8a7d131", "knowledge": "OBSERVED" },
+    { "path": "packages/core/src/harness-workspace.ts", "sha256": "d6e87502eb8543727ae1ea69adfd65c3491f11c104d369bdd6e6fb6adb5a0a0f", "knowledge": "OBSERVED" },
+    { "path": "packages/core/src/standalone-runner.ts", "sha256": "373ce10a4b7f9148bad8fd4abbc589508d4090100523156d918b35f13c7f9ac4", "knowledge": "OBSERVED" },
+    { "path": "packages/core/src/api-agent-tools.ts", "sha256": "e9e9ce68a9253ec4fb5cabc84568d3c47d5acdbf53d6c08aa3e687fc123edfcc", "knowledge": "OBSERVED" },
+    { "path": "resources/references/execution-template.md", "sha256": "91cf0c2abe467cf6b094db6e3ce6eda9c736256b457ca25c996502b6e494e7ba", "knowledge": "OBSERVED" },
+    { "path": "resources/references/operational-template.md", "sha256": "fd8cd2c0e54786a1a50ff9a8ff76081854a64d6161a96224a438c2c67a427c4d", "knowledge": "OBSERVED" },
+    { "path": "contracts/RB-RALPH-CONTRACT.md", "sha256": "b42367f6d48e07f56491c5904a5151d72dabeef84db4b994393d4c47f7e5bce8", "knowledge": "OBSERVED" },
+    { "path": "scripts/check-standalone-package.mjs", "sha256": "e23a830f08d0aa2f4fe593201596abeca59c43527ecc752e1e9b8c7b2c6baf93", "knowledge": "OBSERVED" },
+    { "path": "external/Atravessar_a_rua/.rb/init/PHASES.md", "sha256": "6a4191efd7d0d15c74cf1ceb1ffabd54dd79a7054595a338707c8987f1eb607c", "knowledge": "OBSERVED" },
+    { "path": "external/Atravessar_a_rua/.rb/init/OPERATIONS.json", "sha256": "88561e9005932440cccd8caaad0d3847b869a7cd0569bada5faeb5fa606901bb", "knowledge": "OBSERVED" },
+    { "path": "external/Atravessar_a_rua/.rb/rb-manifest.json", "sha256": "c2a70e85605d14b37215eb9e4a7c70269f9bf679e91f7e871abb6a1ded558113", "knowledge": "OBSERVED" },
+    { "path": "external/Atravessar_a_rua/.rb/runs/atravessar-a-rua-6a4191efd7d0/evidence/P04-attempt-1-changes.json", "sha256": "c48d04490a98e4e9ab6eb7d5d144f6fa5d0d5d9d1a6a25a383401c8572fbb505", "knowledge": "OBSERVED" },
+    { "path": "external/rb-ralph/bin/rb-ralph", "sha256": "af97d798d93f29595d989ee94bbe9f2eca76e630b3b64e4fd7f1ff0880c4af3b", "knowledge": "OBSERVED" },
+    { "path": "external/rb-ralph/lib/control-plane.cjs", "sha256": "b74ddfa8761a3422261df6f90816d6d9ba741433bb7fe6462d0ce43710b8ba9e", "knowledge": "OBSERVED" }
+  ],
+  "commands": [
+    { "command": "node packages/core/dist/cli.js contract validate <example>/.rb/init/PHASES.md", "exitCode": 0, "outcome": "O plano com uma task escritora de .rb foi aceito pelo contrato atual." },
+    { "command": "npm test --workspace @rb-harness/core -- execution-contract.test.ts artifact-verifier.test.ts generation-recovery.test.ts", "exitCode": 0, "outcome": "3 arquivos e 49 testes passaram, confirmando a ausência da regressão necessária." },
+    { "command": "sha256sum e stat sobre manifesto, OPERATIONS e evidência P04", "exitCode": 0, "outcome": "Manifesto antecede a mutação; hash registrado 5148cb0b e hash atual 88561e90; P04 lista OPERATIONS como modificado." }
+  ],
+  "answers": [],
+  "assumptions": [
+    { "id": "artifact-immutability", "disposition": "ACCEPTED_LOW_RISK_ASSUMPTION", "value": "Artefatos publicados são imutáveis durante uma execução; nova autoridade exige nova publicação." },
+    { "id": "read-only-rb-references", "disposition": "ACCEPTED_LOW_RISK_ASSUMPTION", "value": "Context e validations podem ler .rb; Scope não pode possuí-lo." },
+    { "id": "external-ralph-delivery", "disposition": "EXTERNAL_DEPENDENCY", "value": "A defesa provider-neutral no Ralph é coordenada no repositório consumidor e não é falsamente declarada como implementada aqui." }
+  ],
+  "traceability": [
+    { "requirements": ["RF-001", "RF-002"], "impact": ["execution-contract", "custom-output", "direct-executor"], "preservation": ["RG-001", "RG-002", "RG-003", "RG-004"], "tasks": ["T001"] },
+    { "requirements": ["RF-003", "RF-004"], "impact": ["incremental-authoring", "operations-ownership"], "preservation": ["RG-008", "RG-009", "RG-010", "RG-011", "RG-012"], "tasks": ["T003", "T005"] },
+    { "requirements": ["RF-005", "RF-007"], "impact": ["staging", "artifact-verifier"], "preservation": ["RG-005", "RG-006", "RG-007"], "tasks": ["T002", "T007"] },
+    { "requirements": ["RF-006"], "impact": ["publication", "run-state", "rollback"], "preservation": ["RG-013", "RG-014", "RG-015"], "tasks": ["T004"] },
+    { "requirements": ["RF-008", "RF-009"], "impact": ["Ralph-compatibility", "legacy-plans"], "preservation": ["RG-016", "RG-020"], "tasks": ["T006"] },
+    { "requirements": ["RF-010"], "impact": ["release-gate", "package"], "preservation": ["RG-017", "RG-018", "RG-019", "RG-021"], "tasks": ["T007"] }
+  ],
+  "generatedArtifacts": [
+    "evolutions-artifact-generation-integrity-change-request",
+    "evolutions-artifact-generation-integrity-as-is",
+    "evolutions-artifact-generation-integrity-to-be",
+    "evolutions-artifact-generation-integrity-impact",
+    "evolutions-artifact-generation-integrity-preservation",
+    "evolutions-artifact-generation-integrity-migration",
+    "evolutions-artifact-generation-integrity-regression-matrix",
+    "evolutions-artifact-generation-integrity-plan",
+    "execution-artifact-generation-integrity",
+    "evolutions-artifact-generation-integrity-source-manifest"
+  ],
+  "exclusions": [
+    { "path": "ajuste_harness.md", "reason": "Arquivo não rastreado do desenvolvedor; não foi lido nem alterado." },
+    { "path": "external/Atravessar_a_rua/application-code", "reason": "Projeto exemplo foi usado somente como evidência read-only." },
+    { "path": "external/rb-ralph/application-code", "reason": "Consumidor externo foi inspecionado read-only; sua implementação exige entrega coordenada própria." }
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "contract": "rb-review-baseline/v1",
+  "artifactId": "baseline-rb-harness-2026-08-26",
+  "reviewId": "rb-harness-2026-08-26",
+  "target": {
+    "revision": "94411d1a64e64db5542bf63eba1c6f0509aa0e21",
+    "branch": "release/0.5.8",
+    "dirty": true,
+    "version": "0.5.16"
+  },
+  "sourceHashes": {
+    "package.json": "e2d305557661c5feae0fa9262a145441a4f4d92e789a61f91c65e1d548b5e3cc",
+    "package-lock.json": "891f42631efa69a61d41fe58f4b1fcf55be88db8aaf035817ce8286bbddb7436",
+    "packages/core/src/path-policy.ts": "0862e14ec7936630747bdf8f5692fa2f9a6afeb0903a274a412abff8694c2b03",
+    "packages/core/src/api-agent-tools.ts": "e9e9ce68a9253ec4fb5cabc84568d3c47d5acdbf53d6c08aa3e687fc123edfcc",
+    "packages/core/src/credential-store.ts": "4ab0fb4fdee670b7b7bc5db7d091e63705f09ad1e18fdd1d1591ad9bc40deaa0",
+    "packages/core/src/headless-interview-runner.ts": "15aa127ce3e62d73d8c47f8368c6b9c4f8dd73283ae230afad7a4ae580646cc6",
+    "packages/core/src/process-tree.ts": "c9a35988a8d874af6d63b1df5c88aff6db600b3114760562b94260affe450f69"
+  },
+  "findings": [
+    {
+      "id": "RV-SEC-001",
+      "fingerprint": "secret-path-policy-common-auth-files-readable",
+      "severity": "HIGH",
+      "confidence": "CONFIRMED",
+      "disposition": "new"
+    },
+    {
+      "id": "RV-OPS-001",
+      "fingerprint": "raw-spawn-timeout-without-kill-escalation-quiescence",
+      "severity": "HIGH",
+      "confidence": "CONFIRMED",
+      "disposition": "new"
+    },
+    {
+      "id": "RV-DATA-001",
+      "fingerprint": "credential-store-concurrent-read-modify-write-lost-update",
+      "severity": "MEDIUM",
+      "confidence": "CONFIRMED",
+      "disposition": "new"
+    },
+    {
+      "id": "RV-TEST-001",
+      "fingerprint": "release-check-no-coverage-threshold-auth-cli-zero-lines",
+      "severity": "LOW",
+      "confidence": "CONFIRMED",
+      "disposition": "new"
+    }
+  ],
+  "acceptedRisks": [],
+  "comparison": {
+    "baselineReviewId": null,
+    "new": 4,
+    "changed": 0,
+    "regressed": 0,
+    "unchanged": 0,
+    "resolved": 0
+  }
+}

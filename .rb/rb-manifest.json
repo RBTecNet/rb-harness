@@ -1,0 +1,124 @@
+{
+  "manifestVersion": "rb-manifest/v1",
+  "project": {
+    "id": "rb-harness",
+    "name": "rb-harness"
+  },
+  "artifactRoot": ".rb",
+  "generatedAt": "2026-08-26T14:32:51.153Z",
+  "artifacts": [
+    {
+      "id": "context-evidence",
+      "kind": "evidence",
+      "path": ".rb/context/evidence.json",
+      "status": "ready",
+      "sha256": "ddf0f113a05b26fa818d9803a0a1d0ee3df6d0b93ca83fc22363bff375ec2cbf"
+    },
+    {
+      "id": "evolutions-artifact-generation-integrity-as-is",
+      "kind": "evolution-document",
+      "path": ".rb/evolutions/artifact-generation-integrity/AS_IS.md",
+      "status": "ready",
+      "sha256": "6b892bbc91d08b0f19f025faed012d1d2085d59a0f52761a9fd6ffe563d43b3a"
+    },
+    {
+      "id": "evolutions-artifact-generation-integrity-change-request",
+      "kind": "request",
+      "path": ".rb/evolutions/artifact-generation-integrity/CHANGE_REQUEST.md",
+      "status": "ready",
+      "sha256": "2f2dcb438868b5e0e975c9a3815b9e1c76d7e18615568b8c29c2e5e88358f2e7"
+    },
+    {
+      "id": "evolutions-artifact-generation-integrity-impact",
+      "kind": "evolution-document",
+      "path": ".rb/evolutions/artifact-generation-integrity/IMPACT.md",
+      "status": "ready",
+      "sha256": "40f4e97eb773deadd2e8d93a1c4f697954f526c42591e8536a1657f13ef80241"
+    },
+    {
+      "id": "evolutions-artifact-generation-integrity-migration",
+      "kind": "evolution-document",
+      "path": ".rb/evolutions/artifact-generation-integrity/MIGRATION.md",
+      "status": "ready",
+      "sha256": "111e6f0b50f304ae96dcb92b2b41807e5c78655b95a0856ee1dd79912bf568f5"
+    },
+    {
+      "id": "execution-artifact-generation-integrity",
+      "kind": "execution-plan",
+      "path": ".rb/evolutions/artifact-generation-integrity/PHASES.md",
+      "status": "ready",
+      "sha256": "1f06ef1c41278052bc732e8dc3bd72d33910ec0cc58e3c9792b38abebd626095",
+      "contract": "rb-execution/v1"
+    },
+    {
+      "id": "evolutions-artifact-generation-integrity-plan",
+      "kind": "implementation-plan",
+      "path": ".rb/evolutions/artifact-generation-integrity/PLAN.md",
+      "status": "ready",
+      "sha256": "9abfaa6407b87558f46c7f8ccfbadfe5b971996445b0b33869fd780b4f2fd220"
+    },
+    {
+      "id": "evolutions-artifact-generation-integrity-preservation",
+      "kind": "evolution-document",
+      "path": ".rb/evolutions/artifact-generation-integrity/PRESERVATION.md",
+      "status": "ready",
+      "sha256": "83007309615dc989a22a917eca261e7640cc32a991dd71a766fbcd6e0dbb031c"
+    },
+    {
+      "id": "evolutions-artifact-generation-integrity-regression-matrix",
+      "kind": "regression-specification",
+      "path": ".rb/evolutions/artifact-generation-integrity/REGRESSION_MATRIX.md",
+      "status": "ready",
+      "sha256": "9ffd3c7f6e7386ceacb2fddcb26f3d0a71633125be476df7ad7e51faf9caaf01"
+    },
+    {
+      "id": "evolutions-artifact-generation-integrity-source-manifest",
+      "kind": "evolution-document",
+      "path": ".rb/evolutions/artifact-generation-integrity/source-manifest.json",
+      "status": "ready",
+      "sha256": "649602c51a3872c001e9ff6d3fc59c03c44a477686179463c91f196a79dd8f90"
+    },
+    {
+      "id": "evolutions-artifact-generation-integrity-to-be",
+      "kind": "evolution-document",
+      "path": ".rb/evolutions/artifact-generation-integrity/TO_BE.md",
+      "status": "ready",
+      "sha256": "122d140a97b2856b1d7d960fcf08cf5991c66492d293c888da6bb2babb430a1e"
+    },
+    {
+      "id": "reviews-rb-harness-2026-08-26-baseline",
+      "kind": "review-baseline",
+      "path": ".rb/reviews/rb-harness-2026-08-26/BASELINE.json",
+      "status": "ready",
+      "sha256": "7020084ceb62154ae04b20a722a36eac5b57f75a655bc9993609bd9be1f5b58e"
+    },
+    {
+      "id": "reviews-rb-harness-2026-08-26-findings",
+      "kind": "review-findings",
+      "path": ".rb/reviews/rb-harness-2026-08-26/FINDINGS.md",
+      "status": "ready",
+      "sha256": "a72b157cf713f795d655fe97ced50f1dde63fc53a0faffd12076af3810031e9c"
+    },
+    {
+      "id": "reviews-rb-harness-2026-08-26-journeys",
+      "kind": "review-document",
+      "path": ".rb/reviews/rb-harness-2026-08-26/JOURNEYS.md",
+      "status": "ready",
+      "sha256": "7922ea39e9bd798dd44449398db550825dd19b521a6e2466eb9728ec8bd293a5"
+    },
+    {
+      "id": "reviews-rb-harness-2026-08-26-review",
+      "kind": "review-document",
+      "path": ".rb/reviews/rb-harness-2026-08-26/REVIEW.md",
+      "status": "ready",
+      "sha256": "0f1f0842446d5784b4861ef1b69b9e56de2e221d5dff7d71a2579f7bb6e05eb6"
+    },
+    {
+      "id": "reviews-rb-harness-2026-08-26-source-manifest",
+      "kind": "review-document",
+      "path": ".rb/reviews/rb-harness-2026-08-26/source-manifest.json",
+      "status": "ready",
+      "sha256": "386140f6dfe71fd580f76c8926bc7f75930efc29e6564d3b7cf312d006c0aee4"
+    }
+  ]
+}

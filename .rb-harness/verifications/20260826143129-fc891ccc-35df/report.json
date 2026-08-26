@@ -1,0 +1,57 @@
+{
+  "contract": "rb-harness-artifact-verification/v1",
+  "status": "fail",
+  "readyForRalph": false,
+  "artifactDirectory": ".rb",
+  "artifactFingerprint": "1356e82800c0e7a825863b0fff9ef3a4a56c216ae9799d31b3f4511c21af28bc",
+  "authorityFingerprint": "b6bcd8639c36685749a5bd77252162e5b3d6c0fd1572cc0470b65db61635d346",
+  "authority": {
+    "source": "artifact-tree-only"
+  },
+  "deterministic": {
+    "passed": false,
+    "checks": [
+      "manifest-schema",
+      "artifact-hashes",
+      "execution-contracts",
+      "operational-contracts",
+      "responsive-contracts",
+      "ready-plan-discovery",
+      "cold-context-paths",
+      "task-reference-integrity",
+      "requirement-coverage",
+      "portable-paths",
+      "task-decomposition"
+    ],
+    "artifactCount": 16,
+    "readyPlanCount": 1
+  },
+  "semantic": {
+    "executed": false,
+    "reason": "Verification is deterministic by contract; the semantic documentation manager was removed from the product path."
+  },
+  "findings": [
+    {
+      "id": "traceability.undefined-task.execution-artifact-generation-integrity",
+      "severity": "major",
+      "source": "deterministic",
+      "category": "traceability",
+      "artifact": ".rb/evolutions/artifact-generation-integrity/PHASES.md",
+      "criterion": "task-reference-integrity",
+      "evidence": "Artifacts in .rb/evolutions/artifact-generation-integrity reference task IDs that this execution plan does not define: T013.",
+      "requiredChange": "Point every task reference to a task defined by the execution plan, or add the missing bounded task and its traceability."
+    },
+    {
+      "id": "source-authority.original-request-unavailable",
+      "severity": "minor",
+      "source": "deterministic",
+      "category": "source-authority",
+      "artifact": ".rb/rb-manifest.json",
+      "criterion": "request-fidelity",
+      "evidence": "No matching completed Harness run or explicit --against request file was available; the report is not bound to an original request.",
+      "requiredChange": "Provide --against <request-file> or preserve the originating Harness run state to bind this report to its authority."
+    }
+  ],
+  "reportPath": "/home/bruno/Documentos/Projetos/IA/rb-harness/.release-work/rb-harness/.rb-harness/verifications/20260826143129-fc891ccc-35df/report.json",
+  "verifiedAt": "2026-08-26T14:31:29.160Z"
+}

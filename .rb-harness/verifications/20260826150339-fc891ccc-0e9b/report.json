@@ -1,0 +1,79 @@
+{
+  "contract": "rb-harness-artifact-verification/v1",
+  "status": "fail",
+  "readyForRalph": false,
+  "artifactDirectory": ".rb",
+  "artifactFingerprint": "261942f954bce751b3a00532862322eb21ea5636b747919aa40c30dbe9237a41",
+  "authorityFingerprint": "b6bcd8639c36685749a5bd77252162e5b3d6c0fd1572cc0470b65db61635d346",
+  "authority": {
+    "source": "artifact-tree-only"
+  },
+  "deterministic": {
+    "passed": false,
+    "checks": [
+      "manifest-schema",
+      "artifact-hashes",
+      "execution-contracts",
+      "operational-contracts",
+      "responsive-contracts",
+      "ready-plan-discovery",
+      "cold-context-paths",
+      "task-reference-integrity",
+      "requirement-coverage",
+      "portable-paths",
+      "task-decomposition",
+      "artifact-authority",
+      "cross-artifact-consistency"
+    ],
+    "artifactCount": 16,
+    "readyPlanCount": 0
+  },
+  "semantic": {
+    "executed": false,
+    "reason": "Verification is deterministic by contract; the semantic documentation manager was removed from the product path."
+  },
+  "findings": [
+    {
+      "id": "deterministic.task.change.control-plane.66c4f31154",
+      "severity": "blocker",
+      "source": "deterministic",
+      "category": "integrity",
+      "artifact": ".rb/evolutions/artifact-generation-integrity/PHASES.md",
+      "criterion": "task.change.control-plane",
+      "evidence": "T001 Change must not direct edits to immutable .rb planning artifacts. Move the artifact to phase Context and describe only the implementation change.",
+      "requiredChange": "Repair the deterministic artifact contract and rerun verification before invoking RB Ralph."
+    },
+    {
+      "id": "deterministic.task.change.control-plane.406d5b8ef6",
+      "severity": "blocker",
+      "source": "deterministic",
+      "category": "integrity",
+      "artifact": ".rb/evolutions/artifact-generation-integrity/PHASES.md",
+      "criterion": "task.change.control-plane",
+      "evidence": "T007 Change must not direct edits to immutable .rb planning artifacts. Move the artifact to phase Context and describe only the implementation change.",
+      "requiredChange": "Repair the deterministic artifact contract and rerun verification before invoking RB Ralph."
+    },
+    {
+      "id": "deterministic.artifact.status.mismatch.c14b5a8ed0",
+      "severity": "blocker",
+      "source": "deterministic",
+      "category": "integrity",
+      "artifact": ".rb/evolutions/artifact-generation-integrity/PHASES.md",
+      "criterion": "artifact.status.mismatch",
+      "evidence": "Manifest status ready differs from document status invalid",
+      "requiredChange": "Repair the deterministic artifact contract and rerun verification before invoking RB Ralph."
+    },
+    {
+      "id": "source-authority.original-request-unavailable",
+      "severity": "minor",
+      "source": "deterministic",
+      "category": "source-authority",
+      "artifact": ".rb/rb-manifest.json",
+      "criterion": "request-fidelity",
+      "evidence": "No matching completed Harness run or explicit --against request file was available; the report is not bound to an original request.",
+      "requiredChange": "Provide --against <request-file> or preserve the originating Harness run state to bind this report to its authority."
+    }
+  ],
+  "reportPath": "/home/bruno/Documentos/Projetos/IA/rb-harness/.release-work/rb-harness/.rb-harness/verifications/20260826150339-fc891ccc-0e9b/report.json",
+  "verifiedAt": "2026-08-26T15:03:39.406Z"
+}

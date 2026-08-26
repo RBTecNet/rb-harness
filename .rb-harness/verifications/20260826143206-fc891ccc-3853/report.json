@@ -1,0 +1,47 @@
+{
+  "contract": "rb-harness-artifact-verification/v1",
+  "status": "warning",
+  "readyForRalph": true,
+  "artifactDirectory": ".rb",
+  "artifactFingerprint": "77aea4bce3bd4bf254676e5cb3e5ecc9f7b629d7d329c05f35114c4c498a37dc",
+  "authorityFingerprint": "b6bcd8639c36685749a5bd77252162e5b3d6c0fd1572cc0470b65db61635d346",
+  "authority": {
+    "source": "artifact-tree-only"
+  },
+  "deterministic": {
+    "passed": true,
+    "checks": [
+      "manifest-schema",
+      "artifact-hashes",
+      "execution-contracts",
+      "operational-contracts",
+      "responsive-contracts",
+      "ready-plan-discovery",
+      "cold-context-paths",
+      "task-reference-integrity",
+      "requirement-coverage",
+      "portable-paths",
+      "task-decomposition"
+    ],
+    "artifactCount": 16,
+    "readyPlanCount": 1
+  },
+  "semantic": {
+    "executed": false,
+    "reason": "Verification is deterministic by contract; the semantic documentation manager was removed from the product path."
+  },
+  "findings": [
+    {
+      "id": "source-authority.original-request-unavailable",
+      "severity": "minor",
+      "source": "deterministic",
+      "category": "source-authority",
+      "artifact": ".rb/rb-manifest.json",
+      "criterion": "request-fidelity",
+      "evidence": "No matching completed Harness run or explicit --against request file was available; the report is not bound to an original request.",
+      "requiredChange": "Provide --against <request-file> or preserve the originating Harness run state to bind this report to its authority."
+    }
+  ],
+  "reportPath": "/home/bruno/Documentos/Projetos/IA/rb-harness/.release-work/rb-harness/.rb-harness/verifications/20260826143206-fc891ccc-3853/report.json",
+  "verifiedAt": "2026-08-26T14:32:06.066Z"
+}
