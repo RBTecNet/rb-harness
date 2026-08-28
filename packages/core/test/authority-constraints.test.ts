@@ -55,6 +55,34 @@ describe("protected path authority", () => {
     expect(scopeTokenIntersectsProtectedPath("**/*.md", ".rb/**/*.md")).toBe(true);
   });
 
+  it("treats literal Scope directories as ownership prefixes for protected globs", () => {
+    expect(scopeTokenIntersectsProtectedPath("config/secrets", "**/secrets/*.env")).toBe(true);
+    expect(scopeTokenIntersectsProtectedPath("src/legacy", "**/legacy/*.ts")).toBe(true);
+    expect(scopeTokenIntersectsProtectedPath("src", "**/*.md")).toBe(true);
+  });
+
+  it("disproves glob intersections only through deterministic prefixes and suffixes", () => {
+    expect(scopeTokenIntersectsProtectedPath("tests/**/*.ts", "**/*.md")).toBe(false);
+    expect(scopeTokenIntersectsProtectedPath("src/**/*.json", "**/*.yaml")).toBe(false);
+    expect(scopeTokenIntersectsProtectedPath("src/**/*.ts", "**/legacy/*.ts")).toBe(true);
+    expect(scopeTokenIntersectsProtectedPath("tests/**/*.ts", "src/**/*.ts")).toBe(false);
+  });
+
+  it("rejects literal Scope ownership of descendants matched by a protected glob", async () => {
+    const issues = validateAuthorityConstraints(
+      await executionWithScope("`config/secrets`"),
+      [{
+        kind: "protected-path",
+        id: "SECRET-ENV",
+        path: "**/secrets/*.env",
+        source: "request",
+      }],
+      ".rb/features/example/PHASES.md",
+    );
+    expect(issues.find((issue) => issue.code === "authority.protected-path.scope")?.message)
+      .toContain("config/secrets");
+  });
+
   it.each([
     "Do not modify package.json",
     "Don't modify package.json",

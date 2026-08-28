@@ -230,31 +230,24 @@ export function deduplicateProtectedPaths(constraints: readonly ProtectedPathCon
   });
 }
 
-export function scopeTokenIntersectsProtectedPath(token: string, protectedPath: string): boolean {
-  const normalized = canonicalProtectedPath(token);
-  const protectedCanonical = canonicalProtectedPath(protectedPath);
-  if (!normalized || !protectedCanonical) return false;
-  if (scopeTokenCoversPath(normalized, protectedPath) || scopeTokenCoversPath(protectedPath, normalized)) return true;
-  if (!/[*?]/.test(normalized)) return false;
-  if (/[*?]/.test(protectedCanonical)) {
-    const literalPrefix = (value: string): string[] => {
-      const prefix: string[] = [];
-      for (const segment of value.split("/")) {
-        if (/[*?]/.test(segment)) break;
-        prefix.push(segment);
-      }
-      return prefix;
-    };
-    const tokenPrefix = literalPrefix(normalized);
-    const protectedPrefix = literalPrefix(protectedCanonical);
-    const compared = Math.min(tokenPrefix.length, protectedPrefix.length);
-    for (let index = 0; index < compared; index += 1) {
-      if (tokenPrefix[index] !== protectedPrefix[index]) return false;
-    }
-    return true;
+function literalPathPrefix(value: string): string[] {
+  const prefix: string[] = [];
+  for (const segment of value.split("/")) {
+    if (/[*?]/.test(segment)) break;
+    prefix.push(segment);
   }
-  const pattern = normalized.split("/");
-  const target = protectedCanonical.split("/");
+  return prefix;
+}
+
+function literalFilenameSuffix(value: string): string | undefined {
+  const filename = value.split("/").at(-1)!;
+  const wildcard = Math.max(filename.lastIndexOf("*"), filename.lastIndexOf("?"));
+  return filename.slice(wildcard + 1) || undefined;
+}
+
+function globIntersectsLiteralPrefix(glob: string, literal: string): boolean {
+  const pattern = glob.split("/");
+  const target = literal.split("/");
   const memo = new Map<string, boolean>();
   const intersects = (patternIndex: number, targetIndex: number): boolean => {
     const key = `${patternIndex}:${targetIndex}`;
@@ -274,6 +267,37 @@ export function scopeTokenIntersectsProtectedPath(token: string, protectedPath: 
     return result;
   };
   return intersects(0, 0);
+}
+
+export function scopeTokenIntersectsProtectedPath(token: string, protectedPath: string): boolean {
+  const normalized = canonicalProtectedPath(token);
+  const protectedCanonical = canonicalProtectedPath(protectedPath);
+  if (!normalized || !protectedCanonical) return false;
+  const tokenIsGlob = /[*?]/.test(normalized);
+  const protectedIsGlob = /[*?]/.test(protectedCanonical);
+
+  if (!protectedIsGlob && scopeTokenCoversPath(normalized, protectedCanonical)) return true;
+  if (!tokenIsGlob && scopeTokenCoversPath(protectedCanonical, normalized)) return true;
+  if (tokenIsGlob !== protectedIsGlob) {
+    return globIntersectsLiteralPrefix(
+      tokenIsGlob ? normalized : protectedCanonical,
+      tokenIsGlob ? protectedCanonical : normalized,
+    );
+  }
+  if (!tokenIsGlob) return false;
+
+  const tokenPrefix = literalPathPrefix(normalized);
+  const protectedPrefix = literalPathPrefix(protectedCanonical);
+  const compared = Math.min(tokenPrefix.length, protectedPrefix.length);
+  for (let index = 0; index < compared; index += 1) {
+    if (tokenPrefix[index] !== protectedPrefix[index]) return false;
+  }
+
+  const tokenSuffix = literalFilenameSuffix(normalized);
+  const protectedSuffix = literalFilenameSuffix(protectedCanonical);
+  if (tokenSuffix && protectedSuffix
+    && !tokenSuffix.endsWith(protectedSuffix) && !protectedSuffix.endsWith(tokenSuffix)) return false;
+  return true;
 }
 
 export function changeExplicitlyModifiesProtectedPath(change: string, protectedPath: string): boolean {
