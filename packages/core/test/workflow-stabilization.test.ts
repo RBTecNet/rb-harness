@@ -51,6 +51,22 @@ async function writePlanSet(project: string, slug: string, blocked = false): Pro
     "SPEC.md": "# Specification\n\n## RF-001\n\nThe fixture returns the documented value.\n",
     "PLAN.md": "# Plan\n\nImplement RF-001 with a focused regression.\n",
     "PHASES.md": phases(base, slug, blocked),
+    "source-manifest.json": "{\"sources\":[]}\n",
+  };
+  for (const [name, content] of Object.entries(documents)) await writeFile(resolve(project, base, name), content, "utf8");
+  return Object.keys(documents).map((name) => `${base}/${name}`);
+}
+
+async function writeInitSet(project: string): Promise<string[]> {
+  const base = ".rb/init";
+  await mkdir(resolve(project, base), { recursive: true });
+  const documents: Record<string, string> = {
+    "PROJECT.md": "# Project\n\nThe bounded fixture project.\n",
+    "REQUIREMENTS.md": "# Requirements\n\n## RF-001\n\nReturn the documented value.\n",
+    "DECISIONS.md": "# Decisions\n\nUse the existing deterministic fixture.\n",
+    "PLAN.md": "# Plan\n\nImplement RF-001 with a focused regression.\n",
+    "PHASES.md": phases(base, "init-current"),
+    "source-manifest.json": "{\"sources\":[]}\n",
   };
   for (const [name, content] of Object.entries(documents)) await writeFile(resolve(project, base, name), content, "utf8");
   return Object.keys(documents).map((name) => `${base}/${name}`);
@@ -108,6 +124,7 @@ async function writeEvolveSet(
     "REGRESSION_MATRIX.md": "# Regression matrix\n\nCHANGE-001 and PRESERVE-001 are proven by T001.\n",
     "PLAN.md": "# Plan\n\nImplement CHANGE-001 and prove PRESERVE-001.\n",
     "PHASES.md": evolvePhases(base, plan.scope, plan.change, plan.covers),
+    "source-manifest.json": "{\"sources\":[]}\n",
   };
   for (const [name, content] of Object.entries(documents)) await writeFile(resolve(project, base, name), content, "utf8");
   return Object.keys(documents).map((name) => `${base}/${name}`);
@@ -163,6 +180,50 @@ describe("run-scoped readiness and workflow completeness", () => {
     expect(validation.valid).toBe(false);
     expect(validation.errors.find((error) => error.path?.endsWith("/SPEC.md"))?.code)
       .toBe("workflow.artifact.required-missing");
+  });
+
+  it("rejects a dynamic workflow bundle containing an authored path outside its single canonical root", async () => {
+    const project = await root();
+    const current = await writePlanSet(project, "mixed-root");
+    await mkdir(resolve(project, ".rb/context"), { recursive: true });
+    await writeFile(resolve(project, ".rb/context/AGENTS.md"), "# Context\n\nUnrelated authored output.\n", "utf8");
+    current.push(".rb/context/AGENTS.md");
+    const validation = await validateStagedTree(project, "plan", project, { currentArtifactPaths: current });
+    expect(validation.valid).toBe(false);
+    expect(validation.errors.map((error) => error.code)).toContain("workflow.scope.invalid");
+  });
+
+  it("rejects a fixed-root workflow bundle containing an authored path outside its canonical root", async () => {
+    const project = await root();
+    const current = await writeInitSet(project);
+    await mkdir(resolve(project, ".rb/context"), { recursive: true });
+    await writeFile(resolve(project, ".rb/context/project-overview.md"), "# Context\n\nOutside init.\n", "utf8");
+    current.push(".rb/context/project-overview.md");
+    const validation = await validateStagedTree(project, "init", project, { currentArtifactPaths: current });
+    expect(validation.valid).toBe(false);
+    expect(validation.errors.map((error) => error.code)).toContain("workflow.scope.invalid");
+  });
+
+  it("does not promote an old optional artifact from the same slug into current-run authority", async () => {
+    const project = await root();
+    const base = ".rb/features/same-slug";
+    await mkdir(resolve(project, base), { recursive: true });
+    await writeFile(resolve(project, `${base}/OPERATIONS.json`), "{\"contract\":\"stale-invalid\"}\n", "utf8");
+    const current = await writePlanSet(project, "same-slug");
+    const validation = await validateStagedTree(project, "plan", project, { currentArtifactPaths: current });
+    expect(validation.valid).toBe(true);
+    expect(validation.errors).toEqual([]);
+    await syncManifest(project);
+    const authority = resolve(project, "same-slug-request.md");
+    await writeFile(authority, "Implement RF-001.\n", "utf8");
+    const report = await verifyArtifacts({
+      projectRoot: project,
+      artifactDirectory: ".rb",
+      againstFile: authority,
+      currentArtifactPaths: current,
+    });
+    expect(report.readyForRalph).toBe(true);
+    expect(report.findings.some((finding) => finding.artifact.endsWith("/OPERATIONS.json"))).toBe(false);
   });
 });
 

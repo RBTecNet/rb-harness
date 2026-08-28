@@ -1,7 +1,6 @@
 import { access, readFile, realpath } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type { HarnessWorkflow } from "./standalone-types.js";
-import { renderWorkflowArtifactAuthority } from "./workflow-definition.js";
 
 interface ResourceRootOptions {
   launcherPath?: string;
@@ -83,9 +82,6 @@ export async function loadWorkflowResources(
   const sections: string[] = [];
   for (const resource of resources) {
     sections.push(`\n\n===== RB HARNESS RESOURCE: ${resource.label} =====\n${await readFile(resource.path, "utf8")}`);
-  }
-  if (section === "generation") {
-    sections.push(`\n\n===== RB HARNESS RESOURCE: workflows/${workflow}/artifact-authority (code-owned) =====\n${renderWorkflowArtifactAuthority(workflow)}\n`);
   }
   return sections.join("");
 }

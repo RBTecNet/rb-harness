@@ -26,6 +26,7 @@ const originalExitPart = process.env.RB_HARNESS_TEST_INCREMENTAL_EXIT_PART;
 const originalFormatFailures = process.env.RB_HARNESS_TEST_FORMAT_INVALID_ATTEMPTS;
 const originalDocumentDependencies = process.env.RB_HARNESS_TEST_DOCUMENT_DEPENDENCIES;
 const originalCyclicDocumentDependencies = process.env.RB_HARNESS_TEST_CYCLIC_DOCUMENT_DEPENDENCIES;
+const originalIncompleteFirstPlan = process.env.RB_HARNESS_TEST_INCOMPLETE_FIRST_PLAN;
 
 afterEach(() => {
   if (originalCalls === undefined) delete process.env.RB_HARNESS_TEST_INCREMENTAL_CALLS;
@@ -40,6 +41,8 @@ afterEach(() => {
   else process.env.RB_HARNESS_TEST_DOCUMENT_DEPENDENCIES = originalDocumentDependencies;
   if (originalCyclicDocumentDependencies === undefined) delete process.env.RB_HARNESS_TEST_CYCLIC_DOCUMENT_DEPENDENCIES;
   else process.env.RB_HARNESS_TEST_CYCLIC_DOCUMENT_DEPENDENCIES = originalCyclicDocumentDependencies;
+  if (originalIncompleteFirstPlan === undefined) delete process.env.RB_HARNESS_TEST_INCOMPLETE_FIRST_PLAN;
+  else process.env.RB_HARNESS_TEST_INCOMPLETE_FIRST_PLAN = originalIncompleteFirstPlan;
 });
 
 function envelope(begin: string, end: string, value: unknown): string {
@@ -63,6 +66,43 @@ function samplePlan() {
     blocked: [],
   };
 }
+
+function completeInitPlan() {
+  const value = samplePlan();
+  const document = (name: string) => ({
+    path: `.rb/init/${name}`,
+    purpose: name,
+    parts: [{ id: "whole", purpose: `Complete ${name}.` }],
+  });
+  value.documents = [
+    document("PROJECT.md"),
+    document("REQUIREMENTS.md"),
+    document("DECISIONS.md"),
+    document("PLAN.md"),
+    value.documents[0]!,
+    document("source-manifest.json"),
+  ];
+  return value;
+}
+
+const COMPLETE_INIT_PATHS = [
+  ".rb/init/DECISIONS.md",
+  ".rb/init/PHASES.md",
+  ".rb/init/PLAN.md",
+  ".rb/init/PROJECT.md",
+  ".rb/init/REQUIREMENTS.md",
+  ".rb/init/source-manifest.json",
+];
+
+const COMPLETE_INIT_CALLS = [
+  ".rb/init/PROJECT.md#whole",
+  ".rb/init/REQUIREMENTS.md#whole",
+  ".rb/init/DECISIONS.md#whole",
+  ".rb/init/PLAN.md#whole",
+  ".rb/init/PHASES.md#header",
+  ".rb/init/PHASES.md#phase-01",
+  ".rb/init/source-manifest.json#whole",
+];
 
 async function requestFixture(project: string, runRoot: string) {
   const inventory = await inspectProjectInventory(project, ".rb");
@@ -267,6 +307,24 @@ describe("incremental document contracts", () => {
 });
 
 describe("provider-neutral incremental authoring", () => {
+  it("replans a missing mandatory document before authoring any part", async () => {
+    await chmod(fixture, 0o755);
+    const project = await mkdtemp(resolve(tmpdir(), "rb-incremental-completeness-"));
+    const runRoot = resolve(project, ".rb-harness/runs/test");
+    const calls = resolve(await mkdtemp(resolve(tmpdir(), "rb-incremental-completeness-calls-")), "calls.log");
+    process.env.RB_HARNESS_TEST_INCREMENTAL_CALLS = calls;
+    process.env.RB_HARNESS_TEST_INCOMPLETE_FIRST_PLAN = "1";
+    await writeFile(resolve(project, "README.md"), "fixture\n", "utf8");
+
+    const bundle = await requestFixture(project, runRoot);
+    expect(bundle.documents.map((document) => document.path)).toEqual(COMPLETE_INIT_PATHS);
+    expect((await readFile(calls, "utf8")).trim().split("\n")).toEqual([
+      "plan",
+      "plan",
+      ...COMPLETE_INIT_CALLS,
+    ]);
+  }, 60_000);
+
   it("authors and assembles documents over independent custom-adapter calls", async () => {
     await chmod(fixture, 0o755);
     const project = await mkdtemp(resolve(tmpdir(), "rb-incremental-project-"));
@@ -275,14 +333,12 @@ describe("provider-neutral incremental authoring", () => {
     process.env.RB_HARNESS_TEST_INCREMENTAL_CALLS = calls;
     await writeFile(resolve(project, "README.md"), "fixture\n", "utf8");
     const bundle = await requestFixture(project, runRoot);
-    expect(bundle.documents.map((document) => document.path)).toEqual([".rb/init/PHASES.md", ".rb/init/PROJECT.md"]);
+    expect(bundle.documents.map((document) => document.path)).toEqual(COMPLETE_INIT_PATHS);
     expect(bundle.documents.find((document) => document.path.endsWith("PHASES.md"))?.content)
       .toContain("## Phase 1: Deliver incrementally");
     expect((await readFile(calls, "utf8")).trim().split("\n")).toEqual([
       "plan",
-      ".rb/init/PROJECT.md#whole",
-      ".rb/init/PHASES.md#header",
-      ".rb/init/PHASES.md#phase-01",
+      ...COMPLETE_INIT_CALLS,
     ]);
   }, 60_000);
 
@@ -300,9 +356,13 @@ describe("provider-neutral incremental authoring", () => {
     expect((await readFile(calls, "utf8")).trim().split("\n")).toEqual([
       "plan",
       ".rb/init/PROJECT.md#whole",
+      ".rb/init/REQUIREMENTS.md#whole",
+      ".rb/init/DECISIONS.md#whole",
+      ".rb/init/PLAN.md#whole",
       ".rb/init/PHASES.md#header",
       ".rb/init/PHASES.md#phase-01",
       ".rb/init/OPERATIONS.json#whole",
+      ".rb/init/source-manifest.json#whole",
     ]);
   }, 60_000);
 
@@ -321,9 +381,13 @@ describe("provider-neutral incremental authoring", () => {
     expect((await readFile(calls, "utf8")).trim().split("\n")).toEqual([
       "plan",
       ".rb/init/PROJECT.md#whole",
+      ".rb/init/REQUIREMENTS.md#whole",
+      ".rb/init/DECISIONS.md#whole",
+      ".rb/init/PLAN.md#whole",
       ".rb/init/PHASES.md#header",
       ".rb/init/PHASES.md#phase-01",
       ".rb/init/OPERATIONS.json#whole",
+      ".rb/init/source-manifest.json#whole",
     ]);
   }, 60_000);
 
@@ -338,13 +402,17 @@ describe("provider-neutral incremental authoring", () => {
     await expect(requestFixture(project, runRoot)).rejects.toThrow("exited with code 1");
     delete process.env.RB_HARNESS_TEST_INCREMENTAL_EXIT_PART;
     const bundle = await requestFixture(project, runRoot);
-    expect(bundle.documents).toHaveLength(2);
+    expect(bundle.documents).toHaveLength(6);
     expect((await readFile(calls, "utf8")).trim().split("\n")).toEqual([
       "plan",
       ".rb/init/PROJECT.md#whole",
+      ".rb/init/REQUIREMENTS.md#whole",
+      ".rb/init/DECISIONS.md#whole",
+      ".rb/init/PLAN.md#whole",
       ".rb/init/PHASES.md#header",
       ".rb/init/PHASES.md#phase-01",
       ".rb/init/PHASES.md#phase-01",
+      ".rb/init/source-manifest.json#whole",
     ]);
   }, 60_000);
 
@@ -371,14 +439,18 @@ describe("provider-neutral incremental authoring", () => {
       "--- stderr ---",
       "",
     ].join("\n");
-    await writeFile(resolve(runRoot, "logs/generation-document-002-part-002.log"), malformed, "utf8");
+    await writeFile(resolve(runRoot, "logs/generation-document-005-part-002.log"), malformed, "utf8");
     const bundle = await requestFixture(project, runRoot);
     expect(bundle.documents.find((document) => document.path.endsWith("PHASES.md"))?.content).toContain("Recovered without another call");
     expect((await readFile(calls, "utf8")).trim().split("\n")).toEqual([
       "plan",
       ".rb/init/PROJECT.md#whole",
+      ".rb/init/REQUIREMENTS.md#whole",
+      ".rb/init/DECISIONS.md#whole",
+      ".rb/init/PLAN.md#whole",
       ".rb/init/PHASES.md#header",
       ".rb/init/PHASES.md#phase-01",
+      ".rb/init/source-manifest.json#whole",
     ]);
   }, 60_000);
 
@@ -397,9 +469,13 @@ describe("provider-neutral incremental authoring", () => {
     expect((await readFile(calls, "utf8")).trim().split("\n")).toEqual([
       "plan",
       ".rb/init/PROJECT.md#whole",
+      ".rb/init/REQUIREMENTS.md#whole",
+      ".rb/init/DECISIONS.md#whole",
+      ".rb/init/PLAN.md#whole",
       ".rb/init/PHASES.md#header",
       ".rb/init/PHASES.md#phase-01",
       "format",
+      ".rb/init/source-manifest.json#whole",
     ]);
   }, 60_000);
 
@@ -411,8 +487,9 @@ describe("provider-neutral incremental authoring", () => {
     process.env.RB_HARNESS_TEST_INCREMENTAL_CALLS = calls;
     await writeFile(resolve(project, "README.md"), "fixture\n", "utf8");
     await mkdir(resolve(runRoot, "logs"), { recursive: true });
-    const prefixed = samplePlan();
-    prefixed.documents[0] = { ...prefixed.documents[0]!, prefix: "execution plan" } as typeof prefixed.documents[number];
+    const prefixed = completeInitPlan();
+    const phases = prefixed.documents.findIndex((document) => document.path.endsWith("PHASES.md"));
+    prefixed.documents[phases] = { ...prefixed.documents[phases]!, prefix: "execution plan" } as typeof prefixed.documents[number];
     await writeFile(resolve(runRoot, "logs/generation-plan.log"), [
       "exit_code=0",
       "",
@@ -424,11 +501,10 @@ describe("provider-neutral incremental authoring", () => {
     ].join("\n"), { encoding: "utf8", mode: 0o600 });
 
     const bundle = await requestFixture(project, runRoot);
-    expect(bundle.documents).toHaveLength(1);
+    expect(bundle.documents).toHaveLength(6);
     expect((await readFile(calls, "utf8")).trim().split("\n")).toEqual([
       "format",
-      ".rb/init/PHASES.md#header",
-      ".rb/init/PHASES.md#phase-01",
+      ...COMPLETE_INIT_CALLS,
     ]);
   }, 60_000);
 
@@ -441,8 +517,9 @@ describe("provider-neutral incremental authoring", () => {
     process.env.RB_HARNESS_TEST_FORMAT_INVALID_ATTEMPTS = "2";
     await writeFile(resolve(project, "README.md"), "fixture\n", "utf8");
     await mkdir(resolve(runRoot, "logs"), { recursive: true });
-    const prefixed = samplePlan();
-    prefixed.documents[0] = { ...prefixed.documents[0]!, prefix: "execution plan" } as typeof prefixed.documents[number];
+    const prefixed = completeInitPlan();
+    const phases = prefixed.documents.findIndex((document) => document.path.endsWith("PHASES.md"));
+    prefixed.documents[phases] = { ...prefixed.documents[phases]!, prefix: "execution plan" } as typeof prefixed.documents[number];
     await writeFile(resolve(runRoot, "logs/generation-plan.log"), [
       "exit_code=0", "", "--- stdout ---",
       envelope(DOCUMENT_PLAN_BEGIN, DOCUMENT_PLAN_END, prefixed),
@@ -450,11 +527,10 @@ describe("provider-neutral incremental authoring", () => {
     ].join("\n"), { encoding: "utf8", mode: 0o600 });
 
     const bundle = await requestFixture(project, runRoot);
-    expect(bundle.documents).toHaveLength(1);
+    expect(bundle.documents).toHaveLength(6);
     expect((await readFile(calls, "utf8")).trim().split("\n")).toEqual([
       "format", "format", "format",
-      ".rb/init/PHASES.md#header",
-      ".rb/init/PHASES.md#phase-01",
+      ...COMPLETE_INIT_CALLS,
     ]);
   }, 60_000);
 

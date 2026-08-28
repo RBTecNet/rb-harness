@@ -47,7 +47,8 @@ import { runProvider } from "./harness-provider.js";
 import { sha256Text } from "./hash.js";
 import { validateExecutionMarkdown } from "./execution-contract.js";
 import { loadWorkflowResources, requestNeedsHeadlessContracts } from "./standalone-resources.js";
-import type { HarnessRunState, ProviderConfiguration } from "./standalone-types.js";
+import type { HarnessRunState, HarnessWorkflow, ProviderConfiguration } from "./standalone-types.js";
+import { requiredWorkflowArtifactPaths, workflowScopeFromPaths } from "./workflow-definition.js";
 
 const PLAN_SHAPE = JSON.stringify({
   contract: DOCUMENT_PLAN_CONTRACT,
@@ -288,6 +289,24 @@ interface IncrementalAuthoringOptions {
   repairContext?: string;
 }
 
+export function assertGenerationPlanComplete(workflow: HarnessWorkflow, plan: DocumentPlan): void {
+  if (plan.status === "blocked") return;
+  const paths = plan.documents.map((document) => document.path);
+  const scope = workflowScopeFromPaths(workflow, paths);
+  if (!scope) {
+    throw new DocumentSubstanceError(
+      `document plan for ${workflow} must place every authored artifact under exactly one canonical workflow root`,
+    );
+  }
+  const present = new Set(paths);
+  const missing = requiredWorkflowArtifactPaths(workflow, scope).filter((path) => !present.has(path));
+  if (missing.length) {
+    throw new DocumentSubstanceError(
+      `document plan for ${workflow} omits mandatory current-run artifacts: ${missing.join(", ")}`,
+    );
+  }
+}
+
 const MAX_DEPENDENCY_PROJECTION_BYTES = 96 * 1024;
 const MAX_DEPENDENCY_DOCUMENT_BYTES = 16 * 1024;
 
@@ -437,7 +456,11 @@ async function authorIncrementally(options: IncrementalAuthoringOptions): Promis
     let defect: string | undefined;
     for (let attempt = 1; attempt <= HARNESS_BUDGET.generation.planReplans + 1; attempt += 1) {
       try {
-        planned = await requestPlan(attempt === 1 ? options.planPrompt : options.replanPrompt(defect!), attempt);
+        const candidate = await requestPlan(attempt === 1 ? options.planPrompt : options.replanPrompt(defect!), attempt);
+        if (options.mode === "generation" && candidate.kind === "plan") {
+          assertGenerationPlanComplete(options.state.workflow, candidate.plan);
+        }
+        planned = candidate;
         break;
       } catch (error) {
         // Only a substance defect earns a replan. A persistent formatting

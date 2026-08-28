@@ -24,14 +24,6 @@ export function workflowSupportsOperations(workflow: HarnessWorkflow): boolean {
   return OPERATIONAL_WORKFLOWS.has(workflow);
 }
 
-const CODE_OWNED = `## Owned by the orchestrator — never write these
-
-- \`.rb/rb-manifest.json\` and \`.rb/artifacts.tsv\` are generated after your call.
-- Artifact IDs, SHA-256 hashes, \`generatedAt\`, statuses, and kinds are derived from your files.
-- The whole \`.rb/\` tree is generated planning authority, not implementation scope. No PHASES task may create, modify, delete, move, or glob any \`.rb\` path; tasks may only read declared \`.rb\` Context and run read-only validators against it.
-- Directory creation, the mandatory authoring DAG, cycle-safe reconciliation of provider dependency suggestions, deterministic validation, automatic contract/tree/artifact verification, atomic publication, rollback, and the previous-revision backup are code.
-- Do not compute, restate, or "verify" any of the above. Spend your output on documentation content only.`;
-
 const EXECUTION_GRAMMAR = `## rb-execution/v1 — PHASES.md grammar (exact)
 
 \`\`\`markdown
@@ -180,7 +172,6 @@ export function generationContractDigest(workflow: HarnessWorkflow): string {
   const sections = [
     `# ${HARNESS_CONTRACT_DIGEST_VERSION} · workflow ${workflow}`,
     renderWorkflowArtifactAuthority(workflow),
-    CODE_OWNED,
     AUTHORITATIVE_CONSTRAINTS,
     CONVENTIONS,
     EXECUTION_GRAMMAR,

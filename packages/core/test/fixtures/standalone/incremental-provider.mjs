@@ -24,12 +24,32 @@ const plan = {
       parts: [{ id: "whole", purpose: "Complete short project document." }],
     },
     {
+      path: ".rb/init/REQUIREMENTS.md",
+      purpose: "Bounded requirements.",
+      parts: [{ id: "whole", purpose: "Complete requirements document." }],
+    },
+    {
+      path: ".rb/init/DECISIONS.md",
+      purpose: "Closed decisions.",
+      parts: [{ id: "whole", purpose: "Complete decisions document." }],
+    },
+    {
+      path: ".rb/init/PLAN.md",
+      purpose: "Implementation plan.",
+      parts: [{ id: "whole", purpose: "Complete implementation plan." }],
+    },
+    {
       path: ".rb/init/PHASES.md",
       purpose: "Execution contract.",
       parts: [
         { id: "header", purpose: "Header and execution metadata." },
         { id: "phase-01", purpose: "First phase and task." },
       ],
+    },
+    {
+      path: ".rb/init/source-manifest.json",
+      purpose: "Source provenance.",
+      parts: [{ id: "whole", purpose: "Complete source manifest." }],
     },
   ],
   blocked: [],
@@ -99,7 +119,11 @@ if (prompt.includes("===== EXACT OUTPUT CONTRACT =====")) {
 
 if (prompt.includes("RB_HARNESS_DOCUMENT_PLAN_JSON_BEGIN")) {
   await record("plan");
-  process.stdout.write(`RB_HARNESS_DOCUMENT_PLAN_JSON_BEGIN\n${JSON.stringify(plan)}\nRB_HARNESS_DOCUMENT_PLAN_JSON_END\n`);
+  const responsePlan = process.env.RB_HARNESS_TEST_INCOMPLETE_FIRST_PLAN === "1"
+    && !prompt.includes("omits mandatory current-run artifacts")
+    ? { ...plan, documents: plan.documents.filter((document) => !document.path.endsWith("source-manifest.json")) }
+    : plan;
+  process.stdout.write(`RB_HARNESS_DOCUMENT_PLAN_JSON_BEGIN\n${JSON.stringify(responsePlan)}\nRB_HARNESS_DOCUMENT_PLAN_JSON_END\n`);
   process.exit(0);
 }
 
@@ -131,14 +155,22 @@ const content = target.path.endsWith("OPERATIONS.json")
     }, null, 2)}\n`
   : target.path.endsWith("PROJECT.md")
   ? "# Incremental project\n\nGenerated one bounded document at a time.\n"
+  : target.path.endsWith("REQUIREMENTS.md")
+    ? "# Requirements\n\n## RF-001\n\nThe documented behavior is observable.\n"
+    : target.path.endsWith("DECISIONS.md")
+      ? "# Decisions\n\nUse the bounded deterministic fixture.\n"
+      : target.path.endsWith("PLAN.md")
+        ? "# Plan\n\nImplement RF-001 and validate the result.\n"
+        : target.path.endsWith("source-manifest.json")
+          ? '{"sources":[]}\n'
   : target.part === "header"
     ? "# RB Execution Plan: incremental-fixture\n\n<!-- rb-execution-contract: rb-execution/v1 -->\n<!-- rb-artifact-id: incremental-fixture-plan -->\n\n"
-    : "## Phase 1: Deliver incrementally\n\n**Phase ID:** P01\n**Goal:** Produce a bounded artifact.\n**Depends on:** none\n**Context:**\n- `.rb/init/PROJECT.md`\n\n- [ ] T001 — Produce the artifact\n  - **Scope:** `src/`\n  - **Change:** Implement RF-001.\n  - **Covers:** RF-001\n  - **Depends on:** none\n  - **Parallel safe:** false\n  - **Acceptance criteria:**\n    - AC-T001-01: The documented behavior is observable.\n  - **Validation:**\n    - `npm test`\n  - **Expected evidence:** Passing tests.\n";
+    : "## Phase 1: Deliver incrementally\n\n**Phase ID:** P01\n**Goal:** Produce a bounded artifact.\n**Depends on:** none\n**Context:**\n- `.rb/init/PROJECT.md`\n- `.rb/init/REQUIREMENTS.md`\n- `.rb/init/PLAN.md`\n\n- [ ] T001 — Produce the artifact\n  - **Scope:** `src/`\n  - **Change:** Implement RF-001.\n  - **Covers:** RF-001\n  - **Depends on:** none\n  - **Parallel safe:** false\n  - **Acceptance criteria:**\n    - AC-T001-01: The documented behavior is observable.\n  - **Validation:**\n    - `npm test`\n  - **Expected evidence:** Passing tests.\n";
 const part = {
   contract: "rb-harness-document-part/v1",
   path: target.path,
   part: target.part,
   content,
 };
-if (target.path.endsWith("PROJECT.md") || target.path.endsWith("OPERATIONS.json")) process.stdout.write(content);
+if (target.path.endsWith("PROJECT.md") || target.path.endsWith("OPERATIONS.json") || target.path.endsWith("source-manifest.json")) process.stdout.write(content);
 else process.stdout.write(`RB_HARNESS_DOCUMENT_PART_JSON_BEGIN\n${JSON.stringify(part)}\nRB_HARNESS_DOCUMENT_PART_JSON_END\n`);

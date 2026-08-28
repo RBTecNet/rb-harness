@@ -22,7 +22,6 @@ import type { HarnessRunState, HarnessWorkflow, ProviderConfiguration } from "./
 import type { ArtifactManifest, ArtifactRecord, ExecutionDocument, ValidationIssue } from "./types.js";
 import { validateExecutionMarkdown } from "./execution-contract.js";
 import {
-  applicableWorkflowArtifacts,
   readyWorkflowArtifact,
   requiredWorkflowArtifactPaths,
   workflowScopeFromPaths,
@@ -155,7 +154,7 @@ async function readArtifact(
 /** Requirement IDs declared as headings or list anchors in a specification. */
 export function declaredRequirementIds(source: string): string[] {
   const ids = new Set<string>();
-  for (const match of source.matchAll(/^(?:#{1,6}\s+|[-*]\s+(?:\*\*)?|\s*\|\s*)((?:RF|RNF|UI|CT|CHANGE|PRESERVE)-\d+)\b/gm)) {
+  for (const match of source.matchAll(/^(?:#{1,6}\s+|[-*]\s+(?:\*\*)?|\s*\|\s*)((?:RF|RNF|UI|CT)-\d+)\b/gm)) {
     if (match[1]) ids.add(match[1]);
   }
   return [...ids].sort();
@@ -203,7 +202,7 @@ async function coverageAndReferenceFindings(
       const covered = new Set(
         validation.document.phases
           .flatMap((phase) => phase.tasks)
-          .flatMap((task) => task.covers.match(/\b(?:RF|RNF|UI|CT|CHANGE|PRESERVE)-\d+\b/g) ?? []),
+          .flatMap((task) => task.covers.match(/\b(?:RF|RNF|UI|CT)-\d+\b/g) ?? []),
       );
       const uncovered = [...declared].filter((id) => !covered.has(id)).sort();
       if (uncovered.length) {
@@ -309,8 +308,9 @@ async function deterministicVerification(
   try { initialManifest = await loadManifest(projectRoot, artifactDirectory); } catch { /* reported by tree validation */ }
   const scoped = currentArtifactPaths !== undefined;
   const scope = scoped ? workflowScopeFromPaths(workflow, currentArtifactPaths) : undefined;
-  const applicableArtifacts = scoped && scope && initialManifest
-    ? applicableWorkflowArtifacts(workflow, scope, initialManifest.artifacts)
+  const producedPaths = new Set(currentArtifactPaths ?? []);
+  const applicableArtifacts = scoped && initialManifest
+    ? initialManifest.artifacts.filter((artifact) => producedPaths.has(artifact.path))
     : initialManifest?.artifacts ?? [];
   const applicablePaths = scoped ? new Set(applicableArtifacts.map((artifact) => artifact.path)) : undefined;
   const tree = await validateManifestTree(projectRoot, { artifactDirectory, applicablePaths });
@@ -331,15 +331,15 @@ async function deterministicVerification(
       requiredChange: "Emit the current workflow artifacts under one canonical workflow directory.",
     });
   }
-  const relevantArtifacts = scoped && scope
-    ? applicableWorkflowArtifacts(workflow, scope, manifest.artifacts)
+  const relevantArtifacts = scoped
+    ? manifest.artifacts.filter((artifact) => producedPaths.has(artifact.path))
     : manifest.artifacts;
   findings.push(...(await validateArtifactConsistency({
     projectRoot,
     artifactRoot: resolve(projectRoot, artifactDirectory),
     manifest: { ...manifest, artifacts: relevantArtifacts },
   })).map(deterministicFinding));
-  const producedPaths = new Set(currentArtifactPaths ?? relevantArtifacts.map((artifact) => artifact.path));
+  if (!scoped) for (const artifact of relevantArtifacts) producedPaths.add(artifact.path);
   if (scoped && scope) {
     for (const path of requiredWorkflowArtifactPaths(workflow, scope).filter((path) => !producedPaths.has(path))) {
       findings.push({

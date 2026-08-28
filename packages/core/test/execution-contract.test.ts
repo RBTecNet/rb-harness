@@ -80,8 +80,10 @@ describe("rb-execution/v1", () => {
 
   it("rejects control-plane globs and Change instructions even when another field looks safe", async () => {
     const source = await fixture("valid", "minimal");
-    const globbed = validateExecutionMarkdown(source.replace("`src/`, `tests/`", "`.r*/**`"));
-    expect(globbed.issues.map((entry) => entry.code)).toContain("task.scope.control-plane");
+    for (const scope of ["`.r*/**`", "`**/*.md`"]) {
+      const globbed = validateExecutionMarkdown(source.replace("`src/`, `tests/`", scope));
+      expect(globbed.issues.map((entry) => entry.code), scope).toContain("task.scope.control-plane");
+    }
 
     const changed = validateExecutionMarkdown(source.replace(
       "Implement the documented foundation without unrelated changes.",

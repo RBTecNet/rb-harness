@@ -127,7 +127,7 @@ describe("standalone RB Harness", () => {
     const generation = await loadWorkflowResources("plan", { section: "generation" });
     expect(interview).toContain("RESOURCE: workflows/plan/instructions.md");
     expect(interview).not.toContain("RESOURCE: workflows/plan/artifact-shapes.md");
-    expect(generation).toContain("RESOURCE: workflows/plan/artifact-authority (code-owned)");
+    expect(generation).not.toContain("RESOURCE: workflows/plan/artifact-authority (code-owned)");
     // The mechanical formats moved into the code-owned contract digest.
     expect(generation).not.toContain("RESOURCE: references/execution-template.md");
     expect(generation).not.toContain("RESOURCE: references/interview-policy.md");

@@ -89,15 +89,56 @@ describe("compact contract digest", () => {
       const digest = generationContractDigest(workflow);
       const resources = await loadWorkflowResources(workflow, { section: "generation" });
       expect(digest.match(new RegExp(rendered.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"))?.length).toBe(1);
-      expect(resources).toContain(rendered);
+      expect(resources).not.toContain(rendered);
+      expect(resources).not.toContain("artifact-authority (code-owned)");
       expect(rendered).toContain(`Workflow root: \`${WORKFLOW_DEFINITIONS[workflow].root}/\``);
       for (const artifact of WORKFLOW_DEFINITIONS[workflow].artifacts) {
         expect(rendered).toContain(`\`${artifact.name}\``);
         expect(rendered).toContain(artifact.required ? "required" : "conditional");
-        expect(rendered).toContain(`${artifact.owner}-authored`);
+        expect(rendered).toContain(artifact.description);
       }
       for (const owned of CODE_OWNED_WORKFLOW_INFORMATION) expect(rendered).toContain(owned);
     }
+  });
+
+  it("preserves the established mandatory and conditional workflow document sets", () => {
+    const required = (workflow: HarnessWorkflow) => WORKFLOW_DEFINITIONS[workflow].artifacts
+      .filter((artifact) => artifact.required).map((artifact) => artifact.name);
+    expect(required("init")).toEqual([
+      "PROJECT.md", "REQUIREMENTS.md", "DECISIONS.md", "PLAN.md", "PHASES.md", "source-manifest.json",
+    ]);
+    expect(required("plan")).toEqual(["REQUEST.md", "SPEC.md", "PLAN.md", "PHASES.md", "source-manifest.json"]);
+    expect(required("evolve")).toEqual([
+      "CHANGE_REQUEST.md", "AS_IS.md", "TO_BE.md", "IMPACT.md", "PRESERVATION.md", "REGRESSION_MATRIX.md",
+      "PLAN.md", "PHASES.md", "source-manifest.json",
+    ]);
+    expect(required("review")).toEqual(["REVIEW.md", "FINDINGS.md", "BASELINE.json", "source-manifest.json"]);
+    expect(required("ai-context")).toEqual(["AGENTS.md", "source-manifest.json"]);
+    expect(WORKFLOW_DEFINITIONS["ai-context"].artifacts.map((artifact) => artifact.name)).not.toContain("*.md");
+    expect(WORKFLOW_DEFINITIONS.review.artifacts.map((artifact) => artifact.name))
+      .toContain("RESPONSIVE_INVENTORY.md");
+  });
+
+  it("injects semantic artifact authority exactly once with truthful rb-artifact-id ownership", async () => {
+    const project = await mkdtemp(resolve(tmpdir(), "rb-canonical-authority-"));
+    await writeFile(resolve(project, "package.json"), '{"name":"canonical-authority"}\n', "utf8");
+    const state = { workflow: "plan", request: "Plan a bounded feature.", answers: [] } as unknown as HarnessRunState;
+    const inputPackage = await buildInputPackage({
+      workflow: "plan",
+      projectRoot: project,
+      artifactDirectory: ".rb",
+      request: state.request,
+      inventory: await inspectProjectInventory(project, ".rb"),
+    });
+    const prompt = buildGenerationPrompt(
+      state,
+      inputPackage,
+      await loadWorkflowResources("plan", { section: "generation" }),
+    );
+    expect(prompt.match(/## Required output set \(canonical machine authority\)/g)).toHaveLength(1);
+    for (const artifact of WORKFLOW_DEFINITIONS.plan.artifacts) expect(prompt).toContain(artifact.description);
+    expect(prompt).toContain("Model-authored: required `rb-artifact-id` in `PHASES.md`");
+    expect(prompt).not.toMatch(/rb-artifact-id[^\n]*(?:code-owned|never model-authored)/i);
   });
 
   it("never contradicts incremental planning with the retired complete-bundle instruction", async () => {
@@ -127,8 +168,10 @@ describe("compact contract digest", () => {
   it("tells the model that the manifest and hashes are code-owned", () => {
     const digest = generationContractDigest("plan");
     expect(digest).toContain(".rb/rb-manifest.json");
-    expect(digest).toContain("generated after your call");
-    expect(digest).toContain("Do not compute, restate");
+    expect(digest).toContain("manifest SHA-256 hashes, kinds, generatedAt, and derived statuses");
+    expect(digest).toContain("path-derived manifest identities");
+    expect(digest).toContain("rb-artifact-id");
+    expect(digest).toContain("Model-authored: required `rb-artifact-id`");
   });
 
   it("states the exact phase/task dependency split and HTTP probe assertion shape", () => {

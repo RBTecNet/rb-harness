@@ -216,8 +216,17 @@ export async function validateStagedTree(
   await assertNoEnvironmentSecrets(staging);
   const manifest = await syncManifest(staging);
   const authoredPaths = runScope.currentArtifactPaths?.map((path) => path.replaceAll("\\", "/"));
-  const scope = workflowScopeFromPaths(workflow, authoredPaths ?? manifest.artifacts.map((artifact) => artifact.path));
-  const applicableArtifacts = scope ? applicableWorkflowArtifacts(workflow, scope, manifest.artifacts) : [];
+  const authoredPathSet = authoredPaths ? new Set(authoredPaths) : undefined;
+  const scope = workflowScopeFromPaths(
+    workflow,
+    authoredPaths ?? manifest.artifacts.map((artifact) => artifact.path),
+    authoredPaths !== undefined,
+  );
+  const applicableArtifacts = scope
+    ? applicableWorkflowArtifacts(workflow, scope, manifest.artifacts, authoredPathSet)
+    : authoredPathSet
+      ? manifest.artifacts.filter((artifact) => authoredPathSet.has(artifact.path))
+      : [];
   const applicablePaths = new Set(applicableArtifacts.map((artifact) => artifact.path));
   const validation = await validateManifestTree(staging, { applicablePaths });
   const errors = validation.issues.map(structuralError);
@@ -237,7 +246,7 @@ export async function validateStagedTree(
   errors.push(...await decompositionErrors(staging, { ...manifest, artifacts: applicableArtifacts }));
   errors.push(...await authorityErrors(staging, { ...manifest, artifacts: applicableArtifacts }, runScope.authority));
   const requiredPaths = scope ? requiredWorkflowArtifactPaths(workflow, scope) : [];
-  const producedPaths = new Set(authoredPaths ?? applicableArtifacts.map((artifact) => artifact.path));
+  const producedPaths = authoredPathSet ?? new Set(applicableArtifacts.map((artifact) => artifact.path));
   const readyArtifact = scope ? readyWorkflowArtifact(workflow, scope, applicableArtifacts) : undefined;
   const readyProduced = Boolean(readyArtifact && producedPaths.has(readyArtifact.path));
   if (validation.valid && !readyProduced) {

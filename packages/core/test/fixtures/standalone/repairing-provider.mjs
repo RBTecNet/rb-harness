@@ -149,6 +149,7 @@ const bundle = repairing
       { path: ".rb/features/structural-repair/SPEC.md", content: "# Specification\n\n## RF-001\n\nThe request is accepted only when `request.targetMode` equals `greenfield`.\n" },
       { path: ".rb/features/structural-repair/PLAN.md", content: "# Plan\n\nImplement the typed scope gate and its finite matrix.\n" },
       { path: ".rb/features/structural-repair/PHASES.md", content: goRepair ? goPhases(false) : phases(false) },
+      { path: ".rb/features/structural-repair/source-manifest.json", content: '{"sources":[]}\n' },
     ],
     blocked: [],
   };

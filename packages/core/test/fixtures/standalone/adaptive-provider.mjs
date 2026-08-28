@@ -148,6 +148,7 @@ const bundle = {
       content: "# Plan\n\nSelect retained archived records, then expose the bounded export command.\n",
     },
     { path: ".rb/features/adaptive-fixture/PHASES.md", content: phases },
+    { path: ".rb/features/adaptive-fixture/source-manifest.json", content: '{"sources":[]}\n' },
   ],
   blocked: [],
 };

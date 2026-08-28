@@ -85,6 +85,7 @@ const bundle = {
     { path: ".rb/features/standalone-test/SPEC.md", content: "# Specification\n\n## RF-001\n\nThe feature must expose one observable version command.\n" },
     { path: ".rb/features/standalone-test/PLAN.md", content: "# Plan\n\nImplement RF-001 with a regression test.\n" },
     { path: ".rb/features/standalone-test/PHASES.md", content: phases },
+    { path: ".rb/features/standalone-test/source-manifest.json", content: '{"sources":[]}\n' },
   ],
   blocked: [],
 };
