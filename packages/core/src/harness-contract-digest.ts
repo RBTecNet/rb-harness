@@ -2,9 +2,10 @@
  * Compact, versioned output contract (RF-002).
  *
  * The model must never open the RB Harness package to discover how to write an
- * artifact. Everything mechanical — manifest, hashes, derived IDs, the TSV
- * projection — is produced by code and is explicitly declared off-limits here,
- * so no tokens are spent asking a model to replicate deterministic data.
+ * artifact. The control-plane `.rb/rb-manifest.json` and `.rb/artifacts.tsv`,
+ * including their artifact hashes, derived identities, metadata, and statuses,
+ * are produced by code. Workflow-local `source-manifest.json` remains an
+ * authored document and may carry the provenance hashes its semantics require.
  *
  * These digests are code-owned strings: they are byte-stable for a given
  * version, which is what makes provider prefix caching effective, and they are

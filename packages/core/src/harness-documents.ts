@@ -1,10 +1,12 @@
 /**
  * The document bundle assembled from bounded authoring parts (RF-004).
  *
- * The generator returns typed `path`/`content` pairs; the orchestrator — not
- * the model — creates directories, writes files, derives the manifest, and
- * publishes. Materialization is deliberately paranoid: a bundle is untrusted
- * input that decides what lands in the developer's repository.
+ * The generator returns typed `path`/`content` pairs; the orchestrator creates
+ * directories, writes files, derives `.rb/rb-manifest.json` and
+ * `.rb/artifacts.tsv`, and publishes. Workflow-local `source-manifest.json`
+ * remains one of those model-authored pairs. Materialization is deliberately
+ * paranoid: a bundle is untrusted input that decides what lands in the
+ * developer's repository.
  */
 
 import { mkdir, writeFile } from "node:fs/promises";

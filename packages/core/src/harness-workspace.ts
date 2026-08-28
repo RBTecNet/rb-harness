@@ -9,6 +9,7 @@ import type { ArtifactManifest, ValidationIssue } from "./types.js";
 import { validateExecutionMarkdown } from "./execution-contract.js";
 import {
   applicableWorkflowArtifacts,
+  isCanonicalWorkflowArtifactPath,
   readyWorkflowArtifact,
   requiredWorkflowArtifactPaths,
   workflowScopeFromPaths,
@@ -235,6 +236,14 @@ export async function validateStagedTree(
       code: "workflow.scope.invalid",
       message: `The current ${workflow} bundle does not identify exactly one canonical workflow root.`,
     });
+  } else if (authoredPaths) {
+    for (const path of authoredPaths.filter((entry) => !isCanonicalWorkflowArtifactPath(workflow, scope, entry))) {
+      errors.push({
+        code: "workflow.artifact.not-allowed",
+        path,
+        message: `The current ${workflow} run authored ${path}, which is not a required or conditional artifact in the canonical workflow definition.`,
+      });
+    }
   }
   if (validation.valid) {
     errors.push(...(await validateArtifactConsistency({

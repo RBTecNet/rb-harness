@@ -48,7 +48,11 @@ import { sha256Text } from "./hash.js";
 import { validateExecutionMarkdown } from "./execution-contract.js";
 import { loadWorkflowResources, requestNeedsHeadlessContracts } from "./standalone-resources.js";
 import type { HarnessRunState, HarnessWorkflow, ProviderConfiguration } from "./standalone-types.js";
-import { requiredWorkflowArtifactPaths, workflowScopeFromPaths } from "./workflow-definition.js";
+import {
+  isCanonicalWorkflowArtifactPath,
+  requiredWorkflowArtifactPaths,
+  workflowScopeFromPaths,
+} from "./workflow-definition.js";
 
 const PLAN_SHAPE = JSON.stringify({
   contract: DOCUMENT_PLAN_CONTRACT,
@@ -73,7 +77,7 @@ export function stableGenerationPrefix(
   return [
     "You are the RB Harness documentation writer. You write documentation only: never application code, never a commit, never a command execution.",
     "You have read-only access to the target project through your tools. Never inspect the RB Harness installation, its source, its tests, or its packaged resources; everything you need about the output contract is below.",
-    "RB Harness, not you, owns files, checkpoints, validation, manifests, and publication. Your response is data for one bounded authoring step.",
+    "RB Harness materializes files and owns checkpoints, validation, publication, .rb/rb-manifest.json, and .rb/artifacts.tsv. You author the workflow-local documents, including source-manifest.json. Your response is data for one bounded authoring step.",
     "There is no documentation manager or editorial review. Use the closed decisions exactly, preserve grounded existing behavior, and do not ask questions during authoring.",
     generationContractDigest(state.workflow),
     resources,
@@ -296,6 +300,12 @@ export function assertGenerationPlanComplete(workflow: HarnessWorkflow, plan: Do
   if (!scope) {
     throw new DocumentSubstanceError(
       `document plan for ${workflow} must place every authored artifact under exactly one canonical workflow root`,
+    );
+  }
+  const unknown = paths.filter((path) => !isCanonicalWorkflowArtifactPath(workflow, scope, path));
+  if (unknown.length) {
+    throw new DocumentSubstanceError(
+      `document plan for ${workflow} contains non-canonical current-run artifacts: ${unknown.join(", ")}`,
     );
   }
   const present = new Set(paths);

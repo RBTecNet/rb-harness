@@ -165,13 +165,24 @@ describe("compact contract digest", () => {
     }
   });
 
-  it("tells the model that the manifest and hashes are code-owned", () => {
-    const digest = generationContractDigest("plan");
-    expect(digest).toContain(".rb/rb-manifest.json");
-    expect(digest).toContain("manifest SHA-256 hashes, kinds, generatedAt, and derived statuses");
-    expect(digest).toContain("path-derived manifest identities");
-    expect(digest).toContain("rb-artifact-id");
-    expect(digest).toContain("Model-authored: required `rb-artifact-id`");
+  it("keeps workflow-local and control-plane manifest ownership unambiguous in generation prompts", async () => {
+    const project = await mkdtemp(resolve(tmpdir(), "rb-manifest-ownership-"));
+    await writeFile(resolve(project, "package.json"), '{"name":"manifest-ownership"}\n', "utf8");
+    const state = { workflow: "plan", request: "Plan a bounded feature.", answers: [] } as unknown as HarnessRunState;
+    const prompt = buildGenerationPrompt(state, await buildInputPackage({
+      workflow: "plan",
+      projectRoot: project,
+      artifactDirectory: ".rb",
+      request: state.request,
+      inventory: await inspectProjectInventory(project, ".rb"),
+    }), await loadWorkflowResources("plan", { section: "generation" }));
+    expect(prompt).toContain("including workflow-local `source-manifest.json` provenance/hashes");
+    expect(prompt).toContain("You author the workflow-local documents, including source-manifest.json");
+    expect(prompt).toContain(".rb/rb-manifest.json and .rb/artifacts.tsv");
+    expect(prompt).toContain("their artifact hashes, kinds, generated metadata/statuses, and path-derived IDs");
+    expect(prompt).toContain("Model-authored: required `rb-artifact-id`");
+    expect(prompt).not.toMatch(/derives? (?:the )?manifest, IDs, hashes and statuses/i);
+    expect(prompt).not.toMatch(/owns (?:files, checkpoints, validation, )?manifests/i);
   });
 
   it("states the exact phase/task dependency split and HTTP probe assertion shape", () => {

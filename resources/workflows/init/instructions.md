@@ -22,9 +22,12 @@ During the planning call, return only the compact document plan requested by
 the stage prompt: paths, shared IDs, and bounded part briefs, without document
 content. During each later closed authoring call, return only the requested raw
 document segment. Never emit the complete document bundle unless the stage
-prompt explicitly requests the legacy compatibility form. The orchestrator
-checkpoints parts, assembles and materializes files, derives the manifest, IDs,
-hashes and statuses, runs deterministic validators, and publishes atomically.
+prompt explicitly requests the legacy compatibility form. You author the
+workflow-local `source-manifest.json`, including its required source provenance
+and hashes. The orchestrator checkpoints parts, assembles and materializes
+files, and derives the code-owned `.rb/rb-manifest.json` and `.rb/artifacts.tsv`,
+including their artifact hashes, kinds, generated metadata, identities, and
+statuses. It then runs deterministic validators and publishes atomically.
 The exact output contract for this workflow — required documents, the
 `rb-execution/v1` grammar, the `rb-operational/v1` shape, and the conventions —
 is supplied in the prompt as `rb-harness-contract-digest/v1`.

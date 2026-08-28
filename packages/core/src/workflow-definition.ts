@@ -138,8 +138,7 @@ export const WORKFLOW_DEFINITIONS: Readonly<Record<HarnessWorkflow, WorkflowDefi
 
 export const CODE_OWNED_WORKFLOW_INFORMATION = [
   ".rb/rb-manifest.json and .rb/artifacts.tsv",
-  "manifest SHA-256 hashes, kinds, generatedAt, and derived statuses",
-  "path-derived manifest identities where no authored contract marker supplies identity",
+  "their artifact hashes, kinds, generated metadata/statuses, and path-derived IDs",
   "mandatory authoring dependencies and publication state",
 ] as const;
 
@@ -180,6 +179,25 @@ export function requiredWorkflowArtifactPaths(workflow: HarnessWorkflow, scope: 
     .map((artifact) => workflowArtifactPath(scope, artifact.name));
 }
 
+function artifactNameMatches(pattern: string, name: string): boolean {
+  const expression = pattern.split("*")
+    .map((segment) => segment.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&"))
+    .join("[^/]+");
+  return new RegExp(`^${expression}$`).test(name);
+}
+
+/** Whether a model-authored path belongs to the canonical workflow artifact set. */
+export function isCanonicalWorkflowArtifactPath(
+  workflow: HarnessWorkflow,
+  scope: string,
+  path: string,
+): boolean {
+  if (!path.startsWith(`${scope}/`)) return false;
+  const name = path.slice(scope.length + 1);
+  return WORKFLOW_DEFINITIONS[workflow].artifacts.some((artifact) =>
+    artifact.owner === "model" && artifactNameMatches(artifact.name, name));
+}
+
 export function applicableWorkflowArtifacts(
   workflow: HarnessWorkflow,
   scope: string,
@@ -214,7 +232,7 @@ export function renderWorkflowArtifactAuthority(workflow: HarnessWorkflow): stri
     "## Required output set (canonical machine authority)",
     "",
     `Workflow root: \`${definition.root}/\`.`,
-    "Artifacts are model-authored.",
+    "Artifacts are model-authored, including workflow-local `source-manifest.json` provenance/hashes.",
     "",
     ...definition.artifacts.map((artifact) =>
       `- \`${artifact.name}\` — ${artifact.required ? "required" : "conditional"}; ${artifact.description}.`),

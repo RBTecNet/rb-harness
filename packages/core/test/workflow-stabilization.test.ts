@@ -3,8 +3,10 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { verifyArtifacts } from "../src/artifact-verifier.js";
+import { assertGenerationPlanComplete } from "../src/harness-generator.js";
 import { validateStagedTree } from "../src/harness-workspace.js";
 import { initializeProject, syncManifest } from "../src/manifest.js";
+import type { DocumentPlan } from "../src/harness-incremental-documents.js";
 import type { HarnessRunState } from "../src/standalone-types.js";
 
 function phases(root: string, id: string, blocked = false): string {
@@ -72,6 +74,22 @@ async function writeInitSet(project: string): Promise<string[]> {
   return Object.keys(documents).map((name) => `${base}/${name}`);
 }
 
+function documentPlan(paths: readonly string[]): DocumentPlan {
+  return {
+    contract: "rb-harness-document-plan/v1",
+    status: "complete",
+    summary: "Complete canonical fixture.",
+    coordination: "RF-001 is owned by T001.",
+    documents: paths.map((path, index) => ({
+      path,
+      purpose: `Fixture document ${index + 1}.`,
+      dependsOn: [],
+      parts: [{ id: `part-${index + 1}`, purpose: "Complete bounded fixture." }],
+    })),
+    blocked: [],
+  };
+}
+
 function evolvePhases(
   base: string,
   scope = "`src/new.ts`, `test/new.test.ts`",
@@ -131,6 +149,31 @@ async function writeEvolveSet(
 }
 
 describe("run-scoped readiness and workflow completeness", () => {
+  it("rejects unknown plan and init documents before part authoring", async () => {
+    const project = await root();
+    const planPaths = await writePlanSet(project, "unknown-plan");
+    expect(() => assertGenerationPlanComplete("plan", documentPlan([
+      ...planPaths,
+      ".rb/features/unknown-plan/TECHNICAL_NOTES.md",
+    ]))).toThrow(/non-canonical current-run artifacts.*TECHNICAL_NOTES\.md/);
+
+    const initPaths = await writeInitSet(project);
+    expect(() => assertGenerationPlanComplete("init", documentPlan([
+      ...initPaths,
+      ".rb/init/TECHNICAL_NOTES.md",
+    ]))).toThrow(/non-canonical current-run artifacts.*TECHNICAL_NOTES\.md/);
+  });
+
+  it("accepts canonical conditional and contracts wildcard artifacts in the generation plan", async () => {
+    const project = await root();
+    const current = await writePlanSet(project, "canonical-optionals");
+    expect(() => assertGenerationPlanComplete("plan", documentPlan([
+      ...current,
+      ".rb/features/canonical-optionals/OPERATIONS.json",
+      ".rb/features/canonical-optionals/contracts/public-api.yaml",
+    ]))).not.toThrow();
+  });
+
   it("does not let an old READY plan satisfy a current run missing PHASES", async () => {
     const project = await root();
     await mkdir(resolve(project, ".rb/init"), { recursive: true });
@@ -182,6 +225,29 @@ describe("run-scoped readiness and workflow completeness", () => {
       .toBe("workflow.artifact.required-missing");
   });
 
+  it("rejects an unknown current-run artifact in staged and final validation", async () => {
+    const project = await root();
+    const current = await writePlanSet(project, "unknown-current");
+    const unknown = ".rb/features/unknown-current/TECHNICAL_NOTES.md";
+    await writeFile(resolve(project, unknown), "# Technical notes\n", "utf8");
+    current.push(unknown);
+    const staged = await validateStagedTree(project, "plan", project, { currentArtifactPaths: current });
+    expect(staged.errors.find((error) => error.path === unknown)?.code).toBe("workflow.artifact.not-allowed");
+
+    await syncManifest(project);
+    const authority = resolve(project, "unknown-current-request.md");
+    await writeFile(authority, "Implement RF-001.\n", "utf8");
+    const report = await verifyArtifacts({
+      projectRoot: project,
+      artifactDirectory: ".rb",
+      againstFile: authority,
+      currentArtifactPaths: current,
+    });
+    expect(report.readyForRalph).toBe(false);
+    expect(report.findings.find((finding) => finding.artifact === unknown)?.criterion)
+      .toBe("workflow-artifact-allowlist");
+  });
+
   it("rejects a dynamic workflow bundle containing an authored path outside its single canonical root", async () => {
     const project = await root();
     const current = await writePlanSet(project, "mixed-root");
@@ -204,11 +270,12 @@ describe("run-scoped readiness and workflow completeness", () => {
     expect(validation.errors.map((error) => error.code)).toContain("workflow.scope.invalid");
   });
 
-  it("does not promote an old optional artifact from the same slug into current-run authority", async () => {
+  it("does not let historical optional or unknown artifacts contaminate a valid rerun", async () => {
     const project = await root();
     const base = ".rb/features/same-slug";
     await mkdir(resolve(project, base), { recursive: true });
     await writeFile(resolve(project, `${base}/OPERATIONS.json`), "{\"contract\":\"stale-invalid\"}\n", "utf8");
+    await writeFile(resolve(project, `${base}/TECHNICAL_NOTES.md`), "# Historical notes\n", "utf8");
     const current = await writePlanSet(project, "same-slug");
     const validation = await validateStagedTree(project, "plan", project, { currentArtifactPaths: current });
     expect(validation.valid).toBe(true);
@@ -224,6 +291,7 @@ describe("run-scoped readiness and workflow completeness", () => {
     });
     expect(report.readyForRalph).toBe(true);
     expect(report.findings.some((finding) => finding.artifact.endsWith("/OPERATIONS.json"))).toBe(false);
+    expect(report.findings.some((finding) => finding.artifact.endsWith("/TECHNICAL_NOTES.md"))).toBe(false);
   });
 });
 

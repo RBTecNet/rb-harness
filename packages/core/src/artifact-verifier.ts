@@ -22,6 +22,7 @@ import type { HarnessRunState, HarnessWorkflow, ProviderConfiguration } from "./
 import type { ArtifactManifest, ArtifactRecord, ExecutionDocument, ValidationIssue } from "./types.js";
 import { validateExecutionMarkdown } from "./execution-contract.js";
 import {
+  isCanonicalWorkflowArtifactPath,
   readyWorkflowArtifact,
   requiredWorkflowArtifactPaths,
   workflowScopeFromPaths,
@@ -330,6 +331,19 @@ async function deterministicVerification(
       evidence: `The current ${workflow} run does not identify exactly one canonical workflow root.`,
       requiredChange: "Emit the current workflow artifacts under one canonical workflow directory.",
     });
+  } else if (scoped && scope) {
+    for (const path of currentArtifactPaths.filter((entry) => !isCanonicalWorkflowArtifactPath(workflow, scope, entry))) {
+      findings.push({
+        id: `readiness.unknown-artifact.${createHash("sha256").update(path).digest("hex").slice(0, 10)}`,
+        severity: "blocker",
+        source: "deterministic",
+        category: "readiness",
+        artifact: path,
+        criterion: "workflow-artifact-allowlist",
+        evidence: `The current ${workflow} run authored ${path}, which is not a required or conditional artifact in the canonical workflow definition.`,
+        requiredChange: "Remove current-run artifacts that are not declared by the canonical workflow definition.",
+      });
+    }
   }
   const relevantArtifacts = scoped
     ? manifest.artifacts.filter((artifact) => producedPaths.has(artifact.path))

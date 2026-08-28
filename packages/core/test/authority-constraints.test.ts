@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   authorityConstraintsFromState,
+  changeExplicitlyModifiesProtectedPath,
   protectedPathConstraintsFromArtifact,
   protectedPathConstraintsFromText,
   scopeTokenIntersectsProtectedPath,
@@ -46,6 +47,14 @@ describe("protected path authority", () => {
     expect(scopeTokenIntersectsProtectedPath("config/*.json", "src/legacy")).toBe(false);
   });
 
+  it("fails closed for intersecting glob pairs and disproves only incompatible anchored prefixes", () => {
+    expect(scopeTokenIntersectsProtectedPath("config/**", "**/secrets/*.env")).toBe(true);
+    expect(scopeTokenIntersectsProtectedPath("src/**", "tests/**")).toBe(false);
+    expect(scopeTokenIntersectsProtectedPath("src/**/*.ts", "src/**/legacy/*.ts")).toBe(true);
+    expect(scopeTokenIntersectsProtectedPath("tests/**/*.ts", "src/**/*.ts")).toBe(false);
+    expect(scopeTokenIntersectsProtectedPath("**/*.md", ".rb/**/*.md")).toBe(true);
+  });
+
   it.each([
     "Do not modify package.json",
     "Don't modify package.json",
@@ -72,6 +81,33 @@ describe("protected path authority", () => {
       "Keep the accepted configuration behavior stable.",
     ));
     expect(constraints.map((entry) => entry.path)).toContain("config/raw.php");
+  });
+
+  it.each([
+    "without modifying config/app.php",
+    "without changing config/app.php",
+    "Implement X sem alterar config/app.php.",
+    "Implement X sem modificar config/app.php.",
+    "Implement X sem editar config/app.php.",
+    "Implement X sem mexer em config/app.php.",
+  ])("extracts an explicit line-local preservation form: %s", (directive) => {
+    expect(protectedPathConstraintsFromText(directive, "request").map((entry) => entry.path))
+      .toContain("config/app.php");
+  });
+
+  it("associates each protected path occurrence with its nearest mutation", () => {
+    expect(changeExplicitlyModifiesProtectedPath(
+      "Do not modify `config/app.php`; instead modify `config/app.php`.",
+      "config/app.php",
+    )).toBe(true);
+    expect(changeExplicitlyModifiesProtectedPath(
+      "Do not modify `config/app.php`.",
+      "config/app.php",
+    )).toBe(false);
+    expect(changeExplicitlyModifiesProtectedPath(
+      "Modify `src/new.php` without modifying `config/app.php`.",
+      "config/app.php",
+    )).toBe(false);
   });
 
   it("uses only the designated PRESERVATION table path column", async () => {

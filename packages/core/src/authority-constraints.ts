@@ -22,7 +22,7 @@ export const BUILT_IN_PROTECTED_PATH_CONSTRAINTS: readonly ProtectedPathConstrai
   source: "harness-contract",
 }];
 
-const MUTATION = "(?:modify|change|edit|write(?:\\s+to)?|create|delete|remove|replace|overwrite|patch|regenerate|sync|publish|mutate|"
+const MUTATION = "(?:modify|modifying|change|changing|edit|editing|write(?:\\s+to)?|writing(?:\\s+to)?|create|delete|remove|replace|overwrite|patch|regenerate|sync|publish|mutate|"
   + "modificar|modifique|alterar|altere|editar|edite|mexer(?:\\s+em)?|mexa(?:\\s+em)?|tocar(?:\\s+em)?|toque(?:\\s+em)?|"
   + "escrever(?:\\s+em)?|escreva(?:\\s+em)?|criar|crie|excluir|exclua|remover|remova|substituir|substitua|sobrescrever|"
   + "sobrescreva|corrigir|corrija|regenerar|regenere|sincronizar|sincronize|publicar|publique)";
@@ -57,7 +57,7 @@ function explicitPathLiterals(text: string): Array<{ path: string; index: number
   for (const match of text.matchAll(/[`'"]([^`'"]+)[`'"]/g)) {
     if (match[1] && pathLike(match[1])) found.push({ path: match[1], index: match.index! });
   }
-  for (const match of text.matchAll(/(?:^|\s)([A-Za-z0-9._*?-]+(?:\/[A-Za-z0-9._*?-]+)*)(?=$|[\s,;:!?)])/g)) {
+  for (const match of text.matchAll(/(?:^|\s)([A-Za-z0-9._*?-]+(?:\/[A-Za-z0-9._*?-]+)*)(?=$|[\s,;:.!?)])/g)) {
     const raw = match[1]?.replace(/[.,;:!?)]$/, "");
     if (raw && pathLike(raw)) found.push({ path: raw, index: match.index! + match[0].indexOf(match[1]!) });
   }
@@ -70,6 +70,7 @@ export function protectedPathConstraintsFromText(text: string, source: string): 
   let index = 0;
   const directive = new RegExp(
     "(?:must\\s+not|do\\s+not|don['’]t|never|mustn['’]t|(?:n[aã]o|nao|jamais)(?:\\s+deve)?)\\s+" + MUTATION
+      + "\\s+|(?:without|sem)\\s+" + MUTATION
       + "\\s+|(?:must\\s+preserve|preserve|deve\\s+preservar|preservar)\\s+",
     "gi",
   );
@@ -236,9 +237,21 @@ export function scopeTokenIntersectsProtectedPath(token: string, protectedPath: 
   if (scopeTokenCoversPath(normalized, protectedPath) || scopeTokenCoversPath(protectedPath, normalized)) return true;
   if (!/[*?]/.test(normalized)) return false;
   if (/[*?]/.test(protectedCanonical)) {
-    const tokenRoot = normalized.split("/").find((segment) => !/[*?]/.test(segment));
-    const protectedRoot = protectedCanonical.split("/").find((segment) => !/[*?]/.test(segment));
-    return !tokenRoot || !protectedRoot || tokenRoot === protectedRoot;
+    const literalPrefix = (value: string): string[] => {
+      const prefix: string[] = [];
+      for (const segment of value.split("/")) {
+        if (/[*?]/.test(segment)) break;
+        prefix.push(segment);
+      }
+      return prefix;
+    };
+    const tokenPrefix = literalPrefix(normalized);
+    const protectedPrefix = literalPrefix(protectedCanonical);
+    const compared = Math.min(tokenPrefix.length, protectedPrefix.length);
+    for (let index = 0; index < compared; index += 1) {
+      if (tokenPrefix[index] !== protectedPrefix[index]) return false;
+    }
+    return true;
   }
   const pattern = normalized.split("/");
   const target = protectedCanonical.split("/");
@@ -267,11 +280,19 @@ export function changeExplicitlyModifiesProtectedPath(change: string, protectedP
   const paths = explicitPathLiterals(change).filter((entry) => scopeTokenIntersectsProtectedPath(entry.path, protectedPath));
   if (!paths.length) return false;
   for (const match of paths) {
-    const before = change.slice(Math.max(0, match.index - 120), match.index);
-    const mutation = before.match(new RegExp(`\\b${MUTATION}\\b`, "i"));
+    const bounded = change.slice(Math.max(0, match.index - 160), match.index);
+    const clause = bounded.slice(Math.max(
+      bounded.lastIndexOf(";"),
+      bounded.lastIndexOf("."),
+      bounded.lastIndexOf("!"),
+      bounded.lastIndexOf("?"),
+      bounded.lastIndexOf("\n"),
+    ) + 1);
+    const mutations = [...clause.matchAll(new RegExp(`\\b${MUTATION}\\b`, "gi"))];
+    const mutation = mutations.at(-1);
     if (!mutation) continue;
-    const tail = before.slice(Math.max(0, mutation.index! - 30));
-    if (new RegExp(`(?:not|never|without|n[aã]o|sem)\\s+(?:\\w+\\s+){0,2}${MUTATION}`, "i").test(tail)) continue;
+    const prefix = clause.slice(0, mutation.index).slice(-60);
+    if (/(?:(?:\b(?:do|must)\s+not|\bdon['’]t|\bnever|\bwithout|\bn[aã]o(?:\s+deve)?|\bsem)\s+(?:\w+\s+){0,2}$|\bprevent(?:s|ed|ing)?(?:\s+\w+){0,3}\s+from\s+$)/i.test(prefix)) continue;
     return true;
   }
   return false;
