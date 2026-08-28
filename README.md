@@ -28,7 +28,7 @@ only when evidence or the developer requires them.
 
 ## Standalone installation
 
-RB Harness 0.5.19 is an executable rather than a workflow that must run inside
+RB Harness 0.6.2 is an executable rather than a workflow that must run inside
 Codex or Claude. Node.js 20 or newer is required. From the repository:
 
 ```bash
@@ -49,7 +49,7 @@ the current shell. Verify the exact installed build with:
 ```bash
 rb-harness --version
 rb-harness --ver
-# Both print 0.5.19
+# Both print 0.6.2
 ```
 
 Run without arguments to start the wizard:
