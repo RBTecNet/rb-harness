@@ -63,7 +63,15 @@ export type DocumentPlanNormalizationReason =
   | "stripped-json-fence"
   | "recovered-root-property-boundary"
   | "canonicalized-coordination-object"
-  | "removed-document-prefix";
+  | "removed-document-prefix"
+  | "removed-part-scope";
+
+export interface DocumentPlanParseOptions {
+  /** Finalized documents from this run that a localized repair may read. */
+  availableDocumentPaths?: readonly string[];
+  /** Repair plans support only their observed representation differences. */
+  context?: "generation" | "structural-repair";
+}
 
 interface ExtractedDocumentPlan {
   source: string;
@@ -323,7 +331,10 @@ interface NormalizedDocumentPlan {
   reasons: DocumentPlanNormalizationReason[];
 }
 
-function normalizeDocumentPlanRepresentation(output: string): NormalizedDocumentPlan {
+function normalizeDocumentPlanRepresentation(
+  output: string,
+  context: DocumentPlanParseOptions["context"] = "generation",
+): NormalizedDocumentPlan {
   const extracted = extractDocumentPlan(output);
   if (Buffer.byteLength(extracted.source) > HARNESS_BUDGET.documents.maxPlanBytes) {
     throw new Error(`document plan exceeds ${HARNESS_BUDGET.documents.maxPlanBytes} bytes`);
@@ -352,6 +363,17 @@ function normalizeDocumentPlanRepresentation(output: string): NormalizedDocument
       if (typeof document.prefix === "string" && Object.hasOwn(document, "purpose")) {
         delete document.prefix;
         extracted.reasons.push("removed-document-prefix");
+      }
+      if (context === "structural-repair" && Array.isArray(document.parts)) {
+        document.parts = document.parts.map((entry) => {
+          if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
+          const part = { ...(entry as Record<string, unknown>) };
+          if (typeof part.scope === "string" && Object.hasOwn(part, "purpose")) {
+            delete part.scope;
+            extracted.reasons.push("removed-part-scope");
+          }
+          return part;
+        });
       }
       return document;
     });
@@ -434,9 +456,12 @@ function dependencyWouldCycle(
  * cycles such as PHASES -> OPERATIONS -> PHASES. Establish the code-owned
  * workflow DAG first, then retain provider edges only while they preserve it.
  */
-function reconcileDocumentDependencies(documents: PlannedDocument[]): PlannedDocument[] {
+function reconcileDocumentDependencies(
+  documents: PlannedDocument[],
+  availableDocumentPaths: readonly string[] = [],
+): PlannedDocument[] {
   const allPaths = documents.map((document) => document.path);
-  const knownPaths = new Set(allPaths);
+  const knownPaths = new Set([...allPaths, ...availableDocumentPaths]);
   for (const document of documents) {
     for (const dependency of document.dependsOn) {
       if (!knownPaths.has(dependency)) {
@@ -455,7 +480,7 @@ function reconcileDocumentDependencies(documents: PlannedDocument[]): PlannedDoc
   orderDocuments(documents.map((document) => ({
     ...document,
     dependsOn: [...dependenciesByPath.get(document.path)!].sort(),
-  })));
+  })), availableDocumentPaths);
 
   const suggestions = documents.flatMap((document) => [...new Set(document.dependsOn)].map((dependency) => ({
     target: document.path,
@@ -475,18 +500,19 @@ function reconcileDocumentDependencies(documents: PlannedDocument[]): PlannedDoc
   }));
 }
 
-function orderDocuments(documents: PlannedDocument[]): PlannedDocument[] {
+function orderDocuments(documents: PlannedDocument[], availableDocumentPaths: readonly string[] = []): PlannedDocument[] {
   const byPath = new Map(documents.map((document) => [document.path, document]));
+  const available = new Set(availableDocumentPaths);
   for (const document of documents) {
     for (const dependency of document.dependsOn) {
       if (dependency === document.path) throw new DocumentSubstanceError(`planned document ${document.path} depends on itself`);
-      if (!byPath.has(dependency)) {
+      if (!byPath.has(dependency) && !available.has(dependency)) {
         throw new DocumentSubstanceError(`planned document ${document.path} depends on missing document ${dependency}`);
       }
     }
   }
   const pending = new Map(documents.map((document, index) => [document.path, { document, index }]));
-  const completed = new Set<string>();
+  const completed = new Set(available);
   const ordered: PlannedDocument[] = [];
   while (pending.size) {
     const ready = [...pending.values()]
@@ -503,8 +529,8 @@ function orderDocuments(documents: PlannedDocument[]): PlannedDocument[] {
   return ordered;
 }
 
-export function parseDocumentPlan(output: string): DocumentPlan {
-  const normalized = normalizeDocumentPlanRepresentation(output);
+export function parseDocumentPlan(output: string, options: DocumentPlanParseOptions = {}): DocumentPlan {
+  const normalized = normalizeDocumentPlanRepresentation(output, options.context);
   const value = normalized.value;
   allowedKeys(value, ["contract", "status", "summary", "coordination", "documents", "blocked"], "document plan");
   if (value.contract !== DOCUMENT_PLAN_CONTRACT) {
@@ -554,9 +580,13 @@ export function parseDocumentPlan(output: string): DocumentPlan {
   if (value.status === "blocked" && !blocked.length) throw new Error("a blocked document plan must name the missing decision");
   if (value.status === "complete" && !documents.length) throw new Error("a complete document plan must contain documents");
   if (value.status === "complete" && blocked.length) throw new Error("a complete document plan cannot retain blockers");
-  documents = reconcileDocumentDependencies(documents);
-  documents = orderDocuments(documents);
-  if (normalized.reasons.length) {
+  documents = reconcileDocumentDependencies(documents, options.availableDocumentPaths);
+  documents = orderDocuments(documents, options.availableDocumentPaths);
+  if (options.context === "structural-repair") {
+    process.stdout.write(
+      `[rb-harness] repair-plan deterministic normalization ${JSON.stringify({ reasons: normalized.reasons })}\n`,
+    );
+  } else if (normalized.reasons.length) {
     process.stdout.write(
       `[rb-harness] document-plan normalization applied ${JSON.stringify({ reasons: normalized.reasons })}\n`,
     );
@@ -625,9 +655,12 @@ export function assembleDocumentPlan(plan: DocumentPlan, parts: readonly Documen
 export type PlannedOrLegacyBundle = { kind: "plan"; plan: DocumentPlan } | { kind: "bundle"; bundle: DocumentBundle };
 
 /** Accept complete legacy adapters without making them pay for a second call. */
-export function parsePlanOrLegacyBundle(output: string): PlannedOrLegacyBundle {
+export function parsePlanOrLegacyBundle(
+  output: string,
+  options: DocumentPlanParseOptions = {},
+): PlannedOrLegacyBundle {
   if (output.includes(DOCUMENT_PLAN_BEGIN) || output.includes(DOCUMENT_PLAN_CONTRACT)) {
-    return { kind: "plan", plan: parseDocumentPlan(output) };
+    return { kind: "plan", plan: parseDocumentPlan(output, options) };
   }
   return { kind: "bundle", bundle: parseDocumentBundle(output) };
 }

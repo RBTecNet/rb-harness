@@ -24,6 +24,7 @@ import {
   mergeDocumentBundles,
   parseDocumentBundle,
   type DocumentBundle,
+  type GeneratedDocument,
 } from "./harness-documents.js";
 import {
   DOCUMENT_PART_BEGIN,
@@ -292,6 +293,10 @@ interface IncrementalAuthoringOptions {
   /** Rebuild the plan prompt after a defect the formatter cannot repair. */
   replanPrompt: (defect: string) => string;
   repairContext?: string;
+  /** Finalized documents in this run, never historical workspace artifacts. */
+  currentRunDocuments?: readonly GeneratedDocument[];
+  /** Existing documents this localized repair is authorized to replace. */
+  repairAuthorizedPaths?: readonly string[];
 }
 
 export function assertGenerationPlanComplete(workflow: HarnessWorkflow, plan: DocumentPlan): void {
@@ -374,13 +379,16 @@ function dependencyProjection(
   plan: DocumentPlan,
   target: PlannedDocument,
   completed: ReadonlyMap<string, DocumentPart>,
+  currentRunDocuments: readonly GeneratedDocument[] = [],
 ): string | undefined {
   if (!target.dependsOn.length) return undefined;
   const sourceManifest = target.path.toLowerCase().endsWith("/source-manifest.json");
   const documents = target.dependsOn.map((path) => {
     const dependency = plan.documents.find((document) => document.path === path);
-    if (!dependency) throw new Error(`planned dependency disappeared: ${path}`);
-    const content = completedDocumentContent(dependency, completed);
+    const content = dependency
+      ? completedDocumentContent(dependency, completed)
+      : currentRunDocuments.find((document) => document.path === path)?.content;
+    if (!dependency && content === undefined) throw new Error(`planned dependency disappeared: ${path}`);
     if (content === undefined) throw new Error(`planned dependency was not finalized before ${target.path}: ${path}`);
     if (sourceManifest) return { path, sha256: sha256Text(content) };
     const execution = path.toUpperCase().endsWith("/PHASES.MD") ? executionAuthorityProjection(content) : undefined;
@@ -389,6 +397,21 @@ function dependencyProjection(
       : { path, kind: "decision-authority", projection: proseAuthorityProjection(content) };
   });
   return boundedUtf8(JSON.stringify({ target: target.path, documents }), MAX_DEPENDENCY_PROJECTION_BYTES);
+}
+
+/** A localized repair may replace only documents granted by its deterministic errors. */
+export function assertStructuralRepairPlanAuthority(
+  candidate: PlannedOrLegacyBundle,
+  authorizedPaths: readonly string[],
+): void {
+  const authorized = new Set(authorizedPaths);
+  const documents = candidate.kind === "plan" ? candidate.plan.documents : candidate.bundle.documents;
+  const unauthorized = documents.map((document) => document.path).filter((path) => !authorized.has(path));
+  if (unauthorized.length) {
+    throw new DocumentSubstanceError(
+      `structural repair cannot add or rewrite documents without current-run repair authority: ${unauthorized.join(", ")}`,
+    );
+  }
 }
 
 async function authorIncrementally(options: IncrementalAuthoringOptions): Promise<DocumentBundle> {
@@ -414,6 +437,9 @@ async function authorIncrementally(options: IncrementalAuthoringOptions): Promis
         : undefined;
       if (closedPlanRoot) await chmod(closedPlanRoot, 0o555);
       if (rawPlan === undefined) {
+        if (options.mode === "repair") {
+          process.stdout.write("[rb-harness] repair-plan generation call\n");
+        }
         let result: Awaited<ReturnType<typeof runProvider>>;
         try {
           result = await runProvider({
@@ -431,6 +457,7 @@ async function authorIncrementally(options: IncrementalAuthoringOptions): Promis
             // decisions in the authority prefix. Re-reading the same PRD buys a
             // second provider turn and input bill without discovering AS IS code.
             toolsEnabled: options.mode !== "repair" && options.state.workflow !== "init",
+            operation: options.mode === "repair" ? "repair-plan-generation" : undefined,
           });
         } finally {
           if (closedPlanRoot) {
@@ -443,7 +470,10 @@ async function authorIncrementally(options: IncrementalAuthoringOptions): Promis
       // A substance defect is never sent to the formatter: it may only change
       // representation, so all three of its attempts would fail identically.
       try {
-        return parsePlanOrLegacyBundle(rawPlan);
+        return parsePlanOrLegacyBundle(rawPlan, options.mode === "repair" ? {
+          context: "structural-repair",
+          availableDocumentPaths: options.currentRunDocuments?.map((document) => document.path) ?? [],
+        } : undefined);
       } catch (error) {
         if (error instanceof DocumentSubstanceError) throw error;
       }
@@ -456,11 +486,15 @@ async function authorIncrementally(options: IncrementalAuthoringOptions): Promis
         label,
         rawOutput: rawPlan,
         contract: planFormattingContract(),
-        parse: parsePlanOrLegacyBundle,
+        parse: (output) => parsePlanOrLegacyBundle(output, options.mode === "repair" ? {
+          context: "structural-repair",
+          availableDocumentPaths: options.currentRunDocuments?.map((document) => document.path) ?? [],
+        } : undefined),
         timeoutSeconds: options.timeoutSeconds,
         firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
         streamOutput: options.streamOutput,
         rejectedOutputFingerprint: documentPlanFormattingFingerprint,
+        providerOperation: options.mode === "repair" ? "repair-plan-formatter" : undefined,
       });
     };
 
@@ -471,6 +505,9 @@ async function authorIncrementally(options: IncrementalAuthoringOptions): Promis
         const candidate = await requestPlan(attempt === 1 ? options.planPrompt : options.replanPrompt(defect!), attempt);
         if (options.mode === "generation" && candidate.kind === "plan") {
           assertGenerationPlanComplete(options.state.workflow, candidate.plan);
+        }
+        if (options.mode === "repair") {
+          assertStructuralRepairPlanAuthority(candidate, options.repairAuthorizedPaths ?? []);
         }
         planned = candidate;
         break;
@@ -539,7 +576,7 @@ async function authorIncrementally(options: IncrementalAuthoringOptions): Promis
               previousPart,
               options.repairContext,
               undefined,
-              dependencyProjection(checkpoint.plan, document, completed),
+              dependencyProjection(checkpoint.plan, document, completed, options.currentRunDocuments),
             ),
             logPath,
             timeoutSeconds: options.timeoutSeconds,
@@ -576,7 +613,7 @@ async function authorIncrementally(options: IncrementalAuthoringOptions): Promis
                 previousPart,
                 options.repairContext,
                 error.message,
-                dependencyProjection(checkpoint.plan, document, completed),
+                dependencyProjection(checkpoint.plan, document, completed, options.currentRunDocuments),
               ),
               logPath: retryLog,
               timeoutSeconds: options.timeoutSeconds,
@@ -691,7 +728,7 @@ export function buildRepairPrompt(
       ? `\n===== FINALIZED READ-ONLY DEPENDENCIES =====\n${JSON.stringify(documentExcerpts(bundle, dependencies))}`
       : "",
     `\n===== DOCUMENTS THAT MUST NOT CHANGE =====\n${JSON.stringify(bundle.documents.map((document) => document.path).filter((path) => !affected.includes(path)))}`,
-    `Plan only replacements or additions required by those errors. Existing documents outside AFFECTED DOCUMENTS are forbidden.`,
+    "Plan only replacements of AFFECTED DOCUMENTS. Do not add a conditional artifact to satisfy a dependency or rewrite any other document; when the deterministic errors cannot be repaired within that authority, return blocked and name the missing semantic decision.",
     `Every document you plan is rewritten in full from its parts, so plan parts that cover the whole corrected document — not just the fragment that changes. Split it into parts of at most ${HARNESS_BUDGET.documents.maxPartBytes} UTF-8 bytes, and state in each part purpose which span of the original it reproduces and what, if anything, changes inside it. The part writer cannot inspect files; it sees the original under REPAIR AUTHORITY and must reproduce its span byte for byte apart from the listed error.`,
     protocolDefect ? `A prior repair response was rejected. Do not repeat it: ${protocolDefect}` : "",
   ].filter(Boolean).join("\n");
@@ -893,6 +930,8 @@ export async function requestStructuralRepair(options: RepairRequestOptions): Pr
       affected: documentExcerpts(options.bundle, affected),
       dependencies: documentExcerpts(options.bundle, dependencies),
     }),
+    currentRunDocuments: options.bundle.documents,
+    repairAuthorizedPaths: affected,
   });
   const originals = new Map(options.bundle.documents.map((document) => [document.path, document.content]));
   for (const document of repaired.documents) {

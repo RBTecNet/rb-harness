@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { HARNESS_BUDGET } from "./harness-budget.js";
 import { runProvider, type ProviderMode } from "./harness-provider.js";
-import type { HarnessStage } from "./harness-telemetry.js";
+import type { HarnessStage, ProviderCallOperation } from "./harness-telemetry.js";
 import { ProviderStreamObserver } from "./provider-events.js";
 import type { ProviderConfiguration } from "./standalone-types.js";
 
@@ -79,6 +79,8 @@ export interface ControlFormattingOptions<T> {
   streamOutput?: boolean;
   /** Opt-in repetition guard for a control response with a stable payload identity. */
   rejectedOutputFingerprint?: (output: string) => string;
+  /** Narrow telemetry purpose for formatter calls in a shared stage. */
+  providerOperation?: ProviderCallOperation;
 }
 
 /** Parse directly when possible; otherwise buy only bounded formatting calls. */
@@ -108,6 +110,7 @@ export async function parseOrFormatControlOutput<T>(options: ControlFormattingOp
         if (output !== undefined) {
           process.stdout.write(`[rb-harness] tentativa ${attempt} do formatador recuperada do log; provider não será reinvocado.\n`);
         } else {
+          process.stdout.write(`[rb-harness] ${options.label} formatter call attempt=${attempt}\n`);
           const prompt = [
             "You are the RB Harness control-response formatter. You format existing material; you do not analyze the project or make product decisions.",
             "Do not call tools, inspect files, add facts, remove facts, resolve ambiguity, change IDs, or improve the substance.",
@@ -135,6 +138,7 @@ export async function parseOrFormatControlOutput<T>(options: ControlFormattingOp
             streamOutput: options.streamOutput,
             attempt,
             toolsEnabled: false,
+            operation: options.providerOperation,
           });
           output = result.stdout;
         }
@@ -142,7 +146,7 @@ export async function parseOrFormatControlOutput<T>(options: ControlFormattingOp
         if (fingerprint && rejectedFingerprints?.has(fingerprint)) {
           repeated = true;
           process.stdout.write(
-            `[rb-harness] formatador repetiu payload já rejeitado na tentativa ${attempt}; novas tentativas foram canceladas.\n`,
+            `[rb-harness] ${options.label} formatter repeated rejected payload at attempt=${attempt}; remaining attempts cancelled.\n`,
           );
           break;
         }

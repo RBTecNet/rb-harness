@@ -70,8 +70,14 @@ export interface ProviderUsage {
   costUsd?: number;
 }
 
+export type ProviderCallOperation =
+  | "repair-plan-generation"
+  | "repair-plan-formatter";
+
 export interface ProviderCallRecord {
   stage: HarnessStage;
+  /** Narrow call purpose within a stage, recorded only where waste diagnosis needs it. */
+  operation?: ProviderCallOperation;
   provider: string;
   model: string;
   attempt: number;

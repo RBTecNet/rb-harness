@@ -22,6 +22,7 @@ import {
   emptyUsage,
   harnessTelemetry,
   type HarnessStage,
+  type ProviderCallOperation,
   type ProviderUsage,
 } from "./harness-telemetry.js";
 
@@ -48,6 +49,8 @@ export interface ProviderRunOptions {
   firstOutputTimeoutSeconds: number;
   streamOutput?: boolean;
   attempt?: number;
+  /** Optional narrow purpose persisted in provider logs and telemetry. */
+  operation?: ProviderCallOperation;
   /** Closed authoring parts disable direct-provider tools and run from an empty root. */
   toolsEnabled?: boolean;
   /** Test/embedding override. Standalone workflows use the bounded mode default. */
@@ -222,6 +225,7 @@ async function writeProviderLog(
     `effort=${options.configuration.effort || "provider-default"}`,
     `mode=${options.mode}`,
     `stage=${options.stage}`,
+    ...(options.operation ? [`operation=${options.operation}`] : []),
     `exit_code=${result.exitCode}`,
     `first_output_ms=${result.firstOutputMilliseconds ?? "none"}`,
     ...(stdoutTransport ? [`stdout_transport=${stdoutTransport}`] : []),
@@ -571,6 +575,7 @@ export async function runProvider(options: ProviderRunOptions): Promise<Provider
   };
   telemetry?.recordProviderCall({
     stage: options.stage,
+    ...(options.operation ? { operation: options.operation } : {}),
     provider: options.configuration.provider,
     model: options.configuration.model || "provider-default",
     attempt: options.attempt ?? 1,
