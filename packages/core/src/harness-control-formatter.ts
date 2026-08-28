@@ -81,12 +81,15 @@ export interface ControlFormattingOptions<T> {
   rejectedOutputFingerprint?: (output: string) => string;
   /** Narrow telemetry purpose for formatter calls in a shared stage. */
   providerOperation?: ProviderCallOperation;
+  /** Semantic defects must escape instead of becoming formatter instructions. */
+  isSemanticError?: (error: unknown) => boolean;
 }
 
 /** Parse directly when possible; otherwise buy only bounded formatting calls. */
 export async function parseOrFormatControlOutput<T>(options: ControlFormattingOptions<T>): Promise<T> {
   try { return options.parse(options.rawOutput); }
   catch (initialError) {
+    if (options.isSemanticError?.(initialError)) throw initialError;
     process.stdout.write(
       `[rb-harness] ${options.label} fora do contrato; iniciando formatador fechado `
       + `(até ${HARNESS_BUDGET.formatting.maxAttempts} tentativa(s)), sem repetir o trabalho semântico.\n`,
@@ -152,6 +155,7 @@ export async function parseOrFormatControlOutput<T>(options: ControlFormattingOp
         }
         try { return options.parse(output); }
         catch (error) {
+          if (options.isSemanticError?.(error)) throw error;
           defect = errorText(error);
           prior = output;
           if (fingerprint) rejectedFingerprints?.add(fingerprint);

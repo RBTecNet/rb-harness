@@ -540,6 +540,7 @@ async function authorIncrementally(options: IncrementalAuthoringOptions): Promis
         streamOutput: options.streamOutput,
         rejectedOutputFingerprint: documentPlanFormattingFingerprint,
         providerOperation: options.mode === "repair" ? "repair-plan-formatter" : undefined,
+        isSemanticError: (error) => error instanceof DocumentSubstanceError,
       });
     };
 

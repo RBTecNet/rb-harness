@@ -331,6 +331,11 @@ interface NormalizedDocumentPlan {
   reasons: DocumentPlanNormalizationReason[];
 }
 
+interface DocumentDependencyAliasResolution {
+  rawId: string;
+  canonicalPath: string;
+}
+
 function normalizeDocumentPlanRepresentation(
   output: string,
   context: DocumentPlanParseOptions["context"] = "generation",
@@ -447,6 +452,49 @@ function dependencyWouldCycle(
     pending.push(...(dependenciesByPath.get(current) ?? []));
   }
   return false;
+}
+
+/**
+ * A provider sometimes uses one of its explicitly declared part IDs as the
+ * identity of the document that owns that part. Dependencies are document
+ * scoped internally, so resolve only an exact, plan-local, unambiguous part ID
+ * to its owning canonical document path. Part purpose text and path-derived
+ * guesses are deliberately not aliases.
+ */
+function canonicalizeDocumentDependencies(documents: PlannedDocument[]): {
+  documents: PlannedDocument[];
+  resolutions: DocumentDependencyAliasResolution[];
+} {
+  const canonicalPaths = new Set(documents.map((document) => document.path));
+  const ownersByRawId = new Map<string, Set<string>>();
+  for (const document of documents) {
+    for (const part of document.parts) {
+      const owners = ownersByRawId.get(part.id) ?? new Set<string>();
+      owners.add(document.path);
+      ownersByRawId.set(part.id, owners);
+    }
+  }
+
+  const resolutions: DocumentDependencyAliasResolution[] = [];
+  const canonicalized = documents.map((document) => ({
+    ...document,
+    dependsOn: document.dependsOn.map((dependency) => {
+      // Canonical identity always wins over provider-local aliases.
+      if (canonicalPaths.has(dependency)) return dependency;
+      const owners = ownersByRawId.get(dependency);
+      if (!owners) return dependency;
+      if (owners.size !== 1) {
+        throw new DocumentSubstanceError(
+          `planned document ${document.path} depends on ambiguous plan-local ID ${dependency} declared by `
+          + [...owners].sort().join(", "),
+        );
+      }
+      const canonicalPath = [...owners][0]!;
+      resolutions.push({ rawId: dependency, canonicalPath });
+      return canonicalPath;
+    }),
+  }));
+  return { documents: canonicalized, resolutions };
 }
 
 /**
@@ -580,6 +628,19 @@ export function parseDocumentPlan(output: string, options: DocumentPlanParseOpti
   if (value.status === "blocked" && !blocked.length) throw new Error("a blocked document plan must name the missing decision");
   if (value.status === "complete" && !documents.length) throw new Error("a complete document plan must contain documents");
   if (value.status === "complete" && blocked.length) throw new Error("a complete document plan cannot retain blockers");
+  const dependencyAliases = canonicalizeDocumentDependencies(documents);
+  documents = dependencyAliases.documents;
+  if (dependencyAliases.resolutions.length) {
+    const aliases = [...new Map(dependencyAliases.resolutions.map((resolution) => [
+      `${resolution.rawId}\0${resolution.canonicalPath}`,
+      resolution,
+    ])).values()].sort((left, right) =>
+      left.rawId.localeCompare(right.rawId) || left.canonicalPath.localeCompare(right.canonicalPath));
+    process.stdout.write(
+      `[rb-harness] document-plan dependency aliases resolved: ${dependencyAliases.resolutions.length} `
+      + `${JSON.stringify({ aliases })}\n`,
+    );
+  }
   documents = reconcileDocumentDependencies(documents, options.availableDocumentPaths);
   documents = orderDocuments(documents, options.availableDocumentPaths);
   if (options.context === "structural-repair") {

@@ -30,6 +30,8 @@ const originalIncompleteFirstPlan = process.env.RB_HARNESS_TEST_INCOMPLETE_FIRST
 const originalMimoPlan = process.env.RB_HARNESS_TEST_MIMO_PLAN;
 const originalMalformedPlan = process.env.RB_HARNESS_TEST_MALFORMED_PLAN;
 const originalRepeatFormatOutput = process.env.RB_HARNESS_TEST_REPEAT_FORMAT_OUTPUT;
+const originalMissingDependency = process.env.RB_HARNESS_TEST_MISSING_DEPENDENCY;
+const originalStaleDependencyAlias = process.env.RB_HARNESS_TEST_STALE_DEPENDENCY_ALIAS;
 
 afterEach(() => {
   if (originalCalls === undefined) delete process.env.RB_HARNESS_TEST_INCREMENTAL_CALLS;
@@ -52,6 +54,10 @@ afterEach(() => {
   else process.env.RB_HARNESS_TEST_MALFORMED_PLAN = originalMalformedPlan;
   if (originalRepeatFormatOutput === undefined) delete process.env.RB_HARNESS_TEST_REPEAT_FORMAT_OUTPUT;
   else process.env.RB_HARNESS_TEST_REPEAT_FORMAT_OUTPUT = originalRepeatFormatOutput;
+  if (originalMissingDependency === undefined) delete process.env.RB_HARNESS_TEST_MISSING_DEPENDENCY;
+  else process.env.RB_HARNESS_TEST_MISSING_DEPENDENCY = originalMissingDependency;
+  if (originalStaleDependencyAlias === undefined) delete process.env.RB_HARNESS_TEST_STALE_DEPENDENCY_ALIAS;
+  else process.env.RB_HARNESS_TEST_STALE_DEPENDENCY_ALIAS = originalStaleDependencyAlias;
 });
 
 function envelope(begin: string, end: string, value: unknown): string {
@@ -208,6 +214,115 @@ describe("incremental document contracts", () => {
     expect(parseDocumentPlan(envelope(DOCUMENT_PLAN_BEGIN, DOCUMENT_PLAN_END, value)).coordination).toBe(
       '{"sharedIds":["RF-001","RF-002","P01","P02"],"traceability":{"RF-001":"P01/T001","RF-002":"P02/T002"}}',
     );
+  });
+
+  describe("plan-local document dependency identity", () => {
+    const planWith = (documents: unknown[]) => ({
+      contract: "rb-harness-document-plan/v1",
+      status: "complete",
+      summary: "Dependency identity fixture.",
+      coordination: "Exact plan-local IDs only.",
+      documents,
+      blocked: [],
+    });
+    const document = (path: string, partId: string, dependsOn: string[] = [], purpose = path) => ({
+      path,
+      purpose,
+      dependsOn,
+      parts: [{ id: partId, purpose: `Bounded part ${partId}.` }],
+    });
+
+    it.each([
+      ["real user run", "real-user-project-overview.json", "project-overview"],
+      ["real smoke replan", "real-smoke-project-main.json", "project-main"],
+    ])("canonicalizes the exact %s dependency fixture", async (_label, name, rawId) => {
+      const raw = await readFile(resolve(import.meta.dirname, `fixtures/document-plan/${name}`), "utf8");
+      const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      try {
+        const parsed = parseDocumentPlan(raw);
+        expect(parsed.documents.find((entry) => entry.path.endsWith("REQUIREMENTS.md"))?.dependsOn)
+          .toEqual([".rb/init/PROJECT.md"]);
+        expect(write.mock.calls.flat().join("")).toMatch(/document-plan dependency aliases resolved: [1-9][0-9]*/);
+        expect(write.mock.calls.flat().join("")).toContain(
+          `\"rawId\":\"${rawId}\",\"canonicalPath\":\".rb/init/PROJECT.md\"`,
+        );
+        const undeclared = JSON.parse(raw) as { documents: Array<{
+          path: string;
+          parts: Array<{ id: string }>;
+        }> };
+        const project = undeclared.documents.find((entry) => entry.path === ".rb/init/PROJECT.md")!;
+        project.parts.find((part) => part.id === rawId)!.id = `${rawId}-not-declared`;
+        expect(() => parseDocumentPlan(JSON.stringify(undeclared)))
+          .toThrow(`depends on missing document ${rawId}`);
+      } finally {
+        write.mockRestore();
+      }
+    });
+
+    it("rejects an undeclared alias without inferring it from purpose text or a path-derived name", () => {
+      const value = planWith([
+        document(
+          ".rb/init/PROJECT.md",
+          "project-body",
+          [],
+          "Project overview, objective, users, scope, and success criteria.",
+        ),
+        document(".rb/init/REQUIREMENTS.md", "requirements-main", ["project-overview"]),
+      ]);
+      expect(() => parseDocumentPlan(JSON.stringify(value)))
+        .toThrow("depends on missing document project-overview");
+      expect(() => parseDocumentPlan(JSON.stringify(planWith([
+        document(".rb/init/PROJECT.md", "project-body"),
+        document(".rb/init/REQUIREMENTS.md", "requirements-main", ["project"]),
+      ])))).toThrow("depends on missing document project");
+    });
+
+    it("fails closed when a referenced plan-local ID has multiple document owners", () => {
+      const value = planWith([
+        document(".rb/init/PROJECT.md", "shared"),
+        document(".rb/init/DECISIONS.md", "shared"),
+        document(".rb/init/REQUIREMENTS.md", "requirements-main", ["shared"]),
+      ]);
+      expect(() => parseDocumentPlan(JSON.stringify(value)))
+        .toThrow("ambiguous plan-local ID shared declared by .rb/init/DECISIONS.md, .rb/init/PROJECT.md");
+    });
+
+    it("accepts direct canonical paths and leaves a valid canonical graph unchanged", () => {
+      const value = planWith([
+        document(".rb/init/PROJECT.md", "project-main"),
+        document(".rb/init/REQUIREMENTS.md", "requirements-main", [".rb/init/PROJECT.md"]),
+      ]);
+      expect(parseDocumentPlan(JSON.stringify(value))).toEqual(value);
+    });
+
+    it("does not carry a raw alias from a rejected plan into a replan", () => {
+      expect(parseDocumentPlan(JSON.stringify(planWith([
+        document(".rb/init/PROJECT.md", "project-main"),
+      ])))).toBeDefined();
+      const replan = planWith([
+        document(".rb/init/PROJECT.md", "project-overview"),
+        document(".rb/init/REQUIREMENTS.md", "requirements-main", ["project-main"]),
+      ]);
+      expect(() => parseDocumentPlan(JSON.stringify(replan)))
+        .toThrow("depends on missing document project-main");
+    });
+
+    it("keeps the current contract closed instead of inventing a canonical document ID field", () => {
+      const project = { ...document(".rb/init/PROJECT.md", "project-main"), id: "project" };
+      expect(() => parseDocumentPlan(JSON.stringify(planWith([project]))))
+        .toThrow("unsupported planned document field: id");
+    });
+
+    it("canonicalizes aliases before applying deterministic cycle handling", () => {
+      const parsed = parseDocumentPlan(JSON.stringify(planWith([
+        document(".rb/init/A.md", "a", ["b"]),
+        document(".rb/init/B.md", "b", ["a"]),
+      ])));
+      expect(parsed.documents.map((entry) => [entry.path, entry.dependsOn])).toEqual([
+        [".rb/init/B.md", []],
+        [".rb/init/A.md", [".rb/init/B.md"]],
+      ]);
+    });
   });
 
   it("rejects ambiguous brace recovery and unsupported coordination authority", async () => {
@@ -424,6 +539,57 @@ describe("provider-neutral incremental authoring", () => {
       "plan",
       ...COMPLETE_INIT_CALLS,
     ]);
+  }, 60_000);
+
+  it("replans a valid JSON plan with an unknown dependency without calling the formatter", async () => {
+    await chmod(fixture, 0o755);
+    const project = await mkdtemp(resolve(tmpdir(), "rb-incremental-semantic-dependency-"));
+    const runRoot = resolve(project, ".rb-harness/runs/test");
+    const calls = resolve(await mkdtemp(resolve(tmpdir(), "rb-incremental-semantic-dependency-calls-")), "calls.log");
+    process.env.RB_HARNESS_TEST_INCREMENTAL_CALLS = calls;
+    process.env.RB_HARNESS_TEST_MISSING_DEPENDENCY = "1";
+    await writeFile(resolve(project, "README.md"), "fixture\n", "utf8");
+
+    await expect(requestFixture(project, runRoot)).rejects
+      .toThrow("depends on missing document project-foo");
+    expect((await readFile(calls, "utf8")).trim().split("\n")).toEqual(["plan", "plan"]);
+  }, 60_000);
+
+  it("stops formatting when representation repair exposes a semantic dependency defect", async () => {
+    await chmod(fixture, 0o755);
+    const project = await mkdtemp(resolve(tmpdir(), "rb-incremental-formatted-semantic-dependency-"));
+    const runRoot = resolve(project, ".rb-harness/runs/test");
+    const calls = resolve(
+      await mkdtemp(resolve(tmpdir(), "rb-incremental-formatted-semantic-dependency-calls-")),
+      "calls.log",
+    );
+    process.env.RB_HARNESS_TEST_INCREMENTAL_CALLS = calls;
+    process.env.RB_HARNESS_TEST_MISSING_DEPENDENCY = "1";
+    await writeFile(resolve(project, "README.md"), "fixture\n", "utf8");
+    await mkdir(resolve(runRoot, "logs"), { recursive: true });
+    await writeFile(resolve(runRoot, "logs/generation-plan.log"), [
+      "exit_code=0", "", "--- stdout ---",
+      DOCUMENT_PLAN_BEGIN, "YAML_PLAN_FIXTURE", DOCUMENT_PLAN_END,
+      "", "--- stderr ---", "",
+    ].join("\n"), { encoding: "utf8", mode: 0o600 });
+
+    await expect(requestFixture(project, runRoot)).rejects
+      .toThrow("depends on missing document project-foo");
+    expect((await readFile(calls, "utf8")).trim().split("\n")).toEqual(["format", "plan"]);
+  }, 60_000);
+
+  it("builds every replan alias map only from the new response", async () => {
+    await chmod(fixture, 0o755);
+    const project = await mkdtemp(resolve(tmpdir(), "rb-incremental-stale-dependency-alias-"));
+    const runRoot = resolve(project, ".rb-harness/runs/test");
+    const calls = resolve(await mkdtemp(resolve(tmpdir(), "rb-incremental-stale-dependency-alias-calls-")), "calls.log");
+    process.env.RB_HARNESS_TEST_INCREMENTAL_CALLS = calls;
+    process.env.RB_HARNESS_TEST_STALE_DEPENDENCY_ALIAS = "1";
+    await writeFile(resolve(project, "README.md"), "fixture\n", "utf8");
+
+    await expect(requestFixture(project, runRoot)).rejects
+      .toThrow("depends on missing document project-main");
+    expect((await readFile(calls, "utf8")).trim().split("\n")).toEqual(["plan", "plan"]);
   }, 60_000);
 
   it("authors and assembles documents over independent custom-adapter calls", async () => {

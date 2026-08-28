@@ -116,6 +116,9 @@ if (prompt.includes("===== EXACT OUTPUT CONTRACT =====")) {
   const jsonStart = raw.indexOf("\n", begin) + 1;
   const jsonEnd = raw.indexOf("\nRB_HARNESS_DOCUMENT_PLAN_JSON_END", jsonStart);
   const formatted = raw.includes("YAML_PLAN_FIXTURE") ? structuredClone(plan) : JSON.parse(raw.slice(jsonStart, jsonEnd));
+  if (process.env.RB_HARNESS_TEST_MISSING_DEPENDENCY === "1") {
+    formatted.documents.find((document) => document.path.endsWith("REQUIREMENTS.md")).dependsOn = ["project-foo"];
+  }
   for (const document of formatted.documents ?? []) delete document.prefix;
   process.stdout.write(`RB_HARNESS_DOCUMENT_PLAN_JSON_BEGIN\n${JSON.stringify(formatted)}\nRB_HARNESS_DOCUMENT_PLAN_JSON_END\n`);
   process.exit(0);
@@ -123,10 +126,25 @@ if (prompt.includes("===== EXACT OUTPUT CONTRACT =====")) {
 
 if (prompt.includes("RB_HARNESS_DOCUMENT_PLAN_JSON_BEGIN")) {
   await record("plan");
-  const responsePlan = process.env.RB_HARNESS_TEST_INCOMPLETE_FIRST_PLAN === "1"
+  let responsePlan = process.env.RB_HARNESS_TEST_INCOMPLETE_FIRST_PLAN === "1"
     && !prompt.includes("omits mandatory current-run artifacts")
     ? { ...plan, documents: plan.documents.filter((document) => !document.path.endsWith("source-manifest.json")) }
     : plan;
+  if (process.env.RB_HARNESS_TEST_MISSING_DEPENDENCY === "1") {
+    responsePlan = structuredClone(responsePlan);
+    responsePlan.documents.find((document) => document.path.endsWith("REQUIREMENTS.md")).dependsOn = ["project-foo"];
+  }
+  if (process.env.RB_HARNESS_TEST_STALE_DEPENDENCY_ALIAS === "1") {
+    responsePlan = structuredClone(plan);
+    const replanning = prompt.includes("Do not repeat it");
+    responsePlan.documents.find((document) => document.path.endsWith("PROJECT.md")).parts[0].id =
+      replanning ? "project-overview" : "project-main";
+    if (replanning) {
+      responsePlan.documents.find((document) => document.path.endsWith("REQUIREMENTS.md")).dependsOn = ["project-main"];
+    } else {
+      responsePlan.documents = responsePlan.documents.filter((document) => !document.path.endsWith("source-manifest.json"));
+    }
+  }
   let serialized = JSON.stringify(responsePlan);
   if (process.env.RB_HARNESS_TEST_MIMO_PLAN === "1") {
     serialized = JSON.stringify({

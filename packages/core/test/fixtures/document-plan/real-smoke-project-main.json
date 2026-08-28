@@ -1,0 +1,122 @@
+{
+  "contract": "rb-harness-document-plan/v1",
+  "status": "complete",
+  "summary": "Relevant document dependency slice from persisted smoke replan init-20260828141116-df64004abe-afc8b2.",
+  "coordination": {
+    "projectId": "rb-harness-smoke"
+  },
+  "documents": [
+    {
+      "path": ".rb/init/PROJECT.md",
+      "purpose": "Project objective, users, scope, non-goals, constraints, and success criteria",
+      "dependsOn": [],
+      "parts": [
+        {
+          "id": "project-main",
+          "purpose": "Complete PROJECT.md: objective, users, scope, non-goals, constraints, success"
+        }
+      ]
+    },
+    {
+      "path": ".rb/init/REQUIREMENTS.md",
+      "purpose": "Rigid RF/RNF/UI/CT binary criteria and flexible decisions",
+      "dependsOn": [
+        "project-main"
+      ],
+      "parts": [
+        {
+          "id": "requirements-main",
+          "purpose": "Complete REQUIREMENTS.md: rigid requirements and flexible decisions"
+        }
+      ]
+    },
+    {
+      "path": ".rb/init/DECISIONS.md",
+      "purpose": "Confirmed choices, rationale, consequences, and supersession",
+      "dependsOn": [
+        "requirements-main"
+      ],
+      "parts": [
+        {
+          "id": "decisions-main",
+          "purpose": "Complete DECISIONS.md: technology choices, architecture, testing approach with rationale"
+        }
+      ]
+    },
+    {
+      "path": ".rb/init/PLAN.md",
+      "purpose": "Architecture-aware decomposition, dependencies, risks, validation",
+      "dependsOn": [
+        "project-main",
+        "requirements-main",
+        "decisions-main"
+      ],
+      "parts": [
+        {
+          "id": "plan-main",
+          "purpose": "Complete PLAN.md: architecture overview, module decomposition, risk analysis, validation strategy"
+        }
+      ]
+    },
+    {
+      "path": ".rb/init/PHASES.md",
+      "purpose": "Ready rb-execution/v1 plan with 7 tasks across 4 phases",
+      "dependsOn": [
+        "plan-main",
+        "requirements-main"
+      ],
+      "parts": [
+        {
+          "id": "phases-p01",
+          "purpose": "Phase 1 P01: Project scaffolding T001 T002, depends none"
+        },
+        {
+          "id": "phases-p02",
+          "purpose": "Phase 2 P02: Greeting function T003 T004, depends P01"
+        },
+        {
+          "id": "phases-p03",
+          "purpose": "Phase 3 P03: CLI entrypoint T005 T006, depends P02"
+        },
+        {
+          "id": "phases-p04",
+          "purpose": "Phase 4 P04: Build verification T007, depends P03"
+        }
+      ]
+    },
+    {
+      "path": ".rb/init/source-manifest.json",
+      "purpose": "Source hashes, answer provenance, and artifact links for all documents",
+      "dependsOn": [
+        "project-main",
+        "requirements-main",
+        "decisions-main",
+        "plan-main",
+        "phases-p01",
+        "phases-p02",
+        "phases-p03",
+        "phases-p04"
+      ],
+      "parts": [
+        {
+          "id": "manifest-main",
+          "purpose": "Complete source-manifest.json with SHA-256 hashes and artifact references"
+        }
+      ]
+    },
+    {
+      "path": ".rb/init/OPERATIONS.json",
+      "purpose": "Grounded rb-operational/v1 consumer acceptance for CLI product form",
+      "dependsOn": [
+        "project-main"
+      ],
+      "parts": [
+        {
+          "id": "operations-main",
+          "purpose": "Complete OPERATIONS.json with build and CLI command verification scenarios"
+        }
+      ]
+    }
+  ],
+  "blocked": []
+}

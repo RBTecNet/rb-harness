@@ -1,0 +1,225 @@
+{
+  "contract": "rb-harness-document-plan/v1",
+  "status": "complete",
+  "summary": "Relevant document dependency slice from persisted user run init-20260828140622-c6155d4b63-e6b8a4.",
+  "coordination": {
+    "projectId": "cron5"
+  },
+  "documents": [
+    {
+      "path": ".rb/init/PROJECT.md",
+      "purpose": "Project overview, objective, users, scope, non-goals, constraints, success criteria for cron5 cron utility",
+      "dependsOn": [],
+      "parts": [
+        {
+          "id": "project-overview",
+          "purpose": "Objective, target users, product form (web app with two tabs)"
+        },
+        {
+          "id": "project-scope",
+          "purpose": "In-scope features, non-goals, constraints, and success metrics"
+        }
+      ]
+    },
+    {
+      "path": ".rb/init/REQUIREMENTS.md",
+      "purpose": "RIGID binary criteria and FLEXIBLE decisions for cron5",
+      "dependsOn": [
+        "project-overview"
+      ],
+      "parts": [
+        {
+          "id": "rigid-requirements",
+          "purpose": "Binary observable criteria"
+        },
+        {
+          "id": "nonfunctional-flexible",
+          "purpose": "Non-functional criteria and flexible decisions"
+        }
+      ]
+    },
+    {
+      "path": ".rb/init/DECISIONS.md",
+      "purpose": "Confirmed choices with rationale, consequences, and supersession for all interview decisions",
+      "dependsOn": [],
+      "parts": [
+        {
+          "id": "decisions-all",
+          "purpose": "D-001 through D-012: Express, cron-parser, cronstrue, PT-BR, Vite, AI prompt template, schema validation, env vars, port, auth deferral, CORS deferral"
+        }
+      ]
+    },
+    {
+      "path": ".rb/init/PLAN.md",
+      "purpose": "Architecture-aware decomposition, dependencies, risks, and validation strategy",
+      "dependsOn": [
+        "rigid-requirements",
+        "decisions-all"
+      ],
+      "parts": [
+        {
+          "id": "plan-architecture",
+          "purpose": "System architecture (Express + Vite SPA), component boundaries, data flow"
+        },
+        {
+          "id": "plan-risks",
+          "purpose": "Risks, mitigations, dependency graph, validation strategy overview"
+        }
+      ]
+    },
+    {
+      "path": ".rb/init/PHASES.md",
+      "purpose": "Ready rb-execution/v1 plan with decomposed tasks for direct LLM execution",
+      "dependsOn": [
+        "plan-architecture",
+        "plan-risks",
+        "rigid-requirements"
+      ],
+      "parts": [
+        {
+          "id": "phase-p01",
+          "purpose": "P01: Project scaffolding and build setup"
+        },
+        {
+          "id": "phase-p02",
+          "purpose": "P02: Core cron logic"
+        },
+        {
+          "id": "phase-p03",
+          "purpose": "P03: Express API server"
+        },
+        {
+          "id": "phase-p04",
+          "purpose": "P04: Frontend UI"
+        },
+        {
+          "id": "phase-p05",
+          "purpose": "P05: Integration and polish"
+        }
+      ]
+    },
+    {
+      "path": ".rb/init/source-manifest.json",
+      "purpose": "Source hashes, answer provenance, and artifact links for the authoring bundle",
+      "dependsOn": [
+        "project-overview",
+        "rigid-requirements",
+        "decisions-all"
+      ],
+      "parts": [
+        {
+          "id": "source-manifest",
+          "purpose": "SHA-256 hashes of input sources, provenance metadata, artifact cross-references"
+        }
+      ]
+    },
+    {
+      "path": ".rb/init/GLOSSARY.md",
+      "purpose": "Domain terms for cron, Linux scheduling, and project-specific vocabulary",
+      "dependsOn": [],
+      "parts": [
+        {
+          "id": "glossary-terms",
+          "purpose": "Cron expression fields, cronstrue, cron-parser, OpenAI API, PT-BR locale terms"
+        }
+      ]
+    },
+    {
+      "path": ".rb/init/WORKFLOWS.md",
+      "purpose": "Actor state flows for parse and generate tabs, success and failure paths",
+      "dependsOn": [
+        "rigid-requirements"
+      ],
+      "parts": [
+        {
+          "id": "workflows-parse",
+          "purpose": "Tab 1 flow: user input to parse to explanation or error"
+        },
+        {
+          "id": "workflows-generate",
+          "purpose": "Tab 2 flow: user prompt to AI call to response parse to display or error"
+        }
+      ]
+    },
+    {
+      "path": ".rb/init/ARCHITECTURE.md",
+      "purpose": "Confirmed architecture for cron5: Express API + Vite SPA, component boundaries",
+      "dependsOn": [
+        "decisions-all"
+      ],
+      "parts": [
+        {
+          "id": "architecture-overview",
+          "purpose": "System diagram, server/client split, build pipeline, runtime topology"
+        }
+      ]
+    },
+    {
+      "path": ".rb/init/NON_FUNCTIONAL.md",
+      "purpose": "Measurable quality constraints: response time, timeout, build size, error handling",
+      "dependsOn": [
+        "rigid-requirements"
+      ],
+      "parts": [
+        {
+          "id": "nfr-constraints",
+          "purpose": "RN-001 through RN-008 measurable thresholds and verification approach"
+        }
+      ]
+    },
+    {
+      "path": ".rb/init/OPERATIONS.json",
+      "purpose": "rb-operational/v1 consumer acceptance scenarios for cron5",
+      "dependsOn": [
+        "architecture-overview",
+        "rigid-requirements"
+      ],
+      "parts": [
+        {
+          "id": "operations-scenarios",
+          "purpose": "CLI version check, API health probe, parse endpoint, AI generate endpoint scenarios"
+        }
+      ]
+    },
+    {
+      "path": ".rb/init/contracts/ai-response.schema.json",
+      "purpose": "Formal JSON schema contract for AI response validation",
+      "dependsOn": [
+        "rigid-requirements"
+      ],
+      "parts": [
+        {
+          "id": "schema-ai-response",
+          "purpose": "OpenAPI-style schema for {cronLine, explanation} response format"
+        }
+      ]
+    },
+    {
+      "path": ".rb/init/contracts/cron-parse.schema.json",
+      "purpose": "Formal contract for cron parse API request/response",
+      "dependsOn": [
+        "rigid-requirements"
+      ],
+      "parts": [
+        {
+          "id": "schema-cron-parse",
+          "purpose": "Request/response schema for POST /api/cron/parse endpoint"
+        }
+      ]
+    },
+    {
+      "path": ".rb/init/contracts/cron-generate.schema.json",
+      "purpose": "Formal contract for cron generate API request/response",
+      "dependsOn": [
+        "rigid-requirements"
+      ],
+      "parts": [
+        {
+          "id": "schema-cron-generate",
+          "purpose": "Request/response schema for POST /api/cron/generate endpoint"
+        }
+      ]
+    }
+  ],
+  "blocked": []
+}
