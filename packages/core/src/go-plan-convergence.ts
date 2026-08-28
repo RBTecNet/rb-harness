@@ -33,13 +33,13 @@ function scopeTokens(value: string): string[] {
     .filter((path): path is string => Boolean(path));
 }
 
-function modulePaths(value: string): string[] {
+export function goModulePaths(value: string): string[] {
   return [...new Set([...value.matchAll(/`([^`]+)`/g)]
     .map((match) => match[1]?.trim() ?? "")
     .filter((token) => GO_MODULE_PATH.test(token)))];
 }
 
-function requiresDirectGoDependency(value: string): boolean {
+export function requiresDirectGoDependency(value: string): boolean {
   if (DIRECT_GO_NEGATION.test(value)) return false;
   return DIRECT_GO_STATUS.test(value) || DIRECT_GO_ACTION.test(value) || DIRECT_GO_MODAL.test(value);
 }
@@ -64,7 +64,7 @@ function taskCitesImport(task: Task, module: string): boolean {
   const text = `${task.change}\n${task.acceptanceCriteria.join("\n")}`;
   return ownsGoSource(task)
     && IMPORT_INTENT.test(text)
-    && modulePaths(text).some((candidate) => importSatisfiesModule(candidate, module));
+    && goModulePaths(text).some((candidate) => importSatisfiesModule(candidate, module));
 }
 
 function importSatisfiesModule(importPath: string, module: string): boolean {
@@ -91,7 +91,7 @@ export function goPlanNeedsImportInventory(document: ExecutionDocument): boolean
     runsGoModTidy(task)
       && ownsGoMod(task)
       && task.acceptanceCriteria.some(requiresDirectGoDependency)
-      && modulePaths(`${task.change}\n${task.acceptanceCriteria.join("\n")}`).length > 0));
+      && goModulePaths(`${task.change}\n${task.acceptanceCriteria.join("\n")}`).length > 0));
 }
 
 /**
@@ -112,10 +112,11 @@ export function validateGoPlanConvergence(
     if (!ownsGoMod(task)) continue;
     const requirements = task.acceptanceCriteria.filter(requiresDirectGoDependency);
     if (!requirements.length) continue;
-    const taskModules = modulePaths(`${task.change}\n${task.acceptanceCriteria.join("\n")}`);
+    const taskModules = goModulePaths(`${task.change}\n${task.acceptanceCriteria.join("\n")}`);
 
     for (const criterion of requirements) {
-      const modules = modulePaths(criterion).length ? modulePaths(criterion) : taskModules;
+      const criterionModules = goModulePaths(criterion);
+      const modules = criterionModules.length ? criterionModules : taskModules;
       if (!modules.length) {
         issues.push(validationIssue(
           GO_MODULE_IDENTITY_MISSING_CODE,

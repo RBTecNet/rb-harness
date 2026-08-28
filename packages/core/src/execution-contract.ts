@@ -5,7 +5,11 @@ import type {
   Task,
   ValidationIssue,
 } from "./types.js";
-import { validateGoPlanConvergence } from "./go-plan-convergence.js";
+import {
+  GO_MODULE_IDENTITY_MISSING_CODE,
+  GO_TIDY_NONCONVERGENCE_CODE,
+  validateGoPlanConvergence,
+} from "./go-plan-convergence.js";
 import {
   BUILT_IN_PROTECTED_PATH_CONSTRAINTS,
   changeExplicitlyModifiesProtectedPath,
@@ -17,6 +21,46 @@ const PHASE_HEADING = /^## Phase ([0-9]+):\s+(.+)$/;
 const TASK_HEADING = /^- \[([ x])\] (T[0-9]{3,}) —\s+(.+)$/;
 const PHASE_FIELD = /^\*\*(Phase ID|Goal|Depends on):\*\*\s*(.*)$/;
 const TASK_FIELD = /^  - \*\*(Scope|Change|Covers|Depends on|Parallel safe|Acceptance criteria|Validation|Expected evidence):\*\*\s*(.*)$/;
+
+/** The complete issue-code surface emitted by the Ralph execution contract. */
+export const RALPH_EXECUTION_ISSUE_CODES = [
+  "document.artifact-id",
+  "document.contract",
+  "document.heading.h2",
+  "document.phases.empty",
+  "document.title",
+  "phase.context.empty",
+  "phase.dependency.invalid",
+  "phase.depends.missing",
+  "phase.goal.missing",
+  "phase.id.invalid",
+  "phase.id.missing",
+  "phase.sequence",
+  "phase.tasks.empty",
+  "task.acceptance.ambiguous",
+  "task.acceptance.empty",
+  "task.acceptance.id",
+  "task.acceptance.visual-negative-control",
+  "task.change.control-plane",
+  "task.dependency.invalid",
+  "task.duplicate",
+  "task.evidence.visual-contract",
+  "task.evidence.visual-state-pair",
+  "task.field.missing",
+  "task.parallel.invalid",
+  "task.scope.ambiguous",
+  "task.scope.control-plane",
+  "task.sequence",
+  "task.validation.ambiguous",
+  "task.validation.empty",
+  "task.validation.format",
+  "task.validation.visual-manual",
+  "task.validation.visual-unproven",
+  GO_MODULE_IDENTITY_MISSING_CODE,
+  GO_TIDY_NONCONVERGENCE_CODE,
+] as const;
+
+export type RalphExecutionIssueCode = typeof RALPH_EXECUTION_ISSUE_CODES[number];
 
 export interface ValidationInstruction {
   kind: "command" | "manual" | "human";
@@ -102,7 +146,7 @@ function impossibleChecker(command: string): string | undefined {
   return undefined;
 }
 
-function ambiguousValidationInstruction(instruction: ValidationInstruction): string | undefined {
+export function ambiguousValidationInstruction(instruction: ValidationInstruction): string | undefined {
   if (instruction.kind === "command") {
     if (/(^|\s)(?:\|\|\s*true|;\s*(?:true|exit\s+0))(?:\s|$)/i.test(instruction.value)) {
       return "must not mask a failing command with a forced successful exit";
@@ -135,7 +179,7 @@ function ambiguousValidationInstruction(instruction: ValidationInstruction): str
   return undefined;
 }
 
-function ambiguousAcceptanceCriterion(value: string): string | undefined {
+export function ambiguousAcceptanceCriterion(value: string): string | undefined {
   const body = value.replace(/^AC-T[0-9]{3,}-[0-9]{2}:\s*/i, "").trim();
   const requirementId = "(?:RF|RNF|UI|CT)-[0-9]+";
   const circularPatterns = [
@@ -188,7 +232,7 @@ const VISUAL_INTERACTION = /\b(?:before|after|press(?:ing|ed)?|click(?:ing|ed)?|
 const BEFORE_EVIDENCE = /\b(?:before|initial|baseline|antes|inicial)\b/i;
 const AFTER_EVIDENCE = /\b(?:after|resulting|final|depois|ap[oó]s|resultante)\b/i;
 
-function isVisualAcceptanceCriterion(value: string): boolean {
+export function isVisualAcceptanceCriterion(value: string): boolean {
   if (META_VISUAL_CONTRACT.test(value)) return false;
   if (META_VISUAL_VALIDATOR.test(value) && !UI_SURFACE.test(value)) return false;
   return STRONG_VISUAL_CRITERION.test(value)
@@ -270,7 +314,7 @@ function validateVisualEvidenceContract(
 
 function issue(
   issues: ValidationIssue[],
-  code: string,
+  code: RalphExecutionIssueCode,
   message: string,
   line?: number,
 ): void {
@@ -304,7 +348,7 @@ export function scopeTokenOwnsPlanningArtifacts(value: string): boolean {
     scopeTokenIntersectsProtectedPath(value, constraint.path));
 }
 
-function changeReferencesPlanningArtifacts(value: string): boolean {
+export function changeReferencesPlanningArtifacts(value: string): boolean {
   if (BUILT_IN_PROTECTED_PATH_CONSTRAINTS.some((constraint) =>
     changeExplicitlyModifiesProtectedPath(value, constraint.path))) return true;
   // Scope is the primary write-authority boundary. Change adds a second guard
@@ -618,6 +662,15 @@ export function validateExecutionMarkdown(source: string): ExecutionValidation {
   if (document) issues.push(...validateGoPlanConvergence(document));
 
   return { valid: issues.length === 0, issues, ...(document ? { document } : {}) };
+}
+
+/** Parse an execution document through the same Ralph grammar and fail on any contract issue. */
+export function parseExecutionMarkdown(source: string): ExecutionDocument {
+  const validation = validateExecutionMarkdown(source);
+  if (!validation.valid || !validation.document) {
+    throw new Error(`Execution document is invalid: ${validation.issues.map((entry) => `${entry.code}: ${entry.message}`).join("; ")}`);
+  }
+  return validation.document;
 }
 
 export function extractExecutionPhaseMarkdown(source: string, phaseId: string): string {
