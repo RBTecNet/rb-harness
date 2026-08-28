@@ -13,44 +13,9 @@
 
 import { HARNESS_BUDGET, interviewQuestionBudget } from "./harness-budget.js";
 import type { HarnessWorkflow } from "./standalone-types.js";
+import { renderWorkflowArtifactAuthority } from "./workflow-definition.js";
 
 export const HARNESS_CONTRACT_DIGEST_VERSION = "rb-harness-contract-digest/v1" as const;
-
-const WORKFLOW_OUTPUTS: Readonly<Record<HarnessWorkflow, readonly string[]>> = {
-  init: [
-    ".rb/init/PROJECT.md — intent, capabilities, constraints, and knowledge classification",
-    ".rb/init/PHASES.md — rb-execution/v1 initial plan (required, status ready)",
-    ".rb/init/OPERATIONS.json — rb-operational/v1 consumer acceptance (when the product form allows one)",
-  ],
-  "ai-context": [
-    ".rb/context/AGENTS.md — compact index of the AS IS context set",
-    ".rb/context/ARCHITECTURE.md — implemented structure, boundaries, and data flow",
-    ".rb/context/DOMAIN.md — vocabulary and rules proven by code or tests",
-    ".rb/context/OPERATIONS.md — build, test, run, and release commands proven in the repository",
-    "Additional .rb/context/*.md only when the evidence requires a separate concern",
-  ],
-  plan: [
-    ".rb/features/<slug>/REQUEST.md — the normalized developer request",
-    ".rb/features/<slug>/SPEC.md — RIGID/FLEXIBLE requirements with binary criteria",
-    ".rb/features/<slug>/PLAN.md — architecture-aware decomposition and risks",
-    ".rb/features/<slug>/PHASES.md — rb-execution/v1 plan (required, status ready)",
-    ".rb/features/<slug>/OPERATIONS.json — rb-operational/v1 acceptance when the change is consumer-observable",
-  ],
-  evolve: [
-    ".rb/evolutions/<slug>/AS_IS.md — proven current behavior with cited paths",
-    ".rb/evolutions/<slug>/TO_BE.md — the delta and its observable outcome",
-    ".rb/evolutions/<slug>/IMPACT.md — readers, writers, reactors, and preservation boundaries",
-    ".rb/evolutions/<slug>/REGRESSION_MATRIX.md — preserved behavior and its proofs",
-    ".rb/evolutions/<slug>/PHASES.md — rb-execution/v1 plan (required, status ready)",
-    ".rb/evolutions/<slug>/OPERATIONS.json — rb-operational/v1 acceptance when the change is consumer-observable",
-  ],
-  review: [
-    ".rb/reviews/<review-id>/FINDINGS.md — evidence-grounded findings with stable IDs (required, status ready)",
-    ".rb/reviews/<review-id>/BASELINE.json — coverage and limits of this audit",
-    ".rb/reviews/<review-id>/DESIGN_SYSTEM.md and RESPONSIVE_INVENTORY.json — only for UI audits with real evidence",
-    ".rb/reviews/<review-id>/PHASES.md — only when remediation was explicitly requested",
-  ],
-};
 
 const OPERATIONAL_WORKFLOWS = new Set<HarnessWorkflow>(["init", "plan", "evolve"]);
 
@@ -203,13 +168,20 @@ Mark \`status: "complete"\` only when the required ready output for this workflo
 
 If a material contradiction still prevents safe readiness, return \`status: "blocked"\` with the missing decision in \`blocked\`. Do not publish a plan that claims readiness it does not have.`;
 
+const AUTHORITATIVE_CONSTRAINTS = `## Deterministic authority
+
+- Accepted do-not-modify/preserve paths may not appear in task Scope or a modifying Change.
+- Path marker: \`<!-- rb-authority: protected-path; id=PRESERVE-001; path=project/relative/path -->\`.
+- Evolve TO_BE/PRESERVATION obligations use stable \`CHANGE-NNN\`/\`PRESERVE-NNN\` IDs; each must appear in task \`Covers\`. Coverage never permits ownership of a protected path.
+- Enforcement uses explicit paths and stable IDs only; no semantic reviewer exists.`;
+
 /** Compact contract handed to the plan and bounded authoring calls. */
 export function generationContractDigest(workflow: HarnessWorkflow): string {
-  const outputs = WORKFLOW_OUTPUTS[workflow];
   const sections = [
     `# ${HARNESS_CONTRACT_DIGEST_VERSION} · workflow ${workflow}`,
-    `## Required output set\n\n${outputs.map((entry) => `- ${entry}`).join("\n")}`,
+    renderWorkflowArtifactAuthority(workflow),
     CODE_OWNED,
+    AUTHORITATIVE_CONSTRAINTS,
     CONVENTIONS,
     EXECUTION_GRAMMAR,
     ...(workflowSupportsOperations(workflow) ? [OPERATIONAL_GRAMMAR] : []),

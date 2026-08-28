@@ -2,11 +2,29 @@ import { copyFile, lstat, mkdir, readdir, readFile, rename, rm, chmod } from "no
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { assessDecomposition } from "./harness-granularity.js";
 import { validateArtifactConsistency } from "./artifact-consistency.js";
-import { initializeProject, loadManifest, slugify, syncManifest, validateManifestTree } from "./manifest.js";
+import { initializeProject, slugify, syncManifest, validateManifestTree } from "./manifest.js";
 import type { StructuralError } from "./harness-generator.js";
 import type { HarnessRunState, HarnessWorkflow } from "./standalone-types.js";
 import type { ArtifactManifest, ValidationIssue } from "./types.js";
 import { validateExecutionMarkdown } from "./execution-contract.js";
+import {
+  applicableWorkflowArtifacts,
+  readyWorkflowArtifact,
+  requiredWorkflowArtifactPaths,
+  workflowScopeFromPaths,
+} from "./workflow-definition.js";
+import {
+  BUILT_IN_PROTECTED_PATH_CONSTRAINTS,
+  artifactAuthoritySources,
+  authorityConstraintsFromState,
+  deduplicateProtectedPaths,
+  deduplicateTraceability,
+  protectedPathConstraintsFromArtifact,
+  traceabilityConstraintsFromArtifact,
+  traceabilityConstraintsFromState,
+  validateAuthorityConstraints,
+  validateTraceabilityConstraints,
+} from "./authority-constraints.js";
 
 /**
  * Errors a localized repair cannot fix. They indicate a compromised staging
@@ -92,14 +110,6 @@ export async function prepareStagingTree(state: HarnessRunState, runRoot: string
   return staging;
 }
 
-function workflowArtifactReady(workflow: HarnessWorkflow, artifacts: Awaited<ReturnType<typeof loadManifest>>["artifacts"]): boolean {
-  if (["init", "plan", "evolve"].includes(workflow)) {
-    return artifacts.some((artifact) => artifact.kind === "execution-plan" && artifact.status === "ready" && artifact.contract === "rb-execution/v1");
-  }
-  if (workflow === "ai-context") return artifacts.some((artifact) => artifact.kind === "context-document" && artifact.status === "ready");
-  return artifacts.some((artifact) => artifact.kind === "review-findings" && artifact.status === "ready");
-}
-
 function structuralError(issue: ValidationIssue): StructuralError {
   return {
     code: issue.code,
@@ -107,6 +117,7 @@ function structuralError(issue: ValidationIssue): StructuralError {
     // Keep their public message byte-identical to artifacts verify/headless.
     message: issue.line && !issue.code.startsWith("execution.go-") ? `${issue.message} (line ${issue.line})` : issue.message,
     ...(issue.path ? { path: issue.path } : {}),
+    ...(issue.line ? { line: issue.line } : {}),
   };
 }
 
@@ -137,12 +148,57 @@ async function decompositionErrors(staging: string, manifest: ArtifactManifest):
   return errors;
 }
 
+async function authorityErrors(
+  staging: string,
+  manifest: ArtifactManifest,
+  state?: HarnessRunState,
+): Promise<StructuralError[]> {
+  const constraints = [
+    ...BUILT_IN_PROTECTED_PATH_CONSTRAINTS,
+    ...(state ? authorityConstraintsFromState(state) : []),
+  ];
+  const traceability = state ? traceabilityConstraintsFromState(state) : [];
+  for (const artifact of artifactAuthoritySources(manifest.artifacts)) {
+    try {
+      const content = await readFile(resolve(staging, artifact.path), "utf8");
+      constraints.push(...protectedPathConstraintsFromArtifact(
+        artifact.path,
+        content,
+      ));
+      traceability.push(...traceabilityConstraintsFromArtifact(artifact.path, content));
+    } catch { /* manifest/tree validation reports unreadable artifacts */ }
+  }
+  const canonical = deduplicateProtectedPaths(constraints);
+  const errors: StructuralError[] = [];
+  for (const artifact of manifest.artifacts.filter((entry) => entry.kind === "execution-plan")) {
+    try {
+      const parsed = validateExecutionMarkdown(await readFile(resolve(staging, artifact.path), "utf8"));
+      if (parsed.document) {
+        errors.push(...validateAuthorityConstraints(parsed.document, canonical, artifact.path).map(structuralError));
+        errors.push(...validateTraceabilityConstraints(
+          parsed.document,
+          deduplicateTraceability(traceability),
+          artifact.path,
+        ).map(structuralError));
+      }
+    } catch { /* manifest/tree validation reports unreadable artifacts */ }
+  }
+  return errors;
+}
+
 export interface StagedValidation {
   valid: boolean;
   repairable: boolean;
   errors: StructuralError[];
   artifacts: number;
   readyPlans: number;
+}
+
+export interface StagedValidationScope {
+  /** Exact logical paths authored by this run's current document bundle. */
+  currentArtifactPaths?: readonly string[];
+  /** Run authority used by deterministic constraint checks. */
+  authority?: HarnessRunState;
 }
 
 /**
@@ -155,21 +211,37 @@ export async function validateStagedTree(
   staging: string,
   workflow: HarnessWorkflow,
   projectRoot = staging,
+  runScope: StagedValidationScope = {},
 ): Promise<StagedValidation> {
   await assertNoEnvironmentSecrets(staging);
   const manifest = await syncManifest(staging);
-  const validation = await validateManifestTree(staging);
+  const authoredPaths = runScope.currentArtifactPaths?.map((path) => path.replaceAll("\\", "/"));
+  const scope = workflowScopeFromPaths(workflow, authoredPaths ?? manifest.artifacts.map((artifact) => artifact.path));
+  const applicableArtifacts = scope ? applicableWorkflowArtifacts(workflow, scope, manifest.artifacts) : [];
+  const applicablePaths = new Set(applicableArtifacts.map((artifact) => artifact.path));
+  const validation = await validateManifestTree(staging, { applicablePaths });
   const errors = validation.issues.map(structuralError);
+  if (!scope) {
+    errors.push({
+      code: "workflow.scope.invalid",
+      message: `The current ${workflow} bundle does not identify exactly one canonical workflow root.`,
+    });
+  }
   if (validation.valid) {
     errors.push(...(await validateArtifactConsistency({
       projectRoot,
       artifactRoot: resolve(staging, ".rb"),
-      manifest,
+      manifest: { ...manifest, artifacts: applicableArtifacts },
     })).map(structuralError));
   }
-  errors.push(...await decompositionErrors(staging, manifest));
-  if (validation.valid && !workflowArtifactReady(workflow, manifest.artifacts)) {
-    const declaredBlockers = manifest.artifacts
+  errors.push(...await decompositionErrors(staging, { ...manifest, artifacts: applicableArtifacts }));
+  errors.push(...await authorityErrors(staging, { ...manifest, artifacts: applicableArtifacts }, runScope.authority));
+  const requiredPaths = scope ? requiredWorkflowArtifactPaths(workflow, scope) : [];
+  const producedPaths = new Set(authoredPaths ?? applicableArtifacts.map((artifact) => artifact.path));
+  const readyArtifact = scope ? readyWorkflowArtifact(workflow, scope, applicableArtifacts) : undefined;
+  const readyProduced = Boolean(readyArtifact && producedPaths.has(readyArtifact.path));
+  if (validation.valid && !readyProduced) {
+    const declaredBlockers = applicableArtifacts
       .filter((artifact) => artifact.status === "blocked" || basename(artifact.path).toUpperCase() === "BLOCKED.MD")
       .map((artifact) => artifact.path);
     errors.push({
@@ -180,12 +252,20 @@ export async function validateStagedTree(
         : `The generated artifacts do not contain the required ready output for workflow ${workflow}.`,
     });
   }
+  for (const path of requiredPaths.filter((path) => !producedPaths.has(path))) {
+    errors.push({
+      code: "workflow.artifact.required-missing",
+      path,
+      message: `The current ${workflow} run did not produce mandatory artifact ${path}; a historical artifact cannot satisfy current-run completeness.`,
+    });
+  }
   return {
     valid: errors.length === 0,
     repairable: errors.length > 0 && errors.every((error) => !UNREPAIRABLE_CODES.has(error.code)),
     errors,
     artifacts: manifest.artifacts.length,
-    readyPlans: manifest.artifacts.filter((artifact) => artifact.kind === "execution-plan" && artifact.status === "ready").length,
+    readyPlans: applicableArtifacts.filter((artifact) =>
+      artifact.kind === "execution-plan" && artifact.status === "ready" && producedPaths.has(artifact.path)).length,
   };
 }
 

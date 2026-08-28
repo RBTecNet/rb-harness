@@ -9,11 +9,11 @@ Change established behavior without erasing implicit contracts. Treat current
 code and tests as evidence, generated context as navigation, and accepted user
 answers as intent.
 
-## Required references
+## Artifact authority
 
-Read this file completely before producing artifacts:
-
-- [Evolution artifact shapes](artifact-shapes.md)
+The orchestrator injects the canonical machine-owned artifact definition into
+the generation prompt. That definition owns required names, paths, readiness,
+and code/model ownership.
 
 ## How your output is delivered
 
@@ -65,14 +65,14 @@ isolated from existing behavior.
 8. Run the pre-write ambiguity audit and confirm one normalized checkpoint that
    separates accepted delta, preservation rules, assumptions, deferrals, and
    conflicts.
-9. Return the artifacts from `artifact-shapes.md`. Every TO BE RIGID requirement
+9. Return the artifacts from the injected canonical artifact authority. Every TO BE RIGID requirement
    traces to an impact, preservation/regression entry, and plan task. Emit formal
    contracts only when the public boundary requires them.
-10. Derive `PLAN.md` and a 1:1 `PHASES.md`. Tasks are small enough for a fresh,
+10. Derive the authority's decomposition and executable readiness artifacts 1:1. Tasks are small enough for a fresh,
     context-free executor call, dependency-aware,
     name the AS IS/TO BE delta, preserve legitimate behavior, and own focused
     binary validation. The decomposition ceilings in the contract digest are
-    validated mechanically, so respect them while writing. Derive `OPERATIONS.json` when an honest consumer-level
+    validated mechanically, so respect them while writing. Derive the authority's conditional operational artifact when an honest consumer-level
     scenario can validate the evolution and its key preserved path. Harness
     generation owns its structure; `.rb` and descendants never belong in task
     Scope/Change. Only the post-phase RBF audit owns the clean-room pass. Audit exact standard/dialect matrices, independent hostile

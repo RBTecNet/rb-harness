@@ -9,11 +9,11 @@ Audit implemented product reality without repairing it. A finding is useful only
 when another engineer can locate, reproduce or inspect, prioritize, and validate
 it without guessing.
 
-## Required references
+## Artifact authority
 
-Read this file completely before producing artifacts:
-
-- [Review artifact shapes](artifact-shapes.md)
+The orchestrator injects the canonical machine-owned artifact definition into
+the generation prompt. That definition owns required names, paths, readiness,
+and code/model ownership.
 
 ## How your output is delivered
 
@@ -36,8 +36,8 @@ is supplied in the prompt as `rb-harness-contract-digest/v1`.
   remediation plan.
 - Remediation mode applies only when the developer selects stable finding IDs
   or supplies the explicit `--plan-all-confirmed` selection policy in the same
-  review request. It plans the resolved findings into `PLAN.md`, `PHASES.md`,
-  and conditional `OPERATIONS.json`; it never edits application code.
+  review request. It plans the resolved findings into the conditional
+  remediation artifacts declared by the injected authority; it never edits application code.
 
 `--plan-all-confirmed` means every and only finding classified `CONFIRMED` after
 the audit artifacts and stable IDs are finalized. It never promotes or selects
@@ -94,7 +94,7 @@ depth, not cross-boundary evidence needed to understand a critical journey.
 9. Apply the shared ambiguity audit. Deduplicate by root cause, preserve
    independent impact paths, and compare with the baseline as new, changed,
    regressed, unchanged, or resolved.
-10. Plan and incrementally author the conditional artifacts from `artifact-shapes.md`. The orchestrator runs every deterministic validator after assembly; produce document parts that assemble into compliant artifacts, and never claim to have run a command. They
+10. Plan and incrementally author the conditional artifacts from the injected canonical artifact authority. The orchestrator runs every deterministic validator after assembly; produce document parts that assemble into compliant artifacts, and never claim to have run a command. They
     cover `rb-responsive-inventory/v1`, the manifest, and the whole tree. For UI
     targets, do not return findings until every high-risk responsive candidate
     has an individual structured disposition and file/candidate totals
@@ -114,7 +114,7 @@ depth, not cross-boundary evidence needed to understand a critical journey.
    the frozen audit. Revalidate resolved evidence against the current tree.
    Resolved, stale, contradicted, or unselected findings are not planned. If an
    automatic policy resolves to zero IDs, report that result and stop without
-   creating `SELECTION.md`, `PLAN.md`, `PHASES.md`, or `OPERATIONS.json`.
+   creating any conditional remediation artifact.
 2. Group by dependency and shared root cause, not merely severity. Keep each task
    bounded enough for a fresh, context-free executor call; the decomposition
    ceilings in the contract digest are validated mechanically.

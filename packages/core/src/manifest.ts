@@ -324,7 +324,7 @@ function addIssue(
 
 export async function validateManifestTree(
   root: string,
-  options: { artifactDirectory?: string } = {},
+  options: { artifactDirectory?: string; applicablePaths?: ReadonlySet<string> } = {},
 ): Promise<ManifestValidation> {
   const issues: ValidationIssue[] = [];
   const artifactDirectory = options.artifactDirectory ?? ".rb";
@@ -388,7 +388,8 @@ export async function validateManifestTree(
       if (actualHash !== artifact.sha256) {
         addIssue(issues, "artifact.stale", "Artifact hash differs from manifest", artifact.path);
       }
-      if (artifact.kind === "execution-plan") {
+      const validateArtifactContract = !options.applicablePaths || options.applicablePaths.has(artifact.path);
+      if (validateArtifactContract && artifact.kind === "execution-plan") {
         const result = validateExecutionMarkdown(await readFile(absolute, "utf8"));
         const metadata = await executionMetadata(absolute);
         for (const contractIssue of result.issues) {
@@ -408,7 +409,7 @@ export async function validateManifestTree(
         if (artifact.id !== result.document?.artifactId) {
           addIssue(issues, "artifact.id.mismatch", "Manifest ID differs from rb-artifact-id", artifact.path);
         }
-      } else if (artifact.kind === "operational-verification") {
+      } else if (validateArtifactContract && artifact.kind === "operational-verification") {
         const operational = validateOperationalJson(await readFile(absolute, "utf8"));
         const metadata = { status: operational.valid ? "ready" as const : "invalid" as const, contract: "rb-operational/v1" };
         for (const operationalIssue of operational.issues) issues.push({ ...operationalIssue, path: artifact.path });
@@ -418,7 +419,7 @@ export async function validateManifestTree(
         if (artifact.contract !== "rb-operational/v1") {
           addIssue(issues, "artifact.contract", "Operational verification contract must be rb-operational/v1", artifact.path);
         }
-      } else if (artifact.kind === "responsive-inventory") {
+      } else if (validateArtifactContract && artifact.kind === "responsive-inventory") {
         const responsive = validateResponsiveInventoryJson(await readFile(absolute, "utf8"));
         const metadata = {
           status: responsive.valid ? "ready" as const : "invalid" as const,
@@ -465,6 +466,7 @@ export async function validateManifestTree(
   const responsiveContract = "rb-responsive-inventory/v1";
   const reviewDirectories = new Set(
     manifest.artifacts
+      .filter((entry) => !options.applicablePaths || options.applicablePaths.has(entry.path))
       .map((entry) => entry.path.match(/^(\.rb\/reviews\/[^/]+)\//)?.[1])
       .filter((entry): entry is string => Boolean(entry)),
   );

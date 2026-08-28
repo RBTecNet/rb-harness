@@ -1,40 +1,9 @@
-# Plan Artifact Shapes
+# Plan Artifact Shapes — Compatibility Notice
 
-## Request-specific clarification
+This legacy resource no longer defines artifact names, paths, requiredness, or
+ownership. The orchestrator injects the code-owned canonical workflow authority
+rendered from `WORKFLOW_DEFINITIONS`; that injected section is the sole runtime
+contract for plan outputs.
 
-- Feature: actor, trigger, result, boundaries, failure states, permissions,
-  compatibility.
-- Bug: observed vs expected, reproduction evidence, environment, impact,
-  regression boundaries.
-- Refactor: motivation, invariant behavior, permitted scope, compatibility.
-- Migration: source/target, coexistence, data strategy, rollout, rollback.
-- Performance: workload, baseline, measurement method, target, regressions.
-- Contract: consumers, compatibility window, errors, versioning, rollout.
-
-## Artifacts
-
-Under `.rb/features/<slug>/` create:
-
-- `REQUEST.md`: normalized source, type, objective, current/expected behavior,
-  scope, non-goals, answers, assumptions, readiness.
-- `SPEC.md`: RIGID/FLEXIBLE separation, verified literals, requirements,
-  contracts, edge cases, binary acceptance summary.
-- `PLAN.md`: AS IS/TO BE affected slice, atomic tasks, dependencies, conflict
-  surfaces, risks, rollout, rollback, open questions, assumptions.
-- `PHASES.md`: exact 1:1 execution view using `rb-execution/v1`.
-- `OPERATIONS.json`: `rb-operational/v1` consumer-level acceptance when it can
-  be grounded in observed commands or confirmed TO BE decisions. It is not a
-  phase and must remain usable by direct execution without RB Ralph.
-- `contracts/`: OpenAPI/AsyncAPI/proto/schema only when RIGID requires it.
-- `source-manifest.json`: source paths and hashes, architecture/context refs,
-  generated artifact IDs, and for each request response its raw text,
-  normalized decision, answer disposition, affected topics, and remaining
-  uncertainty.
-
-Every RIGID requirement maps to at least one task. Every task maps to one or
-more requirements, declares affected scope, and owns a focused validation.
-Tasks touching the same files or tight shared interface are not parallel-safe.
-The same applies to overlapping directories, migrations, generated artifacts,
-shared state, or validation surfaces. A parallel-safe task has no dependency on
-another pending task and remains correct from the same snapshot in any
-integration order.
+Keep this file only so existing packaged-resource paths remain readable. Do not
+derive output requirements from older copies of this resource.

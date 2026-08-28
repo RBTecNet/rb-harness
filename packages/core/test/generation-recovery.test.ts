@@ -23,6 +23,7 @@ import { buildInputPackage } from "../src/harness-input-package.js";
 import { inspectProjectInventory } from "../src/harness-inventory.js";
 import type { DocumentBundle } from "../src/harness-documents.js";
 import type { HarnessRunState, HarnessWorkflow } from "../src/standalone-types.js";
+import { WORKFLOW_DEFINITIONS, workflowArtifactPath } from "../src/workflow-definition.js";
 
 const WORKFLOWS: HarnessWorkflow[] = ["init", "ai-context", "plan", "evolve", "review"];
 
@@ -41,15 +42,11 @@ describe("the output contract cannot promise a path the parser rejects", () => {
       const digest = generationContractDigest(workflow);
       expect(digest, workflow).toContain("Write only under `.rb/`");
       expect(digest, workflow).not.toMatch(/root\s+`?AGENTS\.md`?/i);
-      // Every path the digest declares as a required output must survive the
-      // parser. Paths it names as orchestrator-owned are quoted to forbid them
-      // and are deliberately excluded here.
-      const outputs = digest.slice(
-        digest.indexOf("## Required output set"),
-        digest.indexOf("## Owned by the orchestrator"),
-      );
-      expect(outputs.length, workflow).toBeGreaterThan(0);
-      const declared = [...outputs.matchAll(/^- (\S+\.(?:md|json))/gm)].map(([, path]) => path!);
+      // Compose every model-authored location from the same root/name records
+      // that render the digest; code-owned paths are deliberately absent.
+      const definition = WORKFLOW_DEFINITIONS[workflow];
+      const declared = definition.artifacts.map((artifact) =>
+        workflowArtifactPath(definition.root, artifact.name));
       expect(declared.length, workflow).toBeGreaterThan(0);
       for (const path of declared) {
         if (path.includes("<")) continue;
@@ -134,7 +131,22 @@ describe("a repair cannot silently truncate the document it replaces", () => {
 
   it("accepts a full document whose corrected span changed", () => {
     const repaired = PLAN.replace("Implement it.", "Implement it without unrelated changes.");
-    expect(() => assertRepairPreservedDocument(PLAN, repaired, ".rb/init/PHASES.md")).not.toThrow();
+    expect(() => assertRepairPreservedDocument(PLAN, repaired, ".rb/init/PHASES.md", [{
+      code: "task.change.vague",
+      message: "T001 Change is not bounded",
+      path: ".rb/init/PHASES.md",
+    }])).not.toThrow();
+  });
+
+  it("rejects unrelated semantic drift outside the authorized structural field", () => {
+    const repaired = PLAN
+      .replace("Implement it.", "Implement it without unrelated changes.")
+      .replace("Expose the documented behavior.", "Silently redefine the product behavior.");
+    expect(() => assertRepairPreservedDocument(PLAN, repaired, ".rb/init/PHASES.md", [{
+      code: "task.change.vague",
+      message: "T001 Change is not bounded",
+      path: ".rb/init/PHASES.md",
+    }])).toThrow(/changed unrelated semantic content/);
   });
 
   it("rejects a repair that swapped the artifact identity", () => {

@@ -8,11 +8,11 @@ description: Plan a feature, bug fix, refactor, migration, performance change, c
 Turn a scoped change into evidence-grounded, provider-neutral documentation.
 Do not implement the change.
 
-## Required references
+## Artifact authority
 
-Read this file completely before producing artifacts:
-
-- [Plan artifact shapes](artifact-shapes.md)
+The orchestrator injects the canonical machine-owned artifact definition into
+the generation prompt. That definition owns required names, paths, readiness,
+and code/model ownership.
 
 ## How your output is delivered
 
@@ -44,8 +44,8 @@ is supplied in the prompt as `rb-harness-contract-digest/v1`.
 5. Run an internal adversarial clarification pass before involving the user:
    verify technical literals, compare request with architecture/domain rules,
    find contradictions, merge duplicate questions, and rank by rework risk.
-6. Interview using the shared policy and the request-specific prompts in
-   `artifact-shapes.md`. Apply the answer acceptance gate and re-ask material
+6. Interview using the shared policy and request-specific evidence. Apply the
+   answer acceptance gate and re-ask material
    partial or ambiguous responses narrowly. Only low-risk unknowns may become
    explicit assumptions; blocking decisions yield `BLOCKED` rather than
    invented requirements.
@@ -56,10 +56,10 @@ is supplied in the prompt as `rb-harness-contract-digest/v1`.
 7. Run the pre-write ambiguity audit, then confirm 1 concise normalized request
    checkpoint that separates accepted decisions, assumptions, deferrals, and
    unresolved conflicts.
-8. Return `.rb/features/<slug>/REQUEST.md`, `SPEC.md`, `PLAN.md`, conditional
-   formal contracts, source manifest, and `PHASES.md`. Also return
-   `OPERATIONS.json` using `rb-operational/v1` when an honest executable
-   consumer scenario can be grounded. The scenario must validate the actual
+8. Return exactly the required and applicable conditional artifacts declared by
+   the injected canonical authority. Include its operational artifact using
+   `rb-operational/v1` only when an honest executable consumer scenario can be
+   grounded. The scenario must validate the actual
    product form and claimed platforms (desktop, CLI, library, service, web, or
    otherwise), not a presumed HTTP boundary. Reuse verified project-level
    operations only when their exact contract and configuration mode still
@@ -79,7 +79,7 @@ is supplied in the prompt as `rb-harness-contract-digest/v1`.
    presence, or a generic test command cannot prove visibility. Carry a
    negative visual corruption criterion and before/after evidence for changed
    visible state.
-10. Derive phases from a dependency DAG. Decompose every capability down to
+10. Derive the authority's readiness artifact from a dependency DAG. Decompose every capability down to
     tasks a fresh, context-free executor can finish in one call: name the single
     behavior each task makes observable, order them with `Depends on`, and never
     write a task that implements a whole feature. The decomposition ceilings in

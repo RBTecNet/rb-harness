@@ -102,6 +102,7 @@ const phases = `# RB Execution Plan: Adaptive fixture
 **Context:**
 - \`.rb/features/adaptive-fixture/REQUEST.md\`
 - \`.rb/features/adaptive-fixture/SPEC.md\`
+- \`.rb/features/adaptive-fixture/PLAN.md\`
 
 - [ ] T001 — Persist the archived-record selection
   - **Scope:** \`src/export/selection.ts\`, \`tests/export/selection.test.ts\`
@@ -141,6 +142,10 @@ const bundle = {
       path: ".rb/features/adaptive-fixture/SPEC.md",
       content: "# Specification\n\n## RF-001\n\nThe export selects archived records inside the retention window.\n\n"
         + "## RF-002\n\nThe export exposes one observable command.\n",
+    },
+    {
+      path: ".rb/features/adaptive-fixture/PLAN.md",
+      content: "# Plan\n\nSelect retained archived records, then expose the bounded export command.\n",
     },
     { path: ".rb/features/adaptive-fixture/PHASES.md", content: phases },
   ],

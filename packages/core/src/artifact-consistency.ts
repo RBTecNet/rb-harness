@@ -3,6 +3,7 @@ import { dirname, resolve, sep } from "node:path";
 import { taskScopeTokens, validateExecutionMarkdown } from "./execution-contract.js";
 import { goPlanNeedsImportInventory, inspectExistingGoImports, validateGoPlanConvergence } from "./go-plan-convergence.js";
 import { validateOperationalJson } from "./operational-contract.js";
+import { scopeTokenCoversPath } from "./path-ownership.js";
 import type { ArtifactManifest, ArtifactRecord, ExecutionDocument, ValidationIssue } from "./types.js";
 
 interface ConsistencyOptions {
@@ -45,29 +46,8 @@ function safeProjectRelativePath(value: string): boolean {
     && !value.split("/").includes("..");
 }
 
-function globExpression(value: string): RegExp {
-  let source = "^";
-  for (let index = 0; index < value.length; index += 1) {
-    const character = value[index]!;
-    if (character === "*") {
-      if (value[index + 1] === "*") {
-        source += ".*";
-        index += 1;
-      } else source += "[^/]*";
-    } else if (character === "?") source += "[^/]";
-    else source += character.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
-  }
-  return new RegExp(`${source}$`);
-}
-
 /** Whether one declared Scope token owns a concrete project-relative path. */
-export function scopeTokenCoversPath(rawToken: string, rawPath: string): boolean {
-  const token = normalizeLogicalPath(rawToken);
-  const path = normalizeLogicalPath(rawPath);
-  if (!token || !path) return false;
-  if (/[*?]/.test(token)) return globExpression(token).test(path);
-  return path === token || path.startsWith(`${token}/`);
-}
+export { scopeTokenCoversPath } from "./path-ownership.js";
 
 function physicalArtifactPath(artifactRoot: string, logicalPath: string): string {
   if (!logicalPath.startsWith(".rb/")) throw new Error(`unsafe logical artifact path: ${logicalPath}`);

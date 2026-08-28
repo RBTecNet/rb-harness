@@ -9,11 +9,11 @@ Document implemented reality with evidence and calibrated confidence. Never use
 `.rb/init`, `.rb/features`, `.spec`, or old generated context as proof of current
 behavior.
 
-## Required references
+## Artifact authority
 
-Read this file completely before producing artifacts:
-
-- [Context artifact shapes](artifact-shapes.md)
+The orchestrator injects the canonical machine-owned artifact definition into
+the generation prompt. That definition owns required names, paths, readiness,
+and code/model ownership.
 
 ## How your output is delivered
 
@@ -57,11 +57,11 @@ is supplied in the prompt as `rb-harness-contract-digest/v1`.
    Apply the answer acceptance gate; a vague or
    partial response is not `CONFIRMED`. Re-ask material ambiguity narrowly or
    retain it as `UNKNOWN`/`CONFLICT`.
-8. Return `.rb/context/AGENTS.md` as a compact portable index and the conditional context documents
-   from `artifact-shapes.md`. A subject with no evidence is omitted or marked
+8. Return the compact portable index and conditional context documents declared
+   by the injected canonical artifact authority. A subject with no evidence is omitted or marked
    evidence-based N/A; never fabricate it. When the repository proves a real
-   consumer setup/start/use workflow, encode it as `.rb/context/OPERATIONS.json`
-   using `rb-operational/v1`. Cover the implemented product form and claimed
+   consumer setup/start/use workflow, encode it in the authority's conditional
+   operational artifact using `rb-operational/v1`. Cover the implemented product form and claimed
    platforms without assuming web. Omit the contract and record the evidence
    gap when commands or observables cannot be grounded.
 9. Before returning, run the shared pre-write ambiguity audit. A writer receives

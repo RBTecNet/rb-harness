@@ -359,7 +359,10 @@ async function materializeAndValidate(
   telemetry?.beginStage("validation");
   state.status = "validating";
   await writeRunState(state);
-  return validateStagedTree(staging, state.workflow, state.projectRoot);
+  return validateStagedTree(staging, state.workflow, state.projectRoot, {
+    currentArtifactPaths: bundle.documents.map((document) => document.path),
+    authority: state,
+  });
 }
 
 async function generate(
@@ -475,6 +478,7 @@ async function generate(
       projectRoot: state.projectRoot,
       artifactDirectory: state.artifactDirectory,
       authorityRunId: state.id,
+      currentArtifactPaths: bundle.documents.map((document) => document.path),
     });
     state.verificationReport = verification.reportPath;
     if (verification.readyForRalph) {

@@ -21,6 +21,24 @@ import { loadManifest, validateManifestTree } from "./manifest.js";
 import type { HarnessRunState, HarnessWorkflow, ProviderConfiguration } from "./standalone-types.js";
 import type { ArtifactManifest, ArtifactRecord, ExecutionDocument, ValidationIssue } from "./types.js";
 import { validateExecutionMarkdown } from "./execution-contract.js";
+import {
+  applicableWorkflowArtifacts,
+  readyWorkflowArtifact,
+  requiredWorkflowArtifactPaths,
+  workflowScopeFromPaths,
+} from "./workflow-definition.js";
+import {
+  BUILT_IN_PROTECTED_PATH_CONSTRAINTS,
+  artifactAuthoritySources,
+  authorityConstraintsFromState,
+  deduplicateProtectedPaths,
+  deduplicateTraceability,
+  protectedPathConstraintsFromArtifact,
+  traceabilityConstraintsFromArtifact,
+  traceabilityConstraintsFromState,
+  validateAuthorityConstraints,
+  validateTraceabilityConstraints,
+} from "./authority-constraints.js";
 
 export type ArtifactVerificationSeverity = "blocker" | "major" | "minor";
 export type ArtifactVerificationStatus = "pass" | "warning" | "fail" | "blocked";
@@ -69,6 +87,8 @@ export interface VerifyArtifactsOptions {
   artifactDirectory: string;
   againstFile?: string;
   authorityRunId?: string;
+  /** Exact logical artifacts emitted by the current run; omitted for legacy tree-wide CLI verification. */
+  currentArtifactPaths?: readonly string[];
   /** Recorded for provenance only; verification never starts a provider. */
   provider?: ProviderConfiguration;
   reportPath?: string;
@@ -135,7 +155,7 @@ async function readArtifact(
 /** Requirement IDs declared as headings or list anchors in a specification. */
 export function declaredRequirementIds(source: string): string[] {
   const ids = new Set<string>();
-  for (const match of source.matchAll(/^(?:#{1,6}\s+|[-*]\s+(?:\*\*)?)((?:RF|RNF|UI|CT)-\d+)\b/gm)) {
+  for (const match of source.matchAll(/^(?:#{1,6}\s+|[-*]\s+(?:\*\*)?|\s*\|\s*)((?:RF|RNF|UI|CT|CHANGE|PRESERVE)-\d+)\b/gm)) {
     if (match[1]) ids.add(match[1]);
   }
   return [...ids].sort();
@@ -183,7 +203,7 @@ async function coverageAndReferenceFindings(
       const covered = new Set(
         validation.document.phases
           .flatMap((phase) => phase.tasks)
-          .flatMap((task) => task.covers.match(/\b(?:RF|RNF|UI|CT)-\d+\b/g) ?? []),
+          .flatMap((task) => task.covers.match(/\b(?:RF|RNF|UI|CT|CHANGE|PRESERVE)-\d+\b/g) ?? []),
       );
       const uncovered = [...declared].filter((id) => !covered.has(id)).sort();
       if (uncovered.length) {
@@ -276,26 +296,70 @@ function decompositionFindings(plans: Array<{ artifact: ArtifactRecord; document
 async function deterministicVerification(
   projectRoot: string,
   artifactDirectory: string,
+  workflow: HarnessWorkflow,
+  currentArtifactPaths?: readonly string[],
+  authorityState?: HarnessRunState,
 ): Promise<{
   manifest?: ArtifactManifest;
   findings: ArtifactVerificationFinding[];
   artifactCount: number;
   readyPlanCount: number;
 }> {
-  const tree = await validateManifestTree(projectRoot, { artifactDirectory });
+  let initialManifest: ArtifactManifest | undefined;
+  try { initialManifest = await loadManifest(projectRoot, artifactDirectory); } catch { /* reported by tree validation */ }
+  const scoped = currentArtifactPaths !== undefined;
+  const scope = scoped ? workflowScopeFromPaths(workflow, currentArtifactPaths) : undefined;
+  const applicableArtifacts = scoped && scope && initialManifest
+    ? applicableWorkflowArtifacts(workflow, scope, initialManifest.artifacts)
+    : initialManifest?.artifacts ?? [];
+  const applicablePaths = scoped ? new Set(applicableArtifacts.map((artifact) => artifact.path)) : undefined;
+  const tree = await validateManifestTree(projectRoot, { artifactDirectory, applicablePaths });
   const findings = tree.issues.map(deterministicFinding);
   if (!tree.manifest || !tree.valid) {
     return { manifest: tree.manifest, findings, artifactCount: tree.manifest?.artifacts.length ?? 0, readyPlanCount: 0 };
   }
   const manifest = await loadManifest(projectRoot, artifactDirectory);
+  if (scoped && !scope) {
+    findings.push({
+      id: "readiness.workflow-scope-invalid",
+      severity: "blocker",
+      source: "deterministic",
+      category: "readiness",
+      artifact: ".rb/rb-manifest.json",
+      criterion: "workflow-scope",
+      evidence: `The current ${workflow} run does not identify exactly one canonical workflow root.`,
+      requiredChange: "Emit the current workflow artifacts under one canonical workflow directory.",
+    });
+  }
+  const relevantArtifacts = scoped && scope
+    ? applicableWorkflowArtifacts(workflow, scope, manifest.artifacts)
+    : manifest.artifacts;
   findings.push(...(await validateArtifactConsistency({
     projectRoot,
     artifactRoot: resolve(projectRoot, artifactDirectory),
-    manifest,
+    manifest: { ...manifest, artifacts: relevantArtifacts },
   })).map(deterministicFinding));
-  const planArtifacts = manifest.artifacts.filter((artifact) => artifact.kind === "execution-plan");
+  const producedPaths = new Set(currentArtifactPaths ?? relevantArtifacts.map((artifact) => artifact.path));
+  if (scoped && scope) {
+    for (const path of requiredWorkflowArtifactPaths(workflow, scope).filter((path) => !producedPaths.has(path))) {
+      findings.push({
+        id: `readiness.required-artifact.${createHash("sha256").update(path).digest("hex").slice(0, 10)}`,
+        severity: "blocker",
+        source: "deterministic",
+        category: "readiness",
+        artifact: path,
+        criterion: "workflow-artifact-completeness",
+        evidence: `The current ${workflow} run did not produce mandatory artifact ${path}; a historical artifact cannot satisfy current-run completeness.`,
+        requiredChange: "Produce every mandatory artifact declared by the canonical workflow definition in the current run.",
+      });
+    }
+  }
+  const planArtifacts = relevantArtifacts.filter((artifact) => artifact.kind === "execution-plan");
   const readyPlans = planArtifacts.filter((artifact) => artifact.status === "ready" && artifact.contract === "rb-execution/v1");
-  if (!readyPlans.length) {
+  const currentReady = scope
+    ? readyWorkflowArtifact(workflow, scope, relevantArtifacts)
+    : readyPlans[0];
+  if (!currentReady || (scoped && !producedPaths.has(currentReady.path))) {
     findings.push({
       id: "readiness.ready-plan-missing",
       severity: "blocker",
@@ -326,12 +390,35 @@ async function deterministicVerification(
   }
   findings.push(...missingContextFindings(manifest, parsedPlans));
   findings.push(...decompositionFindings(parsedPlans));
-  findings.push(...await coverageAndReferenceFindings(projectRoot, artifactDirectory, manifest));
+  findings.push(...await coverageAndReferenceFindings(
+    projectRoot,
+    artifactDirectory,
+    { ...manifest, artifacts: relevantArtifacts },
+  ));
+  const constraints = [
+    ...BUILT_IN_PROTECTED_PATH_CONSTRAINTS,
+    ...(authorityState ? authorityConstraintsFromState(authorityState) : []),
+  ];
+  const traceability = authorityState ? traceabilityConstraintsFromState(authorityState) : [];
+  for (const artifact of artifactAuthoritySources(relevantArtifacts)) {
+    const content = await readArtifact(projectRoot, artifactDirectory, artifact);
+    constraints.push(...protectedPathConstraintsFromArtifact(
+      artifact.path,
+      content,
+    ));
+    traceability.push(...traceabilityConstraintsFromArtifact(artifact.path, content));
+  }
+  const canonicalConstraints = deduplicateProtectedPaths(constraints);
+  const canonicalTraceability = deduplicateTraceability(traceability);
+  for (const { artifact, document } of parsedPlans) {
+    findings.push(...validateAuthorityConstraints(document, canonicalConstraints, artifact.path).map(deterministicFinding));
+    findings.push(...validateTraceabilityConstraints(document, canonicalTraceability, artifact.path).map(deterministicFinding));
+  }
   return {
     manifest,
     findings,
     artifactCount: manifest.artifacts.length,
-    readyPlanCount: readyPlans.length,
+    readyPlanCount: readyPlans.filter((artifact) => !scoped || producedPaths.has(artifact.path)).length,
   };
 }
 
@@ -472,9 +559,17 @@ export function artifactVerificationExitCode(report: ArtifactVerificationReport)
 export async function verifyArtifacts(options: VerifyArtifactsOptions): Promise<ArtifactVerificationReport> {
   const projectRoot = resolve(options.projectRoot);
   const artifactFingerprint = await artifactTreeFingerprint(projectRoot, options.artifactDirectory);
-  const deterministic = await deterministicVerification(projectRoot, options.artifactDirectory);
+  let initialManifest: ArtifactManifest | undefined;
+  try { initialManifest = await loadManifest(projectRoot, options.artifactDirectory); } catch { /* deterministic verification reports it */ }
+  const authority = await authorityState({ ...options, projectRoot }, initialManifest);
+  const deterministic = await deterministicVerification(
+    projectRoot,
+    options.artifactDirectory,
+    authority.state.workflow,
+    options.currentArtifactPaths,
+    authority.state,
+  );
   const findings = [...deterministic.findings];
-  const authority = await authorityState({ ...options, projectRoot }, deterministic.manifest);
   const authorityFingerprint = sourceAuthorityFingerprint(authority.state);
   if (authority.missing) {
     findings.push({

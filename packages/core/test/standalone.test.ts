@@ -127,7 +127,7 @@ describe("standalone RB Harness", () => {
     const generation = await loadWorkflowResources("plan", { section: "generation" });
     expect(interview).toContain("RESOURCE: workflows/plan/instructions.md");
     expect(interview).not.toContain("RESOURCE: workflows/plan/artifact-shapes.md");
-    expect(generation).toContain("RESOURCE: workflows/plan/artifact-shapes.md");
+    expect(generation).toContain("RESOURCE: workflows/plan/artifact-authority (code-owned)");
     // The mechanical formats moved into the code-owned contract digest.
     expect(generation).not.toContain("RESOURCE: references/execution-template.md");
     expect(generation).not.toContain("RESOURCE: references/interview-policy.md");
@@ -517,7 +517,7 @@ describe("standalone RB Harness", () => {
     }
   }, 60_000);
 
-  it("repairs the Go convergence finding without rewriting unrelated documents", async () => {
+  it("fails a cross-task Go repair when semantic preservation cannot be proven", async () => {
     const project = await mkdtemp(resolve(tmpdir(), "rb-harness-go-convergence-repair-"));
     await writeFile(resolve(project, "go.mod"), "module example.com/repair-fixture\n\ngo 1.22\n", "utf8");
     const answers = resolve(project, "answers.json");
@@ -525,23 +525,16 @@ describe("standalone RB Harness", () => {
     await chmod(repairingProvider, 0o755);
     process.env.RB_HARNESS_TEST_GO_REPAIR = "1";
     try {
-      const state = await runStandaloneWorkflow({
+      await expect(runStandaloneWorkflow({
         ...baseOptions(project, answers, repairingProvider),
         request: "Plan a convergent Go module introduction.",
-      });
-      expect(state.status).toBe("complete");
-      expect(state.repairsUsed).toBe(1);
-      const repaired = await readFile(resolve(project, ".rb/features/structural-repair/PHASES.md"), "utf8");
-      expect(repaired).toContain("`go.mod`, `go.sum`, `internal/tui/app.go`");
-      expect(repaired).not.toContain("Resolve the direct module early");
-      expect(await readFile(resolve(project, ".rb/features/structural-repair/SPEC.md"), "utf8"))
-        .toContain("request.targetMode");
+      })).rejects.toThrow(/cannot prove semantic preservation/);
     } finally {
       delete process.env.RB_HARNESS_TEST_GO_REPAIR;
     }
   }, 60_000);
 
-  it("keeps correcting when one generated fix exposes a second deterministic defect", async () => {
+  it("rejects a repair that changes an unrelated field instead of spending another repair", async () => {
     const project = await mkdtemp(resolve(tmpdir(), "rb-harness-multi-repair-"));
     await writeFile(resolve(project, "package.json"), '{"name":"repair-fixture"}\n', "utf8");
     const answers = resolve(project, "answers.json");
@@ -551,16 +544,12 @@ describe("standalone RB Harness", () => {
     process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE = modes;
     process.env.RB_HARNESS_TEST_TWO_REPAIRS = "1";
     try {
-      const state = await runStandaloneWorkflow({
+      await expect(runStandaloneWorkflow({
         ...baseOptions(project, answers, repairingProvider),
         request: "Plan a deterministic scope gate and correct generated defects until valid.",
-      });
-      expect(state.status).toBe("complete");
-      expect(state.repairsUsed).toBe(2);
+      })).rejects.toThrow(/changed unrelated semantic content/);
       expect((await readFile(modes, "utf8")).trim().split("\n"))
-        .toEqual(["interview", "generation", "repair", "repair"]);
-      expect(await readFile(resolve(project, ".rb/features/structural-repair/PHASES.md"), "utf8"))
-        .not.toContain("**Scope:** `.rb/");
+        .toEqual(["interview", "generation", "repair"]);
     } finally {
       delete process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE;
       delete process.env.RB_HARNESS_TEST_TWO_REPAIRS;

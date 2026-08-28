@@ -6,6 +6,11 @@ import type {
   ValidationIssue,
 } from "./types.js";
 import { validateGoPlanConvergence } from "./go-plan-convergence.js";
+import {
+  BUILT_IN_PROTECTED_PATH_CONSTRAINTS,
+  changeExplicitlyModifiesProtectedPath,
+  scopeTokenIntersectsProtectedPath,
+} from "./authority-constraints.js";
 
 const CONTRACT = "rb-execution/v1" as const;
 const PHASE_HEADING = /^## Phase ([0-9]+):\s+(.+)$/;
@@ -295,18 +300,13 @@ export function taskScopeTokens(value: string): string[] {
  * rule provider-, runner-, and output-directory-neutral.
  */
 export function scopeTokenOwnsPlanningArtifacts(value: string): boolean {
-  const normalized = value.trim().replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/{2,}/g, "/");
-  if (normalized === ".rb" || normalized.startsWith(".rb/")) return true;
-  const firstSegment = normalized.split("/")[0] ?? "";
-  if (!/[*?]/.test(firstSegment)) return false;
-  const pattern = firstSegment
-    .replace(/[\\^$.*+?()[\]{}|]/g, "\\$&")
-    .replaceAll("\\*", ".*")
-    .replaceAll("\\?", ".");
-  return new RegExp(`^${pattern}$`).test(".rb");
+  return BUILT_IN_PROTECTED_PATH_CONSTRAINTS.some((constraint) =>
+    scopeTokenIntersectsProtectedPath(value, constraint.path));
 }
 
 function changeReferencesPlanningArtifacts(value: string): boolean {
+  if (BUILT_IN_PROTECTED_PATH_CONSTRAINTS.some((constraint) =>
+    changeExplicitlyModifiesProtectedPath(value, constraint.path))) return true;
   // Scope is the primary write-authority boundary. Change adds a second guard
   // for an explicit mutation instruction, but must still allow a task to
   // describe the protection itself (for example, "reject `.rb/**`" or

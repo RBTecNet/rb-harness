@@ -9,11 +9,11 @@ Create implementation-ready project documentation without application code.
 Treat the user's prompt and confirmed answers as intent; never represent a
 proposal as implemented fact.
 
-## Required references
+## Artifact authority
 
-Read this file completely before producing artifacts:
-
-- [Init artifact shapes](artifact-shapes.md)
+The orchestrator injects the canonical machine-owned artifact definition into
+the generation prompt. That definition owns required names, paths, readiness,
+and code/model ownership.
 
 ## How your output is delivered
 
@@ -56,13 +56,14 @@ is supplied in the prompt as `rb-harness-contract-digest/v1`.
 6. Use the `.rb` staging tree initialized by the standalone orchestrator. The
    orchestrator owns initialization, manifest synchronization, and deterministic
    validation; do not depend on a plugin path.
-7. Plan and incrementally author the conditional artifacts defined in
-   `artifact-shapes.md`. Preserve
+7. Plan and incrementally author the required and conditional artifacts in the
+   injected canonical artifact authority. Preserve
    stable IDs and confirmed manual edits on re-runs; update only impacted
    sections and source hashes. Only `ACCEPTED` responses become confirmed
    intent; unresolved material meaning stays out of RIGID requirements.
-8. Derive `PLAN.md`, then derive `PHASES.md` 1:1. `PHASES.md` must not introduce
-   requirements or implementation choices absent from the richer artifacts.
+8. Derive the executable readiness artifact declared by the injected authority
+   from the richer intent artifact. It must not introduce requirements or
+   implementation choices absent from that authority.
    Decompose every capability down to tasks a fresh, context-free executor can
    finish in one call: name the single behavior each task makes observable,
    order them with `Depends on`, and never write a task that builds a whole
@@ -73,8 +74,9 @@ is supplied in the prompt as `rb-harness-contract-digest/v1`.
    uses `human:` and remains pending; never degrade visible/rendered/layout
    behavior to `manual:` or fake-DOM presence. Include a negative visual
    corruption criterion and durable viewport/screenshot/geometry evidence.
-   Also derive `.rb/init/OPERATIONS.json` from the confirmed product form,
-   claimed platforms, and primary consumer workflow. It must use
+   When the injected authority permits its conditional operational artifact,
+   derive it from the confirmed product form, claimed platforms, and primary
+   consumer workflow. It must use
    `rb-operational/v1`, remain usable without RB Ralph, and must not assume web
    or any stack. If no honest executable scenario can be defined, omit it and
    record the blocking operational gap instead of inventing proof.

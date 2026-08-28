@@ -39,6 +39,11 @@ import { buildInterviewPrompt } from "../src/harness-interview.js";
 import { buildGenerationPrompt } from "../src/harness-generator.js";
 import { loadWorkflowResources } from "../src/standalone-resources.js";
 import type { HarnessRunState, HarnessWorkflow } from "../src/standalone-types.js";
+import {
+  CODE_OWNED_WORKFLOW_INFORMATION,
+  WORKFLOW_DEFINITIONS,
+  renderWorkflowArtifactAuthority,
+} from "../src/workflow-definition.js";
 
 const WORKFLOWS: HarnessWorkflow[] = ["init", "ai-context", "plan", "evolve", "review"];
 
@@ -78,6 +83,23 @@ describe("operational budget", () => {
 });
 
 describe("compact contract digest", () => {
+  it("renders workflow names, paths, requiredness, and ownership from one canonical definition", async () => {
+    for (const workflow of WORKFLOWS) {
+      const rendered = renderWorkflowArtifactAuthority(workflow);
+      const digest = generationContractDigest(workflow);
+      const resources = await loadWorkflowResources(workflow, { section: "generation" });
+      expect(digest.match(new RegExp(rendered.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"))?.length).toBe(1);
+      expect(resources).toContain(rendered);
+      expect(rendered).toContain(`Workflow root: \`${WORKFLOW_DEFINITIONS[workflow].root}/\``);
+      for (const artifact of WORKFLOW_DEFINITIONS[workflow].artifacts) {
+        expect(rendered).toContain(`\`${artifact.name}\``);
+        expect(rendered).toContain(artifact.required ? "required" : "conditional");
+        expect(rendered).toContain(`${artifact.owner}-authored`);
+      }
+      for (const owned of CODE_OWNED_WORKFLOW_INFORMATION) expect(rendered).toContain(owned);
+    }
+  });
+
   it("never contradicts incremental planning with the retired complete-bundle instruction", async () => {
     for (const workflow of WORKFLOWS) {
       const resources = await loadWorkflowResources(workflow, { section: "generation" });
@@ -95,7 +117,8 @@ describe("compact contract digest", () => {
       expect(digest).toBe(generationContractDigest(workflow));
       expect(digest).toContain(HARNESS_CONTRACT_DIGEST_VERSION);
       expect(digest).toContain("rb-execution/v1");
-      expect(Buffer.byteLength(digest)).toBeLessThanOrEqual(HARNESS_BUDGET.prompt.maxContractDigestBytes);
+      expect(Buffer.byteLength(digest), workflow)
+        .toBeLessThanOrEqual(HARNESS_BUDGET.prompt.maxContractDigestBytes);
       expect(digest.includes("rb-operational/v1 — OPERATIONS.json shape"))
         .toBe(workflowSupportsOperations(workflow));
     }

@@ -633,6 +633,7 @@ export interface StructuralError {
   code: string;
   message: string;
   path?: string;
+  line?: number;
 }
 
 export function buildRepairPrompt(
@@ -694,18 +695,133 @@ function documentInvariants(content: string): string[] {
   return invariants;
 }
 
-/** Reject a repair that dropped what the original document declared. */
-export function assertRepairPreservedDocument(original: string, repaired: string, path: string): void {
+interface RepairRange { start: number; end: number }
+
+function lineOffsets(source: string): Array<{ start: number; end: number; text: string }> {
+  const lines: Array<{ start: number; end: number; text: string }> = [];
+  let start = 0;
+  for (const match of source.matchAll(/.*(?:\n|$)/g)) {
+    if (!match[0]) continue;
+    lines.push({ start, end: start + match[0].length, text: match[0].replace(/\n$/, "") });
+    start += match[0].length;
+  }
+  return lines;
+}
+
+function structuralRegion(original: string, error: StructuralError): RepairRange | undefined {
+  const lines = lineOffsets(original);
+  const taskId = error.message.match(/\b(T\d{3,})\b/)?.[1];
+  let anchor = error.line ? Math.max(0, error.line - 1) : -1;
+  if (taskId) {
+    const found = lines.findIndex((line) => new RegExp(`^- \\[.\\] ${taskId} —`).test(line.text));
+    if (found >= 0) anchor = found;
+  }
+  if (anchor < 0 || anchor >= lines.length) {
+    if (error.code.startsWith("document.title")) anchor = lines.findIndex((line) => /^#\s+/.test(line.text));
+    else if (error.code.startsWith("document.contract")) anchor = lines.findIndex((line) => /rb-execution-contract/.test(line.text));
+    else if (error.code.startsWith("document.artifact-id")) anchor = lines.findIndex((line) => /rb-artifact-id/.test(line.text));
+  }
+  if (anchor < 0 || anchor >= lines.length) return undefined;
+
+  const taskStart = (() => {
+    for (let index = anchor; index >= 0; index -= 1) if (/^- \[[ x]\] T\d{3,} —/.test(lines[index]!.text)) return index;
+    return -1;
+  })();
+  const phaseStart = (() => {
+    for (let index = anchor; index >= 0; index -= 1) if (/^## Phase \d+:/.test(lines[index]!.text)) return index;
+    return -1;
+  })();
+  const fieldByCode: Array<[RegExp, string]> = [
+    [/(?:^|\.)(?:scope)(?:\.|$)/, "Scope"],
+    [/(?:^|\.)(?:change)(?:\.|$)/, "Change"],
+    [/(?:^|\.)(?:covers?)(?:\.|$)/, "Covers"],
+    [/(?:^|\.)(?:parallel)(?:\.|$)/, "Parallel safe"],
+    [/(?:^|\.)(?:acceptance)(?:\.|$)|too-many-acceptance-criteria/, "Acceptance criteria"],
+    [/(?:^|\.)(?:validation)(?:\.|$)/, "Validation"],
+    [/(?:^|\.)(?:evidence)(?:\.|$)/, "Expected evidence"],
+  ];
+  const field = fieldByCode.find(([pattern]) => pattern.test(error.code))?.[1];
+  if (field && taskStart >= 0) {
+    const start = lines.findIndex((line, index) => index >= taskStart && line.text.startsWith(`  - **${field}:**`));
+    if (start >= 0) {
+      let end = start + 1;
+      while (end < lines.length && !/^  - \*\*[^*]+:\*\*/.test(lines[end]!.text)
+        && !/^- \[[ x]\] T\d{3,} —/.test(lines[end]!.text) && !/^## Phase \d+:/.test(lines[end]!.text)) end += 1;
+      return { start: lines[start]!.start, end: lines[end - 1]!.end };
+    }
+  }
+  if (/^phase\./.test(error.code) && phaseStart >= 0 && taskStart < 0) {
+    return { start: lines[anchor]!.start, end: lines[anchor]!.end };
+  }
+  if (/^document\./.test(error.code)) return { start: lines[anchor]!.start, end: lines[anchor]!.end };
+  // Decomposition and cross-task convergence can require moving semantic
+  // material across whole tasks/phases. Without a semantic reviewer there is
+  // no deterministic proof that such a rewrite preserved meaning, so it is
+  // deliberately not authorized here.
+  return undefined;
+}
+
+function mergeRepairRanges(ranges: RepairRange[]): RepairRange[] {
+  const merged: RepairRange[] = [];
+  for (const range of ranges.sort((left, right) => left.start - right.start)) {
+    const previous = merged.at(-1);
+    if (previous && range.start <= previous.end) previous.end = Math.max(previous.end, range.end);
+    else merged.push({ ...range });
+  }
+  return merged;
+}
+
+function assertImmutableChunks(original: string, repaired: string, ranges: RepairRange[], path: string): void {
+  const chunks: string[] = [];
+  let cursor = 0;
+  for (const range of ranges) {
+    if (range.start > cursor) chunks.push(original.slice(cursor, range.start));
+    cursor = range.end;
+  }
+  if (cursor < original.length) chunks.push(original.slice(cursor));
+  if (!chunks.length) {
+    throw new Error(`structural repair cannot prove semantic preservation for ${path}: no immutable region remains outside the authorized structural errors.`);
+  }
+  let repairedCursor = 0;
+  for (let index = 0; index < chunks.length; index += 1) {
+    const chunk = chunks[index]!;
+    const found = repaired.indexOf(chunk, repairedCursor);
+    if (found < 0 || (index === 0 && ranges[0]!.start > 0 && found !== 0)) {
+      throw new Error(`structural repair changed unrelated semantic content in ${path} outside the explicitly authorized structural region.`);
+    }
+    repairedCursor = found + chunk.length;
+  }
+  if (ranges.at(-1)!.end < original.length && repairedCursor !== repaired.length) {
+    throw new Error(`structural repair changed unrelated semantic content in ${path} outside the explicitly authorized structural region.`);
+  }
+}
+
+/** Reject a repair that dropped identity or changed bytes outside listed structural errors. */
+export function assertRepairPreservedDocument(
+  original: string,
+  repaired: string,
+  path: string,
+  errors: readonly StructuralError[] = [],
+): void {
   const missing = documentInvariants(original).filter((invariant) => {
     if (invariant === "its title line") return !/^#\s+\S.*$/m.test(repaired);
     const value = invariant.slice(invariant.lastIndexOf(" ") + 1);
     return !repaired.includes(value);
   });
-  if (!missing.length) return;
-  throw new Error(
-    `structural repair truncated ${path}: the repaired document no longer carries ${missing.join(", ")}. `
-    + "A repaired document replaces the original in full, so its parts must reproduce the complete corrected document, not only the fragment that changed.",
-  );
+  if (missing.length) {
+    throw new Error(
+      `structural repair truncated ${path}: the repaired document no longer carries ${missing.join(", ")}. `
+      + "A repaired document replaces the original in full, so its parts must reproduce the complete corrected document, not only the fragment that changed.",
+    );
+  }
+  if (original === repaired) return;
+  const relevant = errors.filter((error) => !error.path || error.path === path);
+  const identified = relevant.map((error) => structuralRegion(original, error));
+  const ranges = mergeRepairRanges(identified.filter((range): range is RepairRange => Boolean(range)));
+  if (!ranges.length || identified.some((range) => !range)) {
+    throw new Error(`structural repair cannot prove semantic preservation for ${path}: the deterministic error does not identify a safely mutable structural region.`);
+  }
+  assertImmutableChunks(original, repaired, ranges, path);
 }
 
 export async function requestStructuralRepair(options: RepairRequestOptions): Promise<DocumentBundle> {
@@ -749,7 +865,7 @@ export async function requestStructuralRepair(options: RepairRequestOptions): Pr
       throw new Error(`structural repair attempted to rewrite unaffected document ${document.path}`);
     }
     const original = originals.get(document.path);
-    if (original) assertRepairPreservedDocument(original, document.content, document.path);
+    if (original) assertRepairPreservedDocument(original, document.content, document.path, options.errors);
   }
   return mergeDocumentBundles(options.bundle, repaired);
 }
