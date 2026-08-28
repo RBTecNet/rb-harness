@@ -93,6 +93,10 @@ if (prompt.includes("===== EXACT OUTPUT CONTRACT =====")) {
   const rawStart = prompt.indexOf(rawMarker);
   const rawTail = prompt.slice(rawStart + rawMarker.length);
   const raw = rawTail.split(priorMarker, 1)[0];
+  if (process.env.RB_HARNESS_TEST_REPEAT_FORMAT_OUTPUT === "1") {
+    process.stdout.write(raw);
+    process.exit(0);
+  }
   if (prompt.includes("RB_HARNESS_DOCUMENT_PART_JSON_BEGIN")) {
     const targetMatch = prompt.match(/The exact JSON shape is \{"contract":"rb-harness-document-part\/v1","path":("(?:[^"\\]|\\.)*"),"part":("(?:[^"\\]|\\.)*"),/);
     if (!targetMatch?.[1] || !targetMatch[2]) process.exit(3);
@@ -111,7 +115,7 @@ if (prompt.includes("===== EXACT OUTPUT CONTRACT =====")) {
   const begin = raw.indexOf("RB_HARNESS_DOCUMENT_PLAN_JSON_BEGIN");
   const jsonStart = raw.indexOf("\n", begin) + 1;
   const jsonEnd = raw.indexOf("\nRB_HARNESS_DOCUMENT_PLAN_JSON_END", jsonStart);
-  const formatted = JSON.parse(raw.slice(jsonStart, jsonEnd));
+  const formatted = raw.includes("YAML_PLAN_FIXTURE") ? structuredClone(plan) : JSON.parse(raw.slice(jsonStart, jsonEnd));
   for (const document of formatted.documents ?? []) delete document.prefix;
   process.stdout.write(`RB_HARNESS_DOCUMENT_PLAN_JSON_BEGIN\n${JSON.stringify(formatted)}\nRB_HARNESS_DOCUMENT_PLAN_JSON_END\n`);
   process.exit(0);
@@ -123,7 +127,17 @@ if (prompt.includes("RB_HARNESS_DOCUMENT_PLAN_JSON_BEGIN")) {
     && !prompt.includes("omits mandatory current-run artifacts")
     ? { ...plan, documents: plan.documents.filter((document) => !document.path.endsWith("source-manifest.json")) }
     : plan;
-  process.stdout.write(`RB_HARNESS_DOCUMENT_PLAN_JSON_BEGIN\n${JSON.stringify(responsePlan)}\nRB_HARNESS_DOCUMENT_PLAN_JSON_END\n`);
+  let serialized = JSON.stringify(responsePlan);
+  if (process.env.RB_HARNESS_TEST_MIMO_PLAN === "1") {
+    serialized = JSON.stringify({
+      ...responsePlan,
+      coordination: { sharedIds: ["RF-001", "P01", "T001"], traceability: { "RF-001": "P01/T001" } },
+    }).replace(/},"documents":/, ',"documents":');
+  }
+  if (process.env.RB_HARNESS_TEST_MALFORMED_PLAN === "1") {
+    serialized = serialized.replace(',"status":', ',,"status":');
+  }
+  process.stdout.write(`RB_HARNESS_DOCUMENT_PLAN_JSON_BEGIN\n${serialized}\nRB_HARNESS_DOCUMENT_PLAN_JSON_END\n`);
   process.exit(0);
 }
 

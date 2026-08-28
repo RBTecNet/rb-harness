@@ -1,0 +1,97 @@
+Provider preface that must remain outside the explicit envelope.
+RB_HARNESS_DOCUMENT_PLAN_JSON_BEGIN
+{
+  "contract": "rb-harness-document-plan/v1",
+  "status": "complete",
+  "summary": "Ten coordinated initialization documents split into nineteen bounded parts.",
+  "coordination":{"sharedIds":["RF-001","RNF-001","P01","T001"],"traceability":{"RF-001":"P01/T001","RNF-001":"P01/T001"},"writerOrder":["authority","plan","execution","manifest"],"documents":[
+    {
+      "path": ".rb/init/PROJECT.md",
+      "purpose": "Project intent and scope authority.",
+      "dependsOn": [],
+      "parts": [
+        { "id": "intent", "purpose": "Objective, users, and success." },
+        { "id": "scope", "purpose": "Scope, non-goals, and constraints." }
+      ]
+    },
+    {
+      "path": ".rb/init/REQUIREMENTS.md",
+      "purpose": "Rigid and flexible requirements.",
+      "dependsOn": [".rb/init/PROJECT.md"],
+      "parts": [
+        { "id": "functional", "purpose": "Functional requirements and criteria." },
+        { "id": "quality", "purpose": "Quality requirements and criteria." }
+      ]
+    },
+    {
+      "path": ".rb/init/DECISIONS.md",
+      "purpose": "Confirmed decisions and consequences.",
+      "dependsOn": [".rb/init/PROJECT.md"],
+      "parts": [
+        { "id": "accepted", "purpose": "Accepted decisions." },
+        { "id": "deferred", "purpose": "Deferred decisions and boundaries." }
+      ]
+    },
+    {
+      "path": ".rb/init/GLOSSARY.md",
+      "purpose": "Stable domain vocabulary.",
+      "dependsOn": [".rb/init/REQUIREMENTS.md"],
+      "parts": [{ "id": "terms", "purpose": "Defined domain terms." }]
+    },
+    {
+      "path": ".rb/init/WORKFLOWS.md",
+      "purpose": "Success and failure workflows.",
+      "dependsOn": [".rb/init/REQUIREMENTS.md"],
+      "parts": [
+        { "id": "success", "purpose": "Successful actor flows." },
+        { "id": "failure", "purpose": "Failure and recovery flows." }
+      ]
+    },
+    {
+      "path": ".rb/init/ARCHITECTURE.md",
+      "purpose": "Confirmed architecture and boundaries.",
+      "dependsOn": [".rb/init/DECISIONS.md"],
+      "parts": [
+        { "id": "components", "purpose": "Components and responsibilities." },
+        { "id": "interfaces", "purpose": "Interfaces and dependency direction." }
+      ]
+    },
+    {
+      "path": ".rb/init/NON_FUNCTIONAL.md",
+      "purpose": "Measurable non-functional constraints.",
+      "dependsOn": [".rb/init/REQUIREMENTS.md"],
+      "parts": [
+        { "id": "performance", "purpose": "Performance and capacity." },
+        { "id": "security", "purpose": "Security and reliability." }
+      ]
+    },
+    {
+      "path": ".rb/init/PLAN.md",
+      "purpose": "Implementation decomposition and risks.",
+      "dependsOn": [".rb/init/ARCHITECTURE.md", ".rb/init/DECISIONS.md", ".rb/init/REQUIREMENTS.md"],
+      "parts": [
+        { "id": "decomposition", "purpose": "Dependency-aware work decomposition." },
+        { "id": "validation", "purpose": "Risks and validation strategy." }
+      ]
+    },
+    {
+      "path": ".rb/init/PHASES.md",
+      "purpose": "Executable rb-execution plan.",
+      "dependsOn": [".rb/init/PLAN.md", ".rb/init/PROJECT.md", ".rb/init/REQUIREMENTS.md"],
+      "parts": [
+        { "id": "header", "purpose": "Execution contract header." },
+        { "id": "phase-01", "purpose": "First bounded phase." },
+        { "id": "phase-02", "purpose": "Second bounded phase." }
+      ]
+    },
+    {
+      "path": ".rb/init/source-manifest.json",
+      "purpose": "Complete source and traceability provenance.",
+      "dependsOn": [".rb/init/PROJECT.md", ".rb/init/REQUIREMENTS.md", ".rb/init/DECISIONS.md", ".rb/init/GLOSSARY.md", ".rb/init/WORKFLOWS.md", ".rb/init/ARCHITECTURE.md", ".rb/init/NON_FUNCTIONAL.md", ".rb/init/PLAN.md", ".rb/init/PHASES.md"],
+      "parts": [{ "id": "manifest", "purpose": "Sources, hashes, and artifact links." }]
+    }
+  ],
+  "blocked": []
+}
+RB_HARNESS_DOCUMENT_PLAN_JSON_END
+Provider epilogue that must remain outside the explicit envelope.

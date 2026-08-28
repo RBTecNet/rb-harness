@@ -1,7 +1,7 @@
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { HARNESS_BUDGET } from "../src/harness-budget.js";
 import {
   DOCUMENT_PART_BEGIN,
@@ -12,7 +12,7 @@ import {
   parseDocumentPart,
   parseDocumentPlan,
 } from "../src/harness-incremental-documents.js";
-import { requestDocumentBundle } from "../src/harness-generator.js";
+import { assertGenerationPlanComplete, requestDocumentBundle } from "../src/harness-generator.js";
 import { successfulProviderLogStdout } from "../src/harness-control-formatter.js";
 import { buildInputPackage } from "../src/harness-input-package.js";
 import { inspectProjectInventory } from "../src/harness-inventory.js";
@@ -27,6 +27,9 @@ const originalFormatFailures = process.env.RB_HARNESS_TEST_FORMAT_INVALID_ATTEMP
 const originalDocumentDependencies = process.env.RB_HARNESS_TEST_DOCUMENT_DEPENDENCIES;
 const originalCyclicDocumentDependencies = process.env.RB_HARNESS_TEST_CYCLIC_DOCUMENT_DEPENDENCIES;
 const originalIncompleteFirstPlan = process.env.RB_HARNESS_TEST_INCOMPLETE_FIRST_PLAN;
+const originalMimoPlan = process.env.RB_HARNESS_TEST_MIMO_PLAN;
+const originalMalformedPlan = process.env.RB_HARNESS_TEST_MALFORMED_PLAN;
+const originalRepeatFormatOutput = process.env.RB_HARNESS_TEST_REPEAT_FORMAT_OUTPUT;
 
 afterEach(() => {
   if (originalCalls === undefined) delete process.env.RB_HARNESS_TEST_INCREMENTAL_CALLS;
@@ -43,6 +46,12 @@ afterEach(() => {
   else process.env.RB_HARNESS_TEST_CYCLIC_DOCUMENT_DEPENDENCIES = originalCyclicDocumentDependencies;
   if (originalIncompleteFirstPlan === undefined) delete process.env.RB_HARNESS_TEST_INCOMPLETE_FIRST_PLAN;
   else process.env.RB_HARNESS_TEST_INCOMPLETE_FIRST_PLAN = originalIncompleteFirstPlan;
+  if (originalMimoPlan === undefined) delete process.env.RB_HARNESS_TEST_MIMO_PLAN;
+  else process.env.RB_HARNESS_TEST_MIMO_PLAN = originalMimoPlan;
+  if (originalMalformedPlan === undefined) delete process.env.RB_HARNESS_TEST_MALFORMED_PLAN;
+  else process.env.RB_HARNESS_TEST_MALFORMED_PLAN = originalMalformedPlan;
+  if (originalRepeatFormatOutput === undefined) delete process.env.RB_HARNESS_TEST_REPEAT_FORMAT_OUTPUT;
+  else process.env.RB_HARNESS_TEST_REPEAT_FORMAT_OUTPUT = originalRepeatFormatOutput;
 });
 
 function envelope(begin: string, end: string, value: unknown): string {
@@ -141,6 +150,102 @@ async function requestFixture(project: string, runRoot: string) {
 }
 
 describe("incremental document contracts", () => {
+  it("accepts canonical JSON without changing its canonical representation", () => {
+    const source = samplePlan();
+    const canonical = { ...source, documents: source.documents.map((document) => ({ ...document, dependsOn: [] })) };
+    expect(parseDocumentPlan(JSON.stringify(canonical))).toEqual(canonical);
+  });
+
+  it("strips a JSON fence and ignores prose outside explicit sentinels", () => {
+    const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      const output = [
+        "Harmless provider preface.",
+        DOCUMENT_PLAN_BEGIN,
+        "```json",
+        JSON.stringify(samplePlan()),
+        "```",
+        DOCUMENT_PLAN_END,
+        "Harmless provider epilogue.",
+      ].join("\n");
+      expect(parseDocumentPlan(output).documents).toHaveLength(1);
+      expect(write.mock.calls.flat().join("")).toContain('"stripped-json-fence"');
+    } finally {
+      write.mockRestore();
+    }
+  });
+
+  it("recovers the real MiMo missing-brace shape without losing plan semantics", async () => {
+    const fixturePath = resolve(import.meta.dirname, "fixtures/document-plan/mimo-missing-brace.txt");
+    const malformed = await readFile(fixturePath, "utf8");
+    const corrected = malformed.replace('],"documents":[', ']},"documents":[');
+    expect(corrected).not.toBe(malformed);
+    const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      const recovered = parseDocumentPlan(malformed);
+      const canonical = parseDocumentPlan(corrected);
+      expect(recovered).toEqual(canonical);
+      expect(recovered.documents).toHaveLength(10);
+      expect(recovered.documents.flatMap((document) => document.parts)).toHaveLength(19);
+      expect(recovered.documents.map((document) => document.path)).toEqual(canonical.documents.map((document) => document.path));
+      expect(recovered.documents.map((document) => document.parts.map((part) => part.id)))
+        .toEqual(canonical.documents.map((document) => document.parts.map((part) => part.id)));
+      expect(recovered.documents.map((document) => document.dependsOn))
+        .toEqual(canonical.documents.map((document) => document.dependsOn));
+      expect(write.mock.calls.flat().join("")).toContain('"recovered-root-property-boundary"');
+      expect(write.mock.calls.flat().join("")).toContain('"canonicalized-coordination-object"');
+    } finally {
+      write.mockRestore();
+    }
+  });
+
+  it("serializes an accepted coordination object deterministically without interpretation", () => {
+    const value = samplePlan();
+    value.coordination = {
+      traceability: { "RF-002": "P02/T002", "RF-001": "P01/T001" },
+      sharedIds: ["RF-001", "RF-002", "P01", "P02"],
+    } as unknown as string;
+    expect(parseDocumentPlan(envelope(DOCUMENT_PLAN_BEGIN, DOCUMENT_PLAN_END, value)).coordination).toBe(
+      '{"sharedIds":["RF-001","RF-002","P01","P02"],"traceability":{"RF-001":"P01/T001","RF-002":"P02/T002"}}',
+    );
+  });
+
+  it("rejects ambiguous brace recovery and unsupported coordination authority", async () => {
+    const fixturePath = resolve(import.meta.dirname, "fixtures/document-plan/mimo-missing-brace.txt");
+    const malformed = await readFile(fixturePath, "utf8");
+    const ambiguous = malformed.replace('],"documents":[', '],"documents":[],"documents":[');
+    expect(() => parseDocumentPlan(ambiguous)).toThrow("malformed document plan JSON");
+    expect(() => parseDocumentPlan(envelope(DOCUMENT_PLAN_BEGIN, DOCUMENT_PLAN_END, {
+      ...samplePlan(), coordination: { documents: ["not root authority"] },
+    }))).toThrow("unsupported document plan coordination authority field: documents");
+  });
+
+  it("keeps semantic completeness and unknown-structure checks fail-closed", () => {
+    const incomplete = parseDocumentPlan(envelope(DOCUMENT_PLAN_BEGIN, DOCUMENT_PLAN_END, samplePlan()));
+    expect(() => assertGenerationPlanComplete("init", incomplete)).toThrow("omits mandatory current-run artifacts");
+    expect(() => parseDocumentPlan(envelope(DOCUMENT_PLAN_BEGIN, DOCUMENT_PLAN_END, {
+      ...samplePlan(), semanticAuthority: { decision: "requires model judgment" },
+    }))).toThrow("unsupported document plan field: semanticAuthority");
+    expect(() => parseDocumentPlan(envelope(DOCUMENT_PLAN_BEGIN, DOCUMENT_PLAN_END, {
+      ...samplePlan(), coordination: ["RF-001", "P01/T001"],
+    }))).toThrow("document plan coordination must be a non-empty string");
+  });
+
+  it("removes only the evidenced non-authoritative document prefix and keeps canonical fields", () => {
+    const prefixed = samplePlan();
+    prefixed.documents[0] = {
+      ...prefixed.documents[0]!,
+      purpose: "Canonical purpose wins.",
+      prefix: "Presentation heading only.",
+    } as typeof prefixed.documents[number];
+    const parsed = parseDocumentPlan(envelope(DOCUMENT_PLAN_BEGIN, DOCUMENT_PLAN_END, prefixed));
+    expect(parsed.documents[0]?.purpose).toBe("Canonical purpose wins.");
+    expect(parsed.documents[0]).not.toHaveProperty("prefix");
+    expect(() => parseDocumentPlan(envelope(DOCUMENT_PLAN_BEGIN, DOCUMENT_PLAN_END, {
+      ...samplePlan(), documents: [{ ...samplePlan().documents[0], outputPath: "/tmp/redirect" }],
+    }))).toThrow("unsupported planned document field: outputPath");
+  });
+
   it("assembles ordered bounded parts into one normalized document", () => {
     const plan = parseDocumentPlan(envelope(DOCUMENT_PLAN_BEGIN, DOCUMENT_PLAN_END, samplePlan()));
     const first = parseDocumentPart(envelope(DOCUMENT_PART_BEGIN, DOCUMENT_PART_END, {
@@ -183,10 +288,6 @@ describe("incremental document contracts", () => {
   });
 
   it("rejects every unknown authority field instead of guessing provider-specific exceptions", () => {
-    const prefixed = samplePlan();
-    prefixed.documents[0] = { ...prefixed.documents[0]!, prefix: "execution plan" } as typeof prefixed.documents[number];
-    expect(() => parseDocumentPlan(envelope(DOCUMENT_PLAN_BEGIN, DOCUMENT_PLAN_END, prefixed)))
-      .toThrow("unsupported planned document field: prefix");
     expect(() => parseDocumentPlan(envelope(DOCUMENT_PLAN_BEGIN, DOCUMENT_PLAN_END, {
       ...samplePlan(),
       documents: [{ ...samplePlan().documents[0], outputPath: "/tmp/redirect" }],
@@ -479,7 +580,7 @@ describe("provider-neutral incremental authoring", () => {
     ]);
   }, 60_000);
 
-  it("recovers a completed compatible plan from its paid log before spawning a provider", async () => {
+  it("normalizes a completed compatible plan from its paid log without spawning a formatter", async () => {
     await chmod(fixture, 0o755);
     const project = await mkdtemp(resolve(tmpdir(), "rb-incremental-plan-log-recovery-"));
     const runRoot = resolve(project, ".rb-harness/runs/test");
@@ -503,7 +604,6 @@ describe("provider-neutral incremental authoring", () => {
     const bundle = await requestFixture(project, runRoot);
     expect(bundle.documents).toHaveLength(6);
     expect((await readFile(calls, "utf8")).trim().split("\n")).toEqual([
-      "format",
       ...COMPLETE_INIT_CALLS,
     ]);
   }, 60_000);
@@ -517,12 +617,9 @@ describe("provider-neutral incremental authoring", () => {
     process.env.RB_HARNESS_TEST_FORMAT_INVALID_ATTEMPTS = "2";
     await writeFile(resolve(project, "README.md"), "fixture\n", "utf8");
     await mkdir(resolve(runRoot, "logs"), { recursive: true });
-    const prefixed = completeInitPlan();
-    const phases = prefixed.documents.findIndex((document) => document.path.endsWith("PHASES.md"));
-    prefixed.documents[phases] = { ...prefixed.documents[phases]!, prefix: "execution plan" } as typeof prefixed.documents[number];
     await writeFile(resolve(runRoot, "logs/generation-plan.log"), [
       "exit_code=0", "", "--- stdout ---",
-      envelope(DOCUMENT_PLAN_BEGIN, DOCUMENT_PLAN_END, prefixed),
+      DOCUMENT_PLAN_BEGIN, "YAML_PLAN_FIXTURE", DOCUMENT_PLAN_END,
       "", "--- stderr ---", "",
     ].join("\n"), { encoding: "utf8", mode: 0o600 });
 
@@ -543,16 +640,45 @@ describe("provider-neutral incremental authoring", () => {
     process.env.RB_HARNESS_TEST_FORMAT_INVALID_ATTEMPTS = "3";
     await writeFile(resolve(project, "README.md"), "fixture\n", "utf8");
     await mkdir(resolve(runRoot, "logs"), { recursive: true });
-    const prefixed = samplePlan();
-    prefixed.documents[0] = { ...prefixed.documents[0]!, prefix: "execution plan" } as typeof prefixed.documents[number];
     await writeFile(resolve(runRoot, "logs/generation-plan.log"), [
       "exit_code=0", "", "--- stdout ---",
-      envelope(DOCUMENT_PLAN_BEGIN, DOCUMENT_PLAN_END, prefixed),
+      DOCUMENT_PLAN_BEGIN, "YAML_PLAN_FIXTURE", DOCUMENT_PLAN_END,
       "", "--- stderr ---", "",
     ].join("\n"), { encoding: "utf8", mode: 0o600 });
 
     await expect(requestFixture(project, runRoot)).rejects.toThrow("after 3 attempts");
     expect((await readFile(calls, "utf8")).trim().split("\n")).toEqual(["format", "format", "format"]);
+  }, 60_000);
+
+  it("accepts the MiMo missing-brace plan with zero formatter calls", async () => {
+    await chmod(fixture, 0o755);
+    const project = await mkdtemp(resolve(tmpdir(), "rb-incremental-mimo-normalization-"));
+    const runRoot = resolve(project, ".rb-harness/runs/test");
+    const calls = resolve(await mkdtemp(resolve(tmpdir(), "rb-incremental-mimo-normalization-calls-")), "calls.log");
+    process.env.RB_HARNESS_TEST_INCREMENTAL_CALLS = calls;
+    process.env.RB_HARNESS_TEST_MIMO_PLAN = "1";
+    await writeFile(resolve(project, "README.md"), "fixture\n", "utf8");
+
+    const bundle = await requestFixture(project, runRoot);
+    expect(bundle.documents).toHaveLength(6);
+    expect((await readFile(calls, "utf8")).trim().split("\n")).toEqual([
+      "plan",
+      ...COMPLETE_INIT_CALLS,
+    ]);
+  }, 60_000);
+
+  it("stops after one formatter attempt repeats the rejected malformed plan", async () => {
+    await chmod(fixture, 0o755);
+    const project = await mkdtemp(resolve(tmpdir(), "rb-incremental-format-repeat-"));
+    const runRoot = resolve(project, ".rb-harness/runs/test");
+    const calls = resolve(await mkdtemp(resolve(tmpdir(), "rb-incremental-format-repeat-calls-")), "calls.log");
+    process.env.RB_HARNESS_TEST_INCREMENTAL_CALLS = calls;
+    process.env.RB_HARNESS_TEST_MALFORMED_PLAN = "1";
+    process.env.RB_HARNESS_TEST_REPEAT_FORMAT_OUTPUT = "1";
+    await writeFile(resolve(project, "README.md"), "fixture\n", "utf8");
+
+    await expect(requestFixture(project, runRoot)).rejects.toThrow(/after 1 attempt:.*repeated identical rejected payload/);
+    expect((await readFile(calls, "utf8")).trim().split("\n")).toEqual(["plan", "format"]);
   }, 60_000);
 });
 

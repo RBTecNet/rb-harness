@@ -8,6 +8,7 @@
  */
 
 import { HARNESS_BUDGET } from "./harness-budget.js";
+import { createHash } from "node:crypto";
 import { basename, dirname } from "node:path/posix";
 import {
   DOCUMENT_BUNDLE_CONTRACT,
@@ -16,6 +17,7 @@ import {
   normalizeGeneratedDocument,
   normalizeGeneratedDocumentPath,
   parseDocumentBundle,
+  stripEnclosingCodeFence,
   type DocumentBundle,
   type GeneratedDocument,
 } from "./harness-documents.js";
@@ -55,6 +57,18 @@ export interface DocumentPart {
   path: string;
   part: string;
   content: string;
+}
+
+export type DocumentPlanNormalizationReason =
+  | "stripped-json-fence"
+  | "recovered-root-property-boundary"
+  | "canonicalized-coordination-object"
+  | "removed-document-prefix";
+
+interface ExtractedDocumentPlan {
+  source: string;
+  explicitEnvelope: boolean;
+  reasons: DocumentPlanNormalizationReason[];
 }
 
 function object(value: unknown, label: string): Record<string, unknown> {
@@ -145,6 +159,223 @@ function allowedKeys(record: Record<string, unknown>, allowed: readonly string[]
   for (const key of Object.keys(record)) {
     if (!accepted.has(key)) throw new Error(`unsupported ${label} field: ${key}`);
   }
+}
+
+function stripDocumentPlanJsonFence(source: string): { source: string; stripped: boolean } {
+  const trimmed = source.trim();
+  if (!/^(?:`{3,}|~{3,})[ \t]*(?:json)?[ \t]*(?:\r?\n|$)/i.test(trimmed)) {
+    return { source: trimmed, stripped: false };
+  }
+  const stripped = stripEnclosingCodeFence(trimmed);
+  if (stripped === trimmed) return { source: trimmed, stripped: false };
+  return { source: stripped.trim(), stripped: true };
+}
+
+/**
+ * Extract only the declared document-plan region. Prose outside explicit
+ * sentinels is ignored; without sentinels the whole response must itself be
+ * the JSON object (optionally fenced), so prose can never widen the boundary.
+ */
+function extractDocumentPlan(output: string): ExtractedDocumentPlan {
+  const start = output.indexOf(DOCUMENT_PLAN_BEGIN);
+  let source: string;
+  let explicitEnvelope = false;
+  if (start >= 0) {
+    explicitEnvelope = true;
+    const finish = output.indexOf(DOCUMENT_PLAN_END, start + DOCUMENT_PLAN_BEGIN.length);
+    if (finish < 0) throw new Error("the document plan envelope was truncated before its terminator");
+    source = output.slice(start + DOCUMENT_PLAN_BEGIN.length, finish);
+  } else {
+    source = output;
+  }
+  const fenced = stripDocumentPlanJsonFence(source);
+  if (!fenced.source) throw new Error("the document plan envelope is empty");
+  return {
+    source: fenced.source,
+    explicitEnvelope,
+    reasons: fenced.stripped ? ["stripped-json-fence"] : [],
+  };
+}
+
+interface JsonPropertyLocation {
+  key: string;
+  start: number;
+  ownerObjectStart: number;
+  valueStart: number;
+}
+
+interface JsonStructureScan {
+  properties: JsonPropertyLocation[];
+  remaining: { kind: "object" | "array"; start: number }[];
+}
+
+/** Structural scan only: it locates property ownership without repairing JSON. */
+function scanJsonStructure(source: string): JsonStructureScan | undefined {
+  const stack: { kind: "object" | "array"; start: number }[] = [];
+  const properties: JsonPropertyLocation[] = [];
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index]!;
+    if (character === '"') {
+      const start = index;
+      let escaped = false;
+      index += 1;
+      for (; index < source.length; index += 1) {
+        const current = source[index]!;
+        if (escaped) escaped = false;
+        else if (current === "\\") escaped = true;
+        else if (current === '"') break;
+      }
+      if (index >= source.length) return undefined;
+      let key: unknown;
+      try { key = JSON.parse(source.slice(start, index + 1)); }
+      catch { return undefined; }
+      let next = index + 1;
+      while (/\s/.test(source[next] ?? "")) next += 1;
+      const owner = stack.at(-1);
+      if (source[next] === ":" && owner?.kind === "object" && typeof key === "string") {
+        next += 1;
+        while (/\s/.test(source[next] ?? "")) next += 1;
+        properties.push({ key, start, ownerObjectStart: owner.start, valueStart: next });
+      }
+      continue;
+    }
+    if (character === "{") stack.push({ kind: "object", start: index });
+    else if (character === "[") stack.push({ kind: "array", start: index });
+    else if (character === "}" || character === "]") {
+      const expected = character === "}" ? "object" : "array";
+      if (stack.at(-1)?.kind !== expected) return undefined;
+      stack.pop();
+    }
+  }
+  return { properties, remaining: stack };
+}
+
+/**
+ * Recover only the observed MiMo serialization: the root object is the sole
+ * unclosed container, `coordination` began as a root object, and exactly one
+ * direct `documents` property is trapped inside it. Inserting `}` before that
+ * property must make the complete source valid JSON. No other brace insertion
+ * or candidate search is attempted.
+ */
+function recoverDocumentPlanRootBoundary(source: string): string | undefined {
+  const scan = scanJsonStructure(source);
+  const rootStart = source.search(/\S/);
+  if (!scan || rootStart < 0 || source[rootStart] !== "{") return undefined;
+  if (scan.remaining.length !== 1 || scan.remaining[0]?.kind !== "object" || scan.remaining[0].start !== rootStart) {
+    return undefined;
+  }
+  const rootProperties = scan.properties.filter((property) => property.ownerObjectStart === rootStart);
+  const coordination = rootProperties.filter((property) => property.key === "coordination");
+  if (coordination.length !== 1 || source[coordination[0]!.valueStart] !== "{") return undefined;
+  if (rootProperties.some((property) => property.key === "documents")) return undefined;
+  const trappedDocuments = scan.properties.filter((property) =>
+    property.ownerObjectStart === coordination[0]!.valueStart && property.key === "documents");
+  if (trappedDocuments.length !== 1) return undefined;
+  let comma = trappedDocuments[0]!.start - 1;
+  while (/\s/.test(source[comma] ?? "")) comma -= 1;
+  if (source[comma] !== ",") return undefined;
+  const candidate = `${source.slice(0, comma)}}${source.slice(comma)}`;
+  try {
+    const parsed = object(JSON.parse(candidate), "document plan");
+    object(parsed.coordination, "document plan coordination");
+    if (!Array.isArray(parsed.documents)) return undefined;
+    return candidate;
+  } catch {
+    return undefined;
+  }
+}
+
+const COORDINATION_ROOT_AUTHORITY_FIELDS = new Set([
+  "contract", "status", "summary", "coordination", "documents", "blocked",
+]);
+
+/**
+ * Accepted structured coordination shape:
+ * - a non-empty JSON object;
+ * - no top-level document-plan authority field;
+ * - JSON primitives, arrays, and nested objects up to 16 levels deep.
+ *
+ * Object keys are sorted recursively and array order is retained. The compact
+ * JSON text is therefore lossless and deterministic; no value is summarized,
+ * interpreted, renamed, or inferred.
+ */
+function canonicalCoordinationObject(value: Record<string, unknown>): string {
+  if (!Object.keys(value).length) throw new Error("document plan coordination object must not be empty");
+  for (const key of Object.keys(value)) {
+    if (COORDINATION_ROOT_AUTHORITY_FIELDS.has(key)) {
+      throw new Error(`unsupported document plan coordination authority field: ${key}`);
+    }
+  }
+  const canonicalize = (entry: unknown, depth: number): unknown => {
+    if (depth > 16) throw new Error("document plan coordination object exceeds 16 levels");
+    if (entry === null || typeof entry === "string" || typeof entry === "boolean" || typeof entry === "number") {
+      return entry;
+    }
+    if (Array.isArray(entry)) return entry.map((item) => canonicalize(item, depth + 1));
+    const record = object(entry, "document plan coordination value");
+    return Object.fromEntries(Object.keys(record).sort().map((key) => [key, canonicalize(record[key], depth + 1)]));
+  };
+  return JSON.stringify(canonicalize(value, 0));
+}
+
+interface NormalizedDocumentPlan {
+  value: Record<string, unknown>;
+  reasons: DocumentPlanNormalizationReason[];
+}
+
+function normalizeDocumentPlanRepresentation(output: string): NormalizedDocumentPlan {
+  const extracted = extractDocumentPlan(output);
+  if (Buffer.byteLength(extracted.source) > HARNESS_BUDGET.documents.maxPlanBytes) {
+    throw new Error(`document plan exceeds ${HARNESS_BUDGET.documents.maxPlanBytes} bytes`);
+  }
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = object(JSON.parse(extracted.source), "document plan");
+  } catch (error) {
+    const recovered = error instanceof SyntaxError && extracted.explicitEnvelope
+      ? recoverDocumentPlanRootBoundary(extracted.source)
+      : undefined;
+    if (!recovered) throw new Error("provider returned malformed document plan JSON");
+    parsed = object(JSON.parse(recovered), "document plan");
+    extracted.reasons.push("recovered-root-property-boundary");
+  }
+
+  const canonical: Record<string, unknown> = { ...parsed };
+  if (canonical.coordination && typeof canonical.coordination === "object" && !Array.isArray(canonical.coordination)) {
+    canonical.coordination = canonicalCoordinationObject(canonical.coordination as Record<string, unknown>);
+    extracted.reasons.push("canonicalized-coordination-object");
+  }
+  if (Array.isArray(canonical.documents)) {
+    canonical.documents = canonical.documents.map((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
+      const document = { ...(entry as Record<string, unknown>) };
+      if (typeof document.prefix === "string" && Object.hasOwn(document, "purpose")) {
+        delete document.prefix;
+        extracted.reasons.push("removed-document-prefix");
+      }
+      return document;
+    });
+  }
+  return { value: canonical, reasons: [...new Set(extracted.reasons)] };
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/** Fingerprint only the relevant plan payload; used solely to stop formatter repetition. */
+export function documentPlanFormattingFingerprint(output: string): string {
+  let relevant: string;
+  try { relevant = extractDocumentPlan(output).source; }
+  catch { relevant = output.trim().replace(/\r\n?/g, "\n"); }
+  try { relevant = stableJson(JSON.parse(relevant)); }
+  catch { relevant = relevant.trim().replace(/\r\n?/g, "\n"); }
+  return createHash("sha256").update(relevant).digest("hex");
 }
 
 const EXECUTION_AUTHORITIES = new Set([
@@ -273,7 +504,8 @@ function orderDocuments(documents: PlannedDocument[]): PlannedDocument[] {
 }
 
 export function parseDocumentPlan(output: string): DocumentPlan {
-  const value = jsonEnvelope(output, DOCUMENT_PLAN_BEGIN, DOCUMENT_PLAN_END, "document plan", HARNESS_BUDGET.documents.maxPlanBytes);
+  const normalized = normalizeDocumentPlanRepresentation(output);
+  const value = normalized.value;
   allowedKeys(value, ["contract", "status", "summary", "coordination", "documents", "blocked"], "document plan");
   if (value.contract !== DOCUMENT_PLAN_CONTRACT) {
     throw new Error(`document plan contract must be ${DOCUMENT_PLAN_CONTRACT}`);
@@ -282,7 +514,7 @@ export function parseDocumentPlan(output: string): DocumentPlan {
     throw new Error("document plan status must be complete or blocked");
   }
   const summary = text(value.summary, "document plan summary");
-  const coordination = typeof value.coordination === "string" ? value.coordination.trim() : "";
+  const coordination = text(value.coordination, "document plan coordination");
   if (!Array.isArray(value.documents)) throw new Error("document plan documents must be an array");
   if (value.documents.length > HARNESS_BUDGET.documents.maxPlannedDocuments) {
     throw new Error(`document plan exceeds ${HARNESS_BUDGET.documents.maxPlannedDocuments} documents`);
@@ -324,6 +556,11 @@ export function parseDocumentPlan(output: string): DocumentPlan {
   if (value.status === "complete" && blocked.length) throw new Error("a complete document plan cannot retain blockers");
   documents = reconcileDocumentDependencies(documents);
   documents = orderDocuments(documents);
+  if (normalized.reasons.length) {
+    process.stdout.write(
+      `[rb-harness] document-plan normalization applied ${JSON.stringify({ reasons: normalized.reasons })}\n`,
+    );
+  }
   return { contract: DOCUMENT_PLAN_CONTRACT, status: value.status, summary, coordination, documents, blocked };
 }
 

@@ -33,6 +33,7 @@ import {
   DOCUMENT_PLAN_CONTRACT,
   DOCUMENT_PLAN_END,
   assembleDocumentPlan,
+  documentPlanFormattingFingerprint,
   parseDocumentPart,
   parseDocumentPlan,
   parsePlanOrLegacyBundle,
@@ -459,6 +460,7 @@ async function authorIncrementally(options: IncrementalAuthoringOptions): Promis
         timeoutSeconds: options.timeoutSeconds,
         firstOutputTimeoutSeconds: options.firstOutputTimeoutSeconds,
         streamOutput: options.streamOutput,
+        rejectedOutputFingerprint: documentPlanFormattingFingerprint,
       });
     };
 

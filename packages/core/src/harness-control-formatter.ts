@@ -77,6 +77,8 @@ export interface ControlFormattingOptions<T> {
   timeoutSeconds: number;
   firstOutputTimeoutSeconds: number;
   streamOutput?: boolean;
+  /** Opt-in repetition guard for a control response with a stable payload identity. */
+  rejectedOutputFingerprint?: (output: string) => string;
 }
 
 /** Parse directly when possible; otherwise buy only bounded formatting calls. */
@@ -91,10 +93,16 @@ export async function parseOrFormatControlOutput<T>(options: ControlFormattingOp
     const contract = bounded(options.contract, HARNESS_BUDGET.formatting.maxContractBytes, `${options.label} formatter contract`);
     let prior = "";
     let defect = errorText(initialError);
+    let attempts = 0;
+    let repeated = false;
+    const rejectedFingerprints = options.rejectedOutputFingerprint
+      ? new Set([options.rejectedOutputFingerprint(options.rawOutput)])
+      : undefined;
     const closedRoot = await mkdtemp(resolve(tmpdir(), "rb-harness-closed-formatter-"));
     await chmod(closedRoot, 0o555);
     try {
       for (let attempt = 1; attempt <= HARNESS_BUDGET.formatting.maxAttempts; attempt += 1) {
+        attempts = attempt;
         const logPath = resolve(options.runRoot, `logs/${options.logPrefix}-${attempt}.log`);
         let output = await successfulProviderLogStdout(logPath);
         if (output !== undefined) {
@@ -130,10 +138,19 @@ export async function parseOrFormatControlOutput<T>(options: ControlFormattingOp
           });
           output = result.stdout;
         }
+        const fingerprint = options.rejectedOutputFingerprint?.(output);
+        if (fingerprint && rejectedFingerprints?.has(fingerprint)) {
+          repeated = true;
+          process.stdout.write(
+            `[rb-harness] formatador repetiu payload já rejeitado na tentativa ${attempt}; novas tentativas foram canceladas.\n`,
+          );
+          break;
+        }
         try { return options.parse(output); }
         catch (error) {
           defect = errorText(error);
           prior = output;
+          if (fingerprint) rejectedFingerprints?.add(fingerprint);
           if (attempt < HARNESS_BUDGET.formatting.maxAttempts) {
             process.stdout.write(`[rb-harness] formatador ainda fora do contrato na tentativa ${attempt}: ${defect}; tentando novamente.\n`);
           }
@@ -144,7 +161,8 @@ export async function parseOrFormatControlOutput<T>(options: ControlFormattingOp
       await rm(closedRoot, { recursive: true, force: true });
     }
     throw new Error(
-      `${options.label} formatter could not satisfy the contract after ${HARNESS_BUDGET.formatting.maxAttempts} attempts: ${defect}`,
+      `${options.label} formatter could not satisfy the contract after ${attempts} attempt${attempts === 1 ? "" : "s"}: ${defect}`
+      + (repeated ? "; repeated identical rejected payload" : ""),
     );
   }
 }
