@@ -46,6 +46,7 @@ import {
 } from "./harness-incremental-documents.js";
 import { assertPromptWithinBudget, serializeInputPackage, type HarnessInputPackage } from "./harness-input-package.js";
 import { runProvider } from "./harness-provider.js";
+import { harnessTelemetry } from "./harness-telemetry.js";
 import { sha256Text } from "./hash.js";
 import { validateExecutionMarkdown } from "./execution-contract.js";
 import { loadWorkflowResources, requestNeedsHeadlessContracts } from "./standalone-resources.js";
@@ -152,8 +153,12 @@ export function buildDocumentPartPrompt(
       part: previousPart.part,
       content: previousPart.content,
     })}` : "",
-    "Return only the raw UTF-8 content of the requested document segment. Do not wrap it in JSON, protocol markers, commentary, or a Markdown code fence.",
-    "Write only the requested contiguous segment. The first part begins the file; every later part continues exactly after the previous segment; concatenation must produce one complete document without omitted or duplicated text.",
+    repairContext
+      ? `Return exactly ${DOCUMENT_PART_BEGIN}, one JSON object, and ${DOCUMENT_PART_END}. The object must use contract ${DOCUMENT_PART_CONTRACT}, the target path, the target region ID as part, and only the replacement bytes as content.`
+      : "Return only the raw UTF-8 content of the requested document segment. Do not wrap it in JSON, protocol markers, commentary, or a Markdown code fence.",
+    repairContext
+      ? "Write only the requested repair-region replacement. Do not include complete-document content, neighboring tasks, outside headings, or immutable transitions. The Harness splices this content into the original document using code-owned offsets."
+      : "Write only the requested contiguous segment. The first part begins the file; every later part continues exactly after the previous segment; concatenation must produce one complete document without omitted or duplicated text.",
     "This is a closed authoring step. Do not inspect files, call tools, rediscover evidence, or change the plan. All authority needed for this segment is in the plan, coordination ledger, finalized dependency projection, target brief, and previous segment above.",
     `The content must not exceed ${HARNESS_BUDGET.documents.maxPartBytes} UTF-8 bytes. If the plan assigned too much to this part, be concise while preserving every RIGID fact and contract requirement; never spill into another response.`,
     defect ? `A prior attempt at this exact segment was rejected: ${defect}. Author the same span again and make it fit: the limit is ${HARNESS_BUDGET.documents.maxPartBytes} UTF-8 bytes, so remove clearly more than the overflow rather than trimming to the edge. Keep every RIGID fact, ID, and contract requirement; cut restatement, rationale, and examples that repeat what the plan or an earlier segment already says.` : "",
@@ -232,8 +237,15 @@ async function loadCheckpoint(runRoot: string, name: string, authoritySha256: st
   return { contract: "rb-harness-incremental-generation/v2", authoritySha256, plan, parts };
 }
 
-function parsePartOrLegacyDocument(output: string, expected: { path: string; part: string }): DocumentPart {
+function parsePartOrLegacyDocument(
+  output: string,
+  expected: { path: string; part: string },
+  requireIdentity = false,
+): DocumentPart {
   if (output.includes(DOCUMENT_PART_BEGIN)) return parseDocumentPart(output, expected);
+  if (requireIdentity) {
+    throw new Error(`provider did not identify the requested repair region ${expected.path}#${expected.part}`);
+  }
   if (output.includes(DOCUMENT_BUNDLE_BEGIN)) {
     const bundle = parseDocumentBundle(output);
     if (bundle.status !== "complete" || bundle.documents.length !== 1 || bundle.documents[0]?.path !== expected.path) {
@@ -297,6 +309,16 @@ interface IncrementalAuthoringOptions {
   currentRunDocuments?: readonly GeneratedDocument[];
   /** Existing documents this localized repair is authorized to replace. */
   repairAuthorizedPaths?: readonly string[];
+  /** Code-owned regions that a repair plan must reference exactly by part ID. */
+  repairAuthorizedRegions?: readonly StructuralRepairRegion[];
+  /** Region-local authority selected for the current repair part. */
+  repairContextForPart?: (path: string, part: string) => string | undefined;
+  /** Repair parts must carry their checkpoint-owned region identity. */
+  requirePartIdentity?: boolean;
+  /** Validate one authored part before it can enter the checkpoint. */
+  validatePart?: (part: DocumentPart) => void;
+  /** Alternate deterministic assembly, used by code-owned repair splicing. */
+  assemble?: (plan: DocumentPlan, parts: readonly DocumentPart[]) => DocumentBundle;
 }
 
 export function assertGenerationPlanComplete(workflow: HarnessWorkflow, plan: DocumentPlan): void {
@@ -403,6 +425,7 @@ function dependencyProjection(
 export function assertStructuralRepairPlanAuthority(
   candidate: PlannedOrLegacyBundle,
   authorizedPaths: readonly string[],
+  authorizedRegions: readonly StructuralRepairRegion[] = [],
 ): void {
   const authorized = new Set(authorizedPaths);
   const documents = candidate.kind === "plan" ? candidate.plan.documents : candidate.bundle.documents;
@@ -410,6 +433,28 @@ export function assertStructuralRepairPlanAuthority(
   if (unauthorized.length) {
     throw new DocumentSubstanceError(
       `structural repair cannot add or rewrite documents without current-run repair authority: ${unauthorized.join(", ")}`,
+    );
+  }
+  if (!authorizedRegions.length) return;
+  if (candidate.kind !== "plan") {
+    throw new DocumentSubstanceError(
+      "structural repair must return a region plan; a complete document bundle cannot identify code-owned repair regions",
+    );
+  }
+  if (candidate.plan.status === "blocked") return;
+  const authorizedRegionKeys = new Map(authorizedRegions.map((region) => [`${region.path}\0${region.id}`, region]));
+  const planned = candidate.plan.documents.flatMap((document) =>
+    document.parts.map((part) => `${document.path}\0${part.id}`));
+  const unknown = planned.filter((key) => !authorizedRegionKeys.has(key));
+  if (unknown.length) {
+    throw new DocumentSubstanceError(
+      `structural repair plan references unknown repair-region ID(s): ${unknown.map((key) => key.split("\0")[1]).join(", ")}`,
+    );
+  }
+  const missing = [...authorizedRegionKeys.keys()].filter((key) => !planned.includes(key));
+  if (missing.length) {
+    throw new DocumentSubstanceError(
+      `structural repair plan omits code-owned repair-region ID(s): ${missing.map((key) => key.split("\0")[1]).join(", ")}`,
     );
   }
 }
@@ -507,7 +552,11 @@ async function authorIncrementally(options: IncrementalAuthoringOptions): Promis
           assertGenerationPlanComplete(options.state.workflow, candidate.plan);
         }
         if (options.mode === "repair") {
-          assertStructuralRepairPlanAuthority(candidate, options.repairAuthorizedPaths ?? []);
+          assertStructuralRepairPlanAuthority(
+            candidate,
+            options.repairAuthorizedPaths ?? [],
+            options.repairAuthorizedRegions ?? [],
+          );
         }
         planned = candidate;
         break;
@@ -535,7 +584,16 @@ async function authorIncrementally(options: IncrementalAuthoringOptions): Promis
   } else {
     process.stdout.write(`[rb-harness] checkpoint incremental recuperado: ${checkpoint.parts.length} parte(s) já concluída(s).\n`);
   }
-  if (checkpoint.plan.status === "blocked") return assembleDocumentPlan(checkpoint.plan, []);
+  if (options.mode === "repair" && options.repairAuthorizedRegions?.length) {
+    assertStructuralRepairPlanAuthority(
+      { kind: "plan", plan: checkpoint.plan },
+      options.repairAuthorizedPaths ?? [],
+      options.repairAuthorizedRegions,
+    );
+  }
+  if (checkpoint.plan.status === "blocked") {
+    return options.assemble?.(checkpoint.plan, []) ?? assembleDocumentPlan(checkpoint.plan, []);
+  }
 
   const completed = new Map(checkpoint.parts.map((part) => [`${part.path}\0${part.part}`, part]));
   /** Segments already re-authored once after a substance defect. */
@@ -573,8 +631,8 @@ async function authorIncrementally(options: IncrementalAuthoringOptions): Promis
               part,
               documentIndex,
               partIndex,
-              previousPart,
-              options.repairContext,
+              options.mode === "repair" ? undefined : previousPart,
+              options.repairContextForPart?.(document.path, part.id) ?? options.repairContext,
               undefined,
               dependencyProjection(checkpoint.plan, document, completed, options.currentRunDocuments),
             ),
@@ -589,7 +647,7 @@ async function authorIncrementally(options: IncrementalAuthoringOptions): Promis
         }
         let authored: DocumentPart;
         try {
-          authored = parsePartOrLegacyDocument(rawPart, expected);
+          authored = parsePartOrLegacyDocument(rawPart, expected, options.requirePartIdentity);
         } catch (error) {
           // A substance defect — an oversized segment — cannot be repaired by
           // the formatter, which may only change representation. The writer
@@ -628,7 +686,8 @@ async function authorIncrementally(options: IncrementalAuthoringOptions): Promis
             // part can hold. The formatter cannot shorten prose, so failing
             // here costs three fewer paid attempts and says what to change.
             try {
-              authored = parsePartOrLegacyDocument(rawPart, expected);
+              authored = parsePartOrLegacyDocument(rawPart, expected, options.requirePartIdentity);
+              options.validatePart?.(authored);
               const stored = { ...authored, sha256: sha256Text(authored.content) };
               checkpoint.parts.push(stored);
               completed.set(key, stored);
@@ -660,6 +719,7 @@ async function authorIncrementally(options: IncrementalAuthoringOptions): Promis
             streamOutput: options.streamOutput,
           });
         }
+        options.validatePart?.(authored);
         const stored = { ...authored, sha256: sha256Text(authored.content) };
         checkpoint.parts.push(stored);
         completed.set(key, stored);
@@ -670,7 +730,7 @@ async function authorIncrementally(options: IncrementalAuthoringOptions): Promis
     await chmod(closedRoot, 0o700).catch(() => undefined);
     await rm(closedRoot, { recursive: true, force: true });
   }
-  return assembleDocumentPlan(checkpoint.plan, checkpoint.parts);
+  return options.assemble?.(checkpoint.plan, checkpoint.parts) ?? assembleDocumentPlan(checkpoint.plan, checkpoint.parts);
 }
 
 export interface GenerationRequestOptions {
@@ -708,6 +768,17 @@ export interface StructuralError {
   line?: number;
 }
 
+export interface StructuralRepairRegion {
+  id: string;
+  path: string;
+  /** Original UTF-8 byte offsets. These are Harness authority and never enter prompts. */
+  start: number;
+  end: number;
+  findingIds: string[];
+  anchor: { kind: "task" | "phase" | "document-line"; id: string };
+  originalContent: string;
+}
+
 export function buildRepairPrompt(
   state: HarnessRunState,
   bundle: DocumentBundle,
@@ -716,20 +787,28 @@ export function buildRepairPrompt(
   dependencies: string[] = [],
   protocolDefect?: string,
 ): string {
+  const regions = deriveStructuralRepairRegions(bundle, errors);
   const prompt = [
     "You are the RB Harness structural repair writer. Repair only deterministic errors; never rewrite unrelated documents.",
-    "RB Harness owns files, validation, checkpoints, and publication. Return a compact plan before any replacement content.",
+    "RB Harness owns region boundaries, files, validation, checkpoints, deterministic splicing, and publication. Return a compact region plan before any replacement content.",
     `Return exactly ${DOCUMENT_PLAN_BEGIN}, one JSON object, and ${DOCUMENT_PLAN_END}. Do not use Markdown fences or surrounding prose.`,
     `The JSON shape is:\n${PLAN_SHAPE}`,
     repairContractDigest(state.workflow),
     `\n===== DETERMINISTIC ERRORS =====\n${JSON.stringify(errors.map((error, index) => ({ order: index + 1, ...error })))}`,
-    `\n===== AFFECTED DOCUMENTS =====\n${JSON.stringify(documentExcerpts(bundle, affected))}`,
+    `\n===== CODE-OWNED MUTABLE REGIONS =====\n${JSON.stringify(regions.map((region) => ({
+      regionId: region.id,
+      path: region.path,
+      anchor: region.anchor,
+      findingIds: region.findingIds,
+      content: region.originalContent,
+    })))}`,
     dependencies.length
       ? `\n===== FINALIZED READ-ONLY DEPENDENCIES =====\n${JSON.stringify(documentExcerpts(bundle, dependencies))}`
       : "",
     `\n===== DOCUMENTS THAT MUST NOT CHANGE =====\n${JSON.stringify(bundle.documents.map((document) => document.path).filter((path) => !affected.includes(path)))}`,
-    "Plan only replacements of AFFECTED DOCUMENTS. Do not add a conditional artifact to satisfy a dependency or rewrite any other document; when the deterministic errors cannot be repaired within that authority, return blocked and name the missing semantic decision.",
-    `Every document you plan is rewritten in full from its parts, so plan parts that cover the whole corrected document — not just the fragment that changes. Split it into parts of at most ${HARNESS_BUDGET.documents.maxPartBytes} UTF-8 bytes, and state in each part purpose which span of the original it reproduces and what, if anything, changes inside it. The part writer cannot inspect files; it sees the original under REPAIR AUTHORITY and must reproduce its span byte for byte apart from the listed error.`,
+    "Plan exactly the supplied CODE-OWNED MUTABLE REGIONS under their existing paths. Each document part ID must be one supplied regionId, every regionId must appear exactly once, and no other part/document is authorized.",
+    "Part purposes may group or describe repairs, but any line number, byte range, or span mentioned by the model is presentation-only and cannot change authority. Do not add a conditional artifact to satisfy a dependency.",
+    "Each part writer returns only that region's replacement content in an rb-harness-document-part/v1 envelope identifying the assigned regionId. It must not reproduce the full document, neighboring tasks, outside phase headings, or immutable transitions.",
     protocolDefect ? `A prior repair response was rejected. Do not repeat it: ${protocolDefect}` : "",
   ].filter(Boolean).join("\n");
   assertPromptWithinBudget(prompt, HARNESS_BUDGET.prompt.maxRepairPromptBytes, "structural repair plan");
@@ -768,25 +847,52 @@ function documentInvariants(content: string): string[] {
 }
 
 interface RepairRange { start: number; end: number }
+interface RepairCandidate extends RepairRange {
+  path: string;
+  findingId: string;
+  anchor: StructuralRepairRegion["anchor"];
+}
 
 function lineOffsets(source: string): Array<{ start: number; end: number; text: string }> {
   const lines: Array<{ start: number; end: number; text: string }> = [];
   let start = 0;
   for (const match of source.matchAll(/.*(?:\n|$)/g)) {
     if (!match[0]) continue;
-    lines.push({ start, end: start + match[0].length, text: match[0].replace(/\n$/, "") });
-    start += match[0].length;
+    const bytes = Buffer.byteLength(match[0], "utf8");
+    lines.push({ start, end: start + bytes, text: match[0].replace(/\r?\n$/, "") });
+    start += bytes;
   }
   return lines;
 }
 
-function structuralRegion(original: string, error: StructuralError): RepairRange | undefined {
+function taskRegion(
+  lines: ReturnType<typeof lineOffsets>,
+  taskStart: number,
+): RepairRange {
+  let boundary = taskStart + 1;
+  while (boundary < lines.length
+    && !/^- \[[ x]\] T\d{3,} —/.test(lines[boundary]!.text)
+    && !/^## Phase \d+:/.test(lines[boundary]!.text)) boundary += 1;
+  let lastOwned = boundary - 1;
+  while (lastOwned > taskStart && lines[lastOwned]!.text.trim() === "") lastOwned -= 1;
+  return { start: lines[taskStart]!.start, end: lines[lastOwned]!.end };
+}
+
+function structuralRegion(
+  original: string,
+  path: string,
+  error: StructuralError,
+  findingId: string,
+): RepairCandidate | undefined {
   const lines = lineOffsets(original);
   const taskId = error.message.match(/\b(T\d{3,})\b/)?.[1];
   let anchor = error.line ? Math.max(0, error.line - 1) : -1;
   if (taskId) {
-    const found = lines.findIndex((line) => new RegExp(`^- \\[.\\] ${taskId} —`).test(line.text));
-    if (found >= 0) anchor = found;
+    const matches = lines
+      .map((line, index) => ({ line, index }))
+      .filter(({ line }) => new RegExp(`^- \\[.\\] ${taskId} —`).test(line.text));
+    if (matches.length !== 1) return undefined;
+    anchor = matches[0]!.index;
   }
   if (anchor < 0 || anchor >= lines.length) {
     if (error.code.startsWith("document.title")) anchor = lines.findIndex((line) => /^#\s+/.test(line.text));
@@ -795,75 +901,124 @@ function structuralRegion(original: string, error: StructuralError): RepairRange
   }
   if (anchor < 0 || anchor >= lines.length) return undefined;
 
-  const taskStart = (() => {
+  let taskStart = (() => {
     for (let index = anchor; index >= 0; index -= 1) if (/^- \[[ x]\] T\d{3,} —/.test(lines[index]!.text)) return index;
     return -1;
   })();
-  const phaseStart = (() => {
-    for (let index = anchor; index >= 0; index -= 1) if (/^## Phase \d+:/.test(lines[index]!.text)) return index;
-    return -1;
-  })();
-  const fieldByCode: Array<[RegExp, string]> = [
-    [/(?:^|\.)(?:scope)(?:\.|$)/, "Scope"],
-    [/(?:^|\.)(?:change)(?:\.|$)/, "Change"],
-    [/(?:^|\.)(?:covers?)(?:\.|$)/, "Covers"],
-    [/(?:^|\.)(?:parallel)(?:\.|$)/, "Parallel safe"],
-    [/(?:^|\.)(?:acceptance)(?:\.|$)|too-many-acceptance-criteria/, "Acceptance criteria"],
-    [/(?:^|\.)(?:validation)(?:\.|$)/, "Validation"],
-    [/(?:^|\.)(?:evidence)(?:\.|$)/, "Expected evidence"],
-  ];
-  const field = fieldByCode.find(([pattern]) => pattern.test(error.code))?.[1];
-  if (field && taskStart >= 0) {
-    const start = lines.findIndex((line, index) => index >= taskStart && line.text.startsWith(`  - **${field}:**`));
-    if (start >= 0) {
-      let end = start + 1;
-      while (end < lines.length && !/^  - \*\*[^*]+:\*\*/.test(lines[end]!.text)
-        && !/^- \[[ x]\] T\d{3,} —/.test(lines[end]!.text) && !/^## Phase \d+:/.test(lines[end]!.text)) end += 1;
-      return { start: lines[start]!.start, end: lines[end - 1]!.end };
-    }
+  if (taskStart >= 0) {
+    const nextPhase = (() => {
+      for (let index = taskStart + 1; index <= anchor; index += 1) if (/^## Phase \d+:/.test(lines[index]!.text)) return index;
+      return -1;
+    })();
+    if (nextPhase >= 0) taskStart = -1;
   }
-  if (/^phase\./.test(error.code) && phaseStart >= 0 && taskStart < 0) {
-    return { start: lines[anchor]!.start, end: lines[anchor]!.end };
+  if (taskStart >= 0) {
+    const id = lines[taskStart]!.text.match(/^- \[[ x]\] (T\d{3,}) —/)?.[1];
+    if (!id) return undefined;
+    return { path, findingId, anchor: { kind: "task", id }, ...taskRegion(lines, taskStart) };
   }
-  if (/^document\./.test(error.code)) return { start: lines[anchor]!.start, end: lines[anchor]!.end };
-  // Decomposition and cross-task convergence can require moving semantic
-  // material across whole tasks/phases. Without a semantic reviewer there is
-  // no deterministic proof that such a rewrite preserved meaning, so it is
-  // deliberately not authorized here.
+  if (/^phase\./.test(error.code) && /^## Phase \d+:/.test(lines[anchor]!.text)) {
+    const id = lines[anchor]!.text.match(/^## Phase (\d+):/)?.[1];
+    if (!id) return undefined;
+    return {
+      path,
+      findingId,
+      anchor: { kind: "phase", id: `Phase ${id}` },
+      start: lines[anchor]!.start,
+      end: lines[anchor]!.end,
+    };
+  }
+  if (/^document\./.test(error.code)) {
+    return {
+      path,
+      findingId,
+      anchor: { kind: "document-line", id: error.code },
+      start: lines[anchor]!.start,
+      end: lines[anchor]!.end,
+    };
+  }
   return undefined;
 }
 
-function mergeRepairRanges(ranges: RepairRange[]): RepairRange[] {
-  const merged: RepairRange[] = [];
-  for (const range of ranges.sort((left, right) => left.start - right.start)) {
+function mergeRepairRanges(candidates: RepairCandidate[]): Array<Omit<StructuralRepairRegion, "id" | "originalContent">> {
+  const merged: Array<Omit<StructuralRepairRegion, "id" | "originalContent">> = [];
+  const sorted = [...candidates].sort((left, right) =>
+    left.path.localeCompare(right.path) || left.start - right.start || left.end - right.end);
+  for (const candidate of sorted) {
     const previous = merged.at(-1);
-    if (previous && range.start <= previous.end) previous.end = Math.max(previous.end, range.end);
-    else merged.push({ ...range });
+    if (previous && previous.path === candidate.path && candidate.start < previous.end) {
+      if (previous.start !== candidate.start || previous.end !== candidate.end
+        || previous.anchor.kind !== candidate.anchor.kind || previous.anchor.id !== candidate.anchor.id) {
+        throw new Error(
+          `structural repair cannot merge overlapping code-owned boundaries in ${candidate.path}: ${previous.anchor.id} and ${candidate.anchor.id}`,
+        );
+      }
+      previous.findingIds.push(candidate.findingId);
+      continue;
+    }
+    if (previous && previous.path === candidate.path
+      && previous.start === candidate.start && previous.end === candidate.end) {
+      previous.findingIds.push(candidate.findingId);
+      continue;
+    }
+    merged.push({
+      path: candidate.path,
+      start: candidate.start,
+      end: candidate.end,
+      findingIds: [candidate.findingId],
+      anchor: candidate.anchor,
+    });
   }
   return merged;
 }
 
-function assertImmutableChunks(original: string, repaired: string, ranges: RepairRange[], path: string): void {
-  const chunks: string[] = [];
+export function deriveStructuralRepairRegions(
+  bundle: DocumentBundle,
+  errors: readonly StructuralError[],
+): StructuralRepairRegion[] {
+  const originals = new Map(bundle.documents.map((document) => [document.path, document.content]));
+  const candidates = errors.map((error, index) => {
+    if (!error.path || !originals.has(error.path)) {
+      throw new Error("structural repair cannot derive a bounded mutable region for a finding without a current-run document path");
+    }
+    const region = structuralRegion(originals.get(error.path)!, error.path, error, `finding-${String(index + 1).padStart(3, "0")}`);
+    if (!region) {
+      throw new Error(
+        `structural repair cannot prove semantic preservation for ${error.path}: the deterministic error does not identify a safely mutable structural region`,
+      );
+    }
+    return region;
+  });
+  return mergeRepairRanges(candidates).map((region, index) => ({
+    ...region,
+    id: `repair-region-${String(index + 1).padStart(3, "0")}`,
+    originalContent: Buffer.from(originals.get(region.path)!, "utf8").subarray(region.start, region.end).toString("utf8"),
+  }));
+}
+
+export function assertImmutableChunks(original: string, repaired: string, ranges: RepairRange[], path: string): void {
+  const originalBytes = Buffer.from(original, "utf8");
+  const repairedBytes = Buffer.from(repaired, "utf8");
+  const chunks: Buffer[] = [];
   let cursor = 0;
   for (const range of ranges) {
-    if (range.start > cursor) chunks.push(original.slice(cursor, range.start));
+    if (range.start > cursor) chunks.push(originalBytes.subarray(cursor, range.start));
     cursor = range.end;
   }
-  if (cursor < original.length) chunks.push(original.slice(cursor));
+  if (cursor < originalBytes.length) chunks.push(originalBytes.subarray(cursor));
   if (!chunks.length) {
     throw new Error(`structural repair cannot prove semantic preservation for ${path}: no immutable region remains outside the authorized structural errors.`);
   }
   let repairedCursor = 0;
   for (let index = 0; index < chunks.length; index += 1) {
     const chunk = chunks[index]!;
-    const found = repaired.indexOf(chunk, repairedCursor);
+    const found = repairedBytes.indexOf(chunk, repairedCursor);
     if (found < 0 || (index === 0 && ranges[0]!.start > 0 && found !== 0)) {
       throw new Error(`structural repair changed unrelated semantic content in ${path} outside the explicitly authorized structural region.`);
     }
     repairedCursor = found + chunk.length;
   }
-  if (ranges.at(-1)!.end < original.length && repairedCursor !== repaired.length) {
+  if (ranges.at(-1)!.end < originalBytes.length && repairedCursor !== repairedBytes.length) {
     throw new Error(`structural repair changed unrelated semantic content in ${path} outside the explicitly authorized structural region.`);
   }
 }
@@ -888,12 +1043,133 @@ export function assertRepairPreservedDocument(
   }
   if (original === repaired) return;
   const relevant = errors.filter((error) => !error.path || error.path === path);
-  const identified = relevant.map((error) => structuralRegion(original, error));
-  const ranges = mergeRepairRanges(identified.filter((range): range is RepairRange => Boolean(range)));
-  if (!ranges.length || identified.some((range) => !range)) {
+  const identified = relevant.map((error, index) => structuralRegion(
+    original,
+    path,
+    error,
+    `finding-${String(index + 1).padStart(3, "0")}`,
+  ));
+  if (!identified.length || identified.some((range) => !range)) {
     throw new Error(`structural repair cannot prove semantic preservation for ${path}: the deterministic error does not identify a safely mutable structural region.`);
   }
+  const ranges = mergeRepairRanges(identified as RepairCandidate[]);
   assertImmutableChunks(original, repaired, ranges, path);
+}
+
+function assertRegionLocalReplacement(region: StructuralRepairRegion, content: string): void {
+  if (!content) throw new Error(`structural repair region ${region.id} has no replacement content`);
+  if (region.originalContent.endsWith("\n") && !content.endsWith("\n")) {
+    throw new Error(`structural repair region ${region.id} must end at its existing line boundary`);
+  }
+  if (region.anchor.kind !== "task") {
+    if (/\r?\n/.test(content.replace(/\r?\n$/, ""))) {
+      throw new Error(`structural repair region ${region.id} returned complete-document or outside-region content`);
+    }
+    return;
+  }
+  if (/^# RB Execution Plan:/m.test(content) || /^## Phase \d+:/m.test(content)
+    || /<!--\s*(?:rb-execution-contract|rb-artifact-id)\s*:/m.test(content)) {
+    throw new Error(`structural repair region ${region.id} returned complete-document or outside-region content`);
+  }
+  const taskHeadings = [...content.matchAll(/^(?:- )?\[[ x]\] (T\d{3,})(?:\s+—)?/gm)].map((match) => match[1]);
+  if (taskHeadings.length > 1 || (taskHeadings.length === 1 && taskHeadings[0] !== region.anchor.id)) {
+    throw new Error(
+      `structural repair region ${region.id} contains a task outside its owned anchor ${region.anchor.id}`,
+    );
+  }
+}
+
+function validateRepairedDocument(path: string, original: string, content: string): void {
+  if (!/\/PHASES\.md$/i.test(path)) return;
+  const validation = validateExecutionMarkdown(content);
+  if (!validation.valid) {
+    throw new Error(
+      `structural repair produced an invalid execution document ${path}: `
+      + validation.issues.map((issue) => `${issue.code}: ${issue.message}`).join("; "),
+    );
+  }
+  const originalDocument = validateExecutionMarkdown(original).document;
+  if (originalDocument && validation.document) {
+    const originalPhases = originalDocument.phases.map((phase) => phase.id);
+    const repairedPhases = validation.document.phases.map((phase) => phase.id);
+    const originalTasks = originalDocument.phases.flatMap((phase) => phase.tasks.map((task) => task.id));
+    const repairedTasks = validation.document.phases.flatMap((phase) => phase.tasks.map((task) => task.id));
+    if (JSON.stringify(originalPhases) !== JSON.stringify(repairedPhases)
+      || JSON.stringify(originalTasks) !== JSON.stringify(repairedTasks)) {
+      throw new Error(
+        `structural repair produced an invalid execution document ${path}: phase/task structural anchors changed`,
+      );
+    }
+  }
+}
+
+export function spliceStructuralRepairParts(
+  bundle: DocumentBundle,
+  regions: readonly StructuralRepairRegion[],
+  plan: DocumentPlan,
+  parts: readonly DocumentPart[],
+): DocumentBundle {
+  if (plan.status === "blocked") return assembleDocumentPlan(plan, []);
+  assertStructuralRepairPlanAuthority(
+    { kind: "plan", plan },
+    [...new Set(regions.map((region) => region.path))],
+    regions,
+  );
+  const originals = new Map(bundle.documents.map((document) => [document.path, document.content]));
+  const replacements = new Map(parts.map((part) => [`${part.path}\0${part.part}`, part.content]));
+  const documents: GeneratedDocument[] = [];
+  for (const path of [...new Set(regions.map((region) => region.path))].sort((left, right) => left.localeCompare(right))) {
+    const original = originals.get(path);
+    if (original === undefined) throw new Error(`structural repair original disappeared: ${path}`);
+    let result = Buffer.from(original, "utf8");
+    const documentRegions = regions.filter((region) => region.path === path)
+      .sort((left, right) => right.start - left.start);
+    for (const region of documentRegions) {
+      const replacement = replacements.get(`${path}\0${region.id}`);
+      if (replacement === undefined) throw new Error(`structural repair is missing replacement ${path}#${region.id}`);
+      assertRegionLocalReplacement(region, replacement);
+      result = Buffer.concat([
+        result.subarray(0, region.start),
+        Buffer.from(replacement, "utf8"),
+        result.subarray(region.end),
+      ]);
+    }
+    const content = result.toString("utf8");
+    assertImmutableChunks(original, content, [...documentRegions].sort((left, right) => left.start - right.start), path);
+    assertRepairPreservedDocument(
+      original,
+      content,
+      path,
+      regions.filter((region) => region.path === path).flatMap((region) =>
+        region.findingIds.map((findingId) => ({ code: findingId, message: region.anchor.id, path }))),
+    );
+    validateRepairedDocument(path, original, content);
+    documents.push({ path, content });
+  }
+  if (replacements.size !== regions.length) {
+    throw new Error("structural repair returned duplicate or unexpected region replacements");
+  }
+  process.stdout.write(
+    `[rb-harness] structural repair splice ${JSON.stringify({
+      mutableRegions: regions.length,
+      regionIds: regions.map((region) => region.id),
+      anchors: regions.map((region) => region.anchor.id),
+      replacementsApplied: regions.length,
+    })}\n`,
+  );
+  harnessTelemetry()?.recordStructuralRepair({
+    mutableRegions: regions.length,
+    regionIds: regions.map((region) => region.id),
+    anchors: regions.map((region) => region.anchor.id),
+    replacementsApplied: regions.length,
+  });
+  return {
+    contract: DOCUMENT_BUNDLE_CONTRACT,
+    status: "complete",
+    summary: plan.summary,
+    documents,
+    blocked: [],
+  };
 }
 
 export async function requestStructuralRepair(options: RepairRequestOptions): Promise<DocumentBundle> {
@@ -907,6 +1183,14 @@ export async function requestStructuralRepair(options: RepairRequestOptions): Pr
       && affectedDirectories.has(path.slice(0, path.lastIndexOf("/")))
       && /\/(?:PHASES\.md|OPERATIONS\.json|SPEC\.md|REQUIREMENTS\.md|PLAN\.md)$/i.test(path))
     .sort((left, right) => left.localeCompare(right));
+  const regions = deriveStructuralRepairRegions(options.bundle, options.errors);
+  process.stdout.write(
+    `[rb-harness] structural repair regions ${JSON.stringify({
+      mutableRegions: regions.length,
+      regionIds: regions.map((region) => region.id),
+      anchors: regions.map((region) => region.anchor.id),
+    })}\n`,
+  );
   const planPrompt = buildRepairPrompt(options.state, options.bundle, options.errors, affected, dependencies);
   const repaired = await authorIncrementally({
     state: options.state,
@@ -920,18 +1204,34 @@ export async function requestStructuralRepair(options: RepairRequestOptions): Pr
     checkpointName: `incremental-structural-repair-${options.repairPass ?? 1}`,
     logPrefix: `structural-repair-${options.repairPass ?? 1}`,
     prefix: [
-      "You are the RB Harness structural repair writer. Write documentation only and change only the authorized affected documents.",
+      "You are the RB Harness structural repair writer. Write documentation only and replace only the one code-owned repair region named by the target part.",
       repairContractDigest(options.state.workflow),
     ].join("\n"),
     planPrompt,
     replanPrompt: (defect) => buildRepairPrompt(options.state, options.bundle, options.errors, affected, dependencies, defect),
-    repairContext: JSON.stringify({
-      errors: options.errors,
-      affected: documentExcerpts(options.bundle, affected),
-      dependencies: documentExcerpts(options.bundle, dependencies),
-    }),
+    repairContextForPart: (path, part) => {
+      const region = regions.find((candidate) => candidate.path === path && candidate.id === part);
+      if (!region) return undefined;
+      return JSON.stringify({
+        regionId: region.id,
+        path: region.path,
+        anchor: region.anchor,
+        findingIds: region.findingIds,
+        errors: region.findingIds.map((findingId) => options.errors[Number(findingId.slice(-3)) - 1]),
+        originalRegionContent: region.originalContent,
+        instruction: "Return only this region's replacement content; do not include neighboring or complete-document content.",
+      });
+    },
     currentRunDocuments: options.bundle.documents,
     repairAuthorizedPaths: affected,
+    repairAuthorizedRegions: regions,
+    requirePartIdentity: true,
+    validatePart: (part) => {
+      const region = regions.find((candidate) => candidate.path === part.path && candidate.id === part.part);
+      if (!region) throw new Error(`structural repair returned unknown repair-region ID ${part.part}`);
+      assertRegionLocalReplacement(region, part.content);
+    },
+    assemble: (plan, parts) => spliceStructuralRepairParts(options.bundle, regions, plan, parts),
   });
   const originals = new Map(options.bundle.documents.map((document) => [document.path, document.content]));
   for (const document of repaired.documents) {

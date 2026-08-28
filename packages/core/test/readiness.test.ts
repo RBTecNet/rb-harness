@@ -742,6 +742,7 @@ describe("CR-007 · the invariant prompt prefix is real", () => {
       durationMilliseconds: 10,
       stages: [],
       providerCalls: [],
+      structuralRepairs: [],
       totals: { ...usage, providerCalls: 1 },
     });
     expect(report).toContain("não medidos");

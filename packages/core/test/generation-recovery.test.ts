@@ -155,7 +155,7 @@ describe("a repair cannot silently truncate the document it replaces", () => {
       .toThrow(/rb-artifact-id marker init-execution/);
   });
 
-  it("tells the repair writer that its parts overwrite the whole file", async () => {
+  it("tells the repair writer that code-owned regions are spliced into the original", async () => {
     const project = await mkdtemp(resolve(tmpdir(), "rb-harness-repair-prompt-"));
     await mkdir(resolve(project, ".rb"), { recursive: true });
     const state = { workflow: "init", request: "Create the project." } as HarnessRunState;
@@ -169,12 +169,13 @@ describe("a repair cannot silently truncate the document it replaces", () => {
     const prompt = buildRepairPrompt(
       state,
       bundle,
-      [{ code: "task.change.vague", message: "Change is not bounded", path: ".rb/init/PHASES.md" }],
+      [{ code: "task.change.vague", message: "T001 Change is not bounded", path: ".rb/init/PHASES.md" }],
       [".rb/init/PHASES.md"],
     );
-    expect(prompt).toContain("rewritten in full from its parts");
-    expect(prompt).toContain("not just the fragment that changes");
-    expect(repairContractDigest("init")).toContain("replaced in full");
+    expect(prompt).toContain("CODE-OWNED MUTABLE REGIONS");
+    expect(prompt).toContain("repair-region-001");
+    expect(prompt).not.toContain("AFFECTED DOCUMENTS");
+    expect(repairContractDigest("init")).toContain("splices accepted replacements into the original bytes");
   });
 });
 

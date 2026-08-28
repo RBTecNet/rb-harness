@@ -29,7 +29,7 @@ if (prompt.includes("RB_HARNESS_DOCUMENT_PLAN_JSON_BEGIN")) {
     path: phasePath,
     purpose: "Replace the complete plan with the localized structural correction.",
     dependsOn: process.env.RB_HARNESS_TEST_REPAIR_DEPENDENCY === "1" ? [operationsPath] : [],
-    parts: [{ id: "whole", purpose: "Reproduce the complete corrected PHASES document." }],
+    parts: [{ id: "repair-region-001", purpose: "Replace only the code-owned T001 task region." }],
   };
   const plan = {
     contract: "rb-harness-document-plan/v1",
@@ -71,20 +71,7 @@ await record(`repair-part:${target.path}`);
 if (process.env.RB_HARNESS_TEST_REPAIR_DEPENDENCY === "1"
   && !prompt.includes("rb-operational/v1")) process.exit(7);
 
-const content = `# RB Execution Plan: Structural repair
-
-<!-- rb-execution-contract: rb-execution/v1 -->
-<!-- rb-artifact-id: structural-repair-execution -->
-
-## Phase 1: Build the scope gate
-
-**Phase ID:** P01
-**Goal:** Enforce the documented typed scope authority.
-**Depends on:** none
-**Context:**
-- \`.rb/init/PROJECT.md\`
-
-- [ ] T001 — Implement the typed scope gate
+const content = `- [ ] T001 — Implement the typed scope gate
   - **Scope:** \`src/\`, \`tests/\`
   - **Change:** Enforce RF-001 using the declared request field and finite matrix.
   - **Covers:** RF-001
@@ -96,4 +83,9 @@ const content = `# RB Execution Plan: Structural repair
     - \`npm test\`
   - **Expected evidence:** Positive and negative regression results with exit code 0.
 `;
-process.stdout.write(content);
+process.stdout.write(`RB_HARNESS_DOCUMENT_PART_JSON_BEGIN\n${JSON.stringify({
+  contract: "rb-harness-document-part/v1",
+  path: target.path,
+  part: target.part,
+  content,
+})}\nRB_HARNESS_DOCUMENT_PART_JSON_END\n`);

@@ -132,6 +132,41 @@ const needsSecondRepair = process.env.RB_HARNESS_TEST_TWO_REPAIRS === "1"
   && repairing
   && !prompt.includes("task.scope.control-plane");
 const goRepair = process.env.RB_HARNESS_TEST_GO_REPAIR === "1";
+
+if (repairing && prompt.includes("RB_HARNESS_DOCUMENT_PLAN_JSON_BEGIN")) {
+  const plan = {
+    contract: "rb-harness-document-plan/v1",
+    status: "complete",
+    summary: "Repair the one code-owned task region.",
+    coordination: "Use only repair-region-001.",
+    documents: [{
+      path: ".rb/features/structural-repair/PHASES.md",
+      purpose: "Repair the bounded T001 region.",
+      dependsOn: [],
+      parts: [{ id: "repair-region-001", purpose: "Replace only T001." }],
+    }],
+    blocked: [],
+  };
+  process.stdout.write(`RB_HARNESS_DOCUMENT_PLAN_JSON_BEGIN\n${JSON.stringify(plan)}\nRB_HARNESS_DOCUMENT_PLAN_JSON_END\n`);
+  process.exit(0);
+}
+
+if (repairing && prompt.includes("===== TARGET DOCUMENT PART =====")) {
+  const marker = "===== TARGET DOCUMENT PART =====\n";
+  const target = JSON.parse(prompt.slice(prompt.indexOf(marker) + marker.length).split("\n", 1)[0]);
+  const repairedDocument = goRepair ? goPhases(true) : phases(true, needsSecondRepair);
+  const content = goRepair
+    ? repairedDocument
+    : repairedDocument.slice(repairedDocument.indexOf("- [ ] T001"));
+  process.stdout.write(`RB_HARNESS_DOCUMENT_PART_JSON_BEGIN\n${JSON.stringify({
+    contract: "rb-harness-document-part/v1",
+    path: target.path,
+    part: target.part,
+    content,
+  })}\nRB_HARNESS_DOCUMENT_PART_JSON_END\n`);
+  process.exit(0);
+}
+
 const bundle = repairing
   ? {
     contract: "rb-harness-documents/v1",

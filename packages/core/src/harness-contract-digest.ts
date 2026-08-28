@@ -262,9 +262,10 @@ export function repairContractDigest(workflow: HarnessWorkflow): string {
     `This is one pass in a bounded correction sequence. It is mechanical, not editorial.
 
 - Fix exactly the listed deterministic errors, in the order given.
-- Plan only the documents an error actually requires: the ones named as affected, plus any new document an error requires. Never replan a document no error names.
-- **A document you replan is replaced in full.** Its parts are concatenated and the result overwrites the whole file — there is no partial patch. So re-emit the complete corrected document: title, contract markers, artifact ID, every phase, every task, every section. Emitting only the corrected fragment deletes the rest of the file and fails the run.
-- Outside the exact error, preserve every line, section, ID, and decision byte for byte from the original supplied under REPAIR AUTHORITY.
+- The RB Harness has already derived every mutable region from the original document. Plan exactly those region IDs under their existing document paths; never invent a region, range, part, or document.
+- A repair part is one region-local replacement. Return only the replacement content owned by that region, identified by its assigned region ID. Never reproduce the complete document, a neighboring task, or a phase heading outside the region.
+- Region boundaries and reconstruction are code-owned. Line numbers or ranges in prose are non-authoritative and can never expand a region.
+- The Harness splices accepted replacements into the original bytes and preserves everything outside the listed regions byte for byte.
 - Do not reopen the interview, re-explore the repository, or restate the manifest.
 - If an error cannot be repaired without a developer decision, return \`status: "blocked"\` and name the decision.`,
     EXECUTION_GRAMMAR,

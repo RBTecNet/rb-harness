@@ -95,12 +95,20 @@ export interface StageRecord {
   entries: number;
 }
 
+export interface StructuralRepairTelemetryRecord {
+  mutableRegions: number;
+  regionIds: string[];
+  anchors: string[];
+  replacementsApplied: number;
+}
+
 export interface HarnessTelemetryReport {
   contract: typeof HARNESS_TELEMETRY_CONTRACT;
   startedAt: string;
   durationMilliseconds: number;
   stages: StageRecord[];
   providerCalls: ProviderCallRecord[];
+  structuralRepairs: StructuralRepairTelemetryRecord[];
   totals: ProviderUsage & { providerCalls: number };
 }
 
@@ -142,6 +150,7 @@ export class HarnessTelemetry {
   private readonly startedAt = new Date();
   private readonly stageTotals = new Map<HarnessStage, StageRecord>();
   private readonly calls: ProviderCallRecord[] = [];
+  private readonly structuralRepairs: StructuralRepairTelemetryRecord[] = [];
   private current?: { stage: HarnessStage; at: number };
 
   /** Enter a documentation stage; the previous stage's elapsed time is banked. */
@@ -173,6 +182,14 @@ export class HarnessTelemetry {
     return this.calls.length;
   }
 
+  recordStructuralRepair(record: StructuralRepairTelemetryRecord): void {
+    this.structuralRepairs.push({
+      ...record,
+      regionIds: [...record.regionIds],
+      anchors: [...record.anchors],
+    });
+  }
+
   report(): HarnessTelemetryReport {
     const active = this.current;
     if (active) {
@@ -190,6 +207,7 @@ export class HarnessTelemetry {
         (record): record is StageRecord => Boolean(record),
       ),
       providerCalls: [...this.calls],
+      structuralRepairs: [...this.structuralRepairs],
       totals,
     };
   }

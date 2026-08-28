@@ -234,6 +234,12 @@ describe("structural repair formatter recovery", () => {
     expect(stdout.mock.calls.flat().join(" ")).toContain("removed-part-scope");
     expect(telemetry.providerCalls.map((call) => call.operation))
       .toEqual(["repair-plan-generation", undefined]);
+    expect(telemetry.structuralRepairs).toEqual([{
+      mutableRegions: 1,
+      regionIds: ["repair-region-001"],
+      anchors: ["T001"],
+      replacementsApplied: 1,
+    }]);
   });
 });
 

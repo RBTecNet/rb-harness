@@ -500,7 +500,7 @@ describe("standalone RB Harness", () => {
       expect(state.status).toBe("complete");
       expect(state.repairsUsed).toBe(1);
       expect((await readFile(modes, "utf8")).trim().split("\n"))
-        .toEqual(["interview", "generation", "repair"]);
+        .toEqual(["interview", "generation", "repair", "repair"]);
       const invocations = (await readFile(workingDirectories, "utf8")).trim().split("\n")
         .map((line) => JSON.parse(line) as { mode: string; cwd: string; entries: string[] });
       const repair = invocations.find((invocation) => invocation.mode === "repair");
@@ -517,7 +517,7 @@ describe("standalone RB Harness", () => {
     }
   }, 60_000);
 
-  it("fails a cross-task Go repair when semantic preservation cannot be proven", async () => {
+  it("fails a cross-task Go repair that returns a complete document for one region", async () => {
     const project = await mkdtemp(resolve(tmpdir(), "rb-harness-go-convergence-repair-"));
     await writeFile(resolve(project, "go.mod"), "module example.com/repair-fixture\n\ngo 1.22\n", "utf8");
     const answers = resolve(project, "answers.json");
@@ -528,13 +528,13 @@ describe("standalone RB Harness", () => {
       await expect(runStandaloneWorkflow({
         ...baseOptions(project, answers, repairingProvider),
         request: "Plan a convergent Go module introduction.",
-      })).rejects.toThrow(/cannot prove semantic preservation/);
+      })).rejects.toThrow(/complete-document or outside-region content/);
     } finally {
       delete process.env.RB_HARNESS_TEST_GO_REPAIR;
     }
   }, 60_000);
 
-  it("rejects a repair that changes an unrelated field instead of spending another repair", async () => {
+  it("rejects an invalid control-plane scope inside the authorized task region", async () => {
     const project = await mkdtemp(resolve(tmpdir(), "rb-harness-multi-repair-"));
     await writeFile(resolve(project, "package.json"), '{"name":"repair-fixture"}\n', "utf8");
     const answers = resolve(project, "answers.json");
@@ -547,9 +547,9 @@ describe("standalone RB Harness", () => {
       await expect(runStandaloneWorkflow({
         ...baseOptions(project, answers, repairingProvider),
         request: "Plan a deterministic scope gate and correct generated defects until valid.",
-      })).rejects.toThrow(/changed unrelated semantic content/);
+      })).rejects.toThrow(/invalid execution document.*task.scope.control-plane/);
       expect((await readFile(modes, "utf8")).trim().split("\n"))
-        .toEqual(["interview", "generation", "repair"]);
+        .toEqual(["interview", "generation", "repair", "repair"]);
     } finally {
       delete process.env.RB_HARNESS_TEST_PROVIDER_MODE_FILE;
       delete process.env.RB_HARNESS_TEST_TWO_REPAIRS;

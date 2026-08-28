@@ -221,13 +221,11 @@ describe("compact contract digest", () => {
 
   it("keeps the repair pass mechanical and localized", () => {
     const digest = repairContractDigest("plan");
-    expect(digest).toContain("Never replan a document no error names");
+    expect(digest).toContain("Plan exactly those region IDs");
     expect(digest).toContain("byte for byte");
     expect(digest).toContain("Do not reopen the interview");
-    // Parts overwrite the whole file, so a repair that emits only the corrected
-    // fragment deletes the rest of the document. The contract has to say so.
-    expect(digest).toContain("replaced in full");
-    expect(digest).toContain("re-emit the complete corrected document");
+    expect(digest).toContain("Never reproduce the complete document");
+    expect(digest).toContain("splices accepted replacements into the original bytes");
   });
 });
 
