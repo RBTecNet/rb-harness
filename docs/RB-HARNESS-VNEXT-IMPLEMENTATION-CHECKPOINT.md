@@ -1,8 +1,8 @@
 # RB Harness vNext — Implementation Checkpoint
 
-**Status:** authoritative checkpoint for the next implementation conversation  
-**Date:** 2026-08-28  
-**Purpose:** replace the current RB Harness generation architecture with a smaller, deterministic vNext without repeating the failed incremental-patching cycle.
+**Status:** authoritative continuation checkpoint for Phase 3
+**Date:** 2026-08-29
+**Purpose:** connect the proven deterministic Core and independently conformed provider transports into a useful semantic `vnext init` vertical slice without repeating the failed incremental-patching cycle.
 
 ---
 
@@ -17,7 +17,7 @@ In a new conversation:
 3. State that implementation should continue from this checkpoint.
 4. Do **not** reconstruct decisions from older conversations unless this checkpoint explicitly says they are still open.
 
-If this checkpoint conflicts with the older architecture spec, **this checkpoint wins** for the decisions explicitly recorded here.
+If this checkpoint conflicts with the older architecture spec, **this checkpoint wins**. In particular, the interview, provenance, semantic-recovery, request-accounting, transport-identity and roadmap decisions recorded here explicitly supersede older proposals.
 
 ---
 
@@ -40,6 +40,8 @@ But we do **not** continue adding:
 - new validator patches to compensate for independent artifacts;
 - higher retry budgets;
 - more document-part orchestration.
+
+The bounded whole-slice semantic recovery authorized later in this checkpoint is not a legacy formatter/model-repair loop and does not reopen that architecture.
 
 The new architecture is built separately under a clear `vnext/` boundary.
 
@@ -84,6 +86,10 @@ These are architectural causes. Continuing to patch individual symptoms was judg
 
 # 4. Product direction
 
+RB Harness exists to transform even an incomplete, vague or poorly specified user request into a sufficiently complete MVP specification that can be deterministically rendered into `.rb` artifacts and executed end-to-end by Ralph.
+
+The user is not required to arrive with a perfect prompt, complete architectural knowledge or zero ambiguity. The Harness owns the burden of discovering material gaps, explaining consequential choices, recommending conventional answers and reaching a usable minimum viable semantic closure.
+
 The target principle is:
 
 > **LLM thinks. Adapter translates. Harness governs. Renderer emits. Ralph executes.**
@@ -93,7 +99,9 @@ Target flow:
 ```text
 Request
    ↓
-Typed ambiguity handling
+Semantic understanding
+   ↓
+Typed ambiguity discovery and resolution
    ↓
 Provider Adapter + Model Profile
    ↓
@@ -113,6 +121,28 @@ Ralph verification
    ↓
 Atomic publication
 ```
+
+The product success criterion is:
+
+```text
+user request
+   ↓
+semantic understanding
+   ↓
+ambiguity resolution / interview
+   ↓
+reasonable controlled recovery when needed
+   ↓
+valid workflow-specific IR
+   ↓
+deterministic render
+   ↓
+Ralph-compatible .rb artifacts
+   ↓
+Ralph executes the plan end-to-end
+```
+
+The Harness must not require the user to understand software architecture merely to request an MVP. Questions should be limited to decisions that materially change what is being built; implementation trivia should normally receive an explained recommendation rather than becoming unnecessary interrogation.
 
 ---
 
@@ -205,6 +235,22 @@ Rule:
 
 > No IR field enters production unless we can answer: **who consumes this field and why?**
 
+Phase 3 orchestration and evidence concepts do not automatically become `InitProjectModel` fields. In particular, keep these outside the workflow IR unless an actual deterministic IR consumer is identified:
+
+```text
+InterviewQuestion[]
+recommendation presentation state
+interactive/headless response state
+run budget counters
+provider invocation state
+raw wire responses
+decode attempts
+semantic recovery findings
+recovery attempt history
+```
+
+`InitProjectModel` represents resolved project semantics, not the history of how those semantics were obtained. A resolved determination may reference verifiable provenance such as `questionKey` without embedding the complete interview or orchestration state into the IR.
+
 ---
 
 # 7. Phase 1 IR must stay small
@@ -279,6 +325,10 @@ type DeterminationSource =
       questionKey: SemanticKey;
     }
   | {
+      kind: "accepted-recommendation";
+      questionKey: SemanticKey;
+    }
+  | {
       kind: "model-default";
     };
 ```
@@ -286,6 +336,27 @@ type DeterminationSource =
 For `kind: "request"` the Core must verify the evidence against the original request.
 
 For `kind: "user-answer"` the Core must verify it against persisted interview answers.
+
+For `kind: "accepted-recommendation"` the Core must verify all of the following against persisted interview state:
+
+```text
+the question existed
+the recommended answer was presented or prepared for policy presentation
+the interactive response was blank, or the run was explicitly non-interactive
+the selected value equals that exact recommendation
+the acceptance mode is recorded
+```
+
+Persist enough state to distinguish:
+
+```text
+explicit user answer
+blank interactive acceptance
+non-interactive policy acceptance
+silent model assumption
+```
+
+Do not rewrite an accepted recommendation as `user-answer`: the user did not type that value. Do not rewrite it as `model-default`: the recommendation became authoritative through a defined interaction policy. It is a distinct, verifiable authority class.
 
 Only Core assigns the final origin/provenance classification.
 
@@ -295,7 +366,8 @@ A hard protected path may become authority only when it is:
 
 - built-in;
 - explicitly anchored in the request;
-- explicitly confirmed by the user.
+- explicitly confirmed by the user;
+- established by a presented and accepted recommendation whose provenance Core verifies.
 
 A model may **propose** a path for protection, but a model suggestion alone must not silently become immutable project authority.
 
@@ -313,61 +385,90 @@ Built-in protections include at minimum:
 
 Interview remains LLM-assisted because ambiguity discovery is semantic work.
 
-But the blocking decision belongs to Core.
+The model discovers ambiguity and recommends semantically useful answers. Core owns question identity, persisted state, selection authority, provenance and the decision that enough semantic authority exists to continue.
 
-Use typed questions with:
-
-```text
-materiality:
-- product
-- architecture
-- implementation
-- preference
-
-rigidity:
-- RIGID
-- FLEXIBLE
-```
-
-## Critical rule
-
-A model-provided default must **not** automatically resolve a RIGID material product/architecture question.
-
-Blocking precedence:
+Every user-facing question must contain exactly one concrete recommended answer. Conceptually:
 
 ```ts
-if (
-  q.rigidity === "RIGID" &&
-  (q.materiality === "product" ||
-   q.materiality === "architecture")
-) {
-  return BLOCKING;
-}
-
-if (q.proposedDefault !== null) {
-  return ASSUMED_DEFAULT;
+interface InterviewQuestion {
+  key: SemanticKey;
+  question: string;
+  materiality: "product" | "architecture" | "implementation" | "preference";
+  rigidity: "RIGID" | "FLEXIBLE";
+  recommendedAnswer: {
+    value: string;
+    rationale: string;
+  };
+  alternatives?: readonly string[];
 }
 ```
 
-Principle:
+The Harness never asks a question without also offering the option it recommends. The model is responsible for recommendation quality; Core decides how a selected recommendation becomes authority.
 
-> A default may resolve FLEXIBLE uncertainty.  
-> A default may recommend a RIGID decision, but it cannot decide it.
+## Answer selection
 
-Implementation/preference questions should normally become explicit assumptions rather than blocking execution.
+```text
+non-blank user answer
+→ select the explicit answer
+→ provenance: user-answer
 
-### First-slice interview ceiling
+blank interactive answer
+→ select the recommendation that was shown
+→ provenance: accepted-recommendation
 
-- max interview rounds: **1**
-- max blocking questions asked: **3**
-- more than 3 genuine blocking questions: **fail closed**
-- no hidden adaptive loop
+no interactive answer channel
+→ generate and persist the question and recommendation that would have been shown
+→ select it under non-interactive policy
+→ provenance: accepted-recommendation with non-interactive acceptance state
+```
 
-For non-interactive execution:
+A blank answer is not unresolved ambiguity. Do not repeat the same question, fail the run or silently substitute a different value. This applies to both `RIGID` and `FLEXIBLE` questions.
 
-- non-blocking questions become recorded assumptions;
-- unresolved blocking questions cause `INTERVIEW_BLOCKED`;
-- do not invent product/architecture decisions.
+## RIGID decisions
+
+The old rule that a model recommendation can never resolve a `RIGID` product/architecture decision is superseded by a distinction between silent and presented recommendations.
+
+A **silent model default** that was never presented remains model-owned. It cannot silently become hard user authority for a `RIGID` material decision.
+
+A **presented recommendation** that the user accepts by submitting blank is resolved under the Harness interaction contract:
+
+```text
+RIGID product/architecture question
++ recommendation shown
++ blank response
+→ RESOLVED
+→ accepted-recommendation provenance
+```
+
+The model still cannot claim that the user explicitly said something they did not say.
+
+## Semantic sufficiency
+
+Interview termination is based on whether the Harness has enough authority to construct a coherent MVP, not on a raw question count. Minimum viable semantic closure means:
+
+```text
+project objective is understood
+material product behavior is defined
+material architecture decisions required for planning are resolved
+requirements are sufficiently concrete
+remaining ambiguity can safely become explicit assumptions/defaults
+no unresolved contradiction prevents executable decomposition
+```
+
+An underspecified initial request is not a failure condition. The ordinary flow is:
+
+```text
+underspecified request
+→ identify material ambiguities
+→ ask focused questions with recommendations
+→ accept explicit answers or presented recommendations
+→ persist determinations and provenance
+→ continue toward minimum viable semantic closure
+```
+
+The implementation may batch questions and retain a finite operational ceiling to prevent runaway loops. The checkpoint intentionally does not freeze an arbitrary round count. If a ceiling is reached, remaining resolvable questions first adopt their already-presented recommendations. Exhaustion is not, by itself, `INTERVIEW_BLOCKED`.
+
+`INTERVIEW_BLOCKED` is exceptional. It is permitted only when no safe or meaningful decision can be established through the approved recommendation policy, an unresolved contradiction prevents executable decomposition, or the user explicitly prevents resolution. Ordinary product/architecture ambiguity and lack of initial detail are not blocking conditions.
 
 ---
 
@@ -418,6 +519,7 @@ Not all must be implemented immediately.
 
 Owns protocol concerns only:
 
+- provider family and transport identity;
 - endpoint;
 - authentication;
 - request envelope;
@@ -431,6 +533,7 @@ Owns protocol concerns only:
 
 Owns model-specific capabilities:
 
+- exact provider transport;
 - structured output mode;
 - JSON Schema support;
 - strict schema support;
@@ -439,6 +542,8 @@ Owns model-specific capabilities:
 - output limits;
 - system/developer role behavior;
 - usage reporting;
+- request-accounting mode (`exact` or `opaque`);
+- external-runtime version constraints where applicable;
 - conformance result.
 
 ### Core Wire Decoder
@@ -488,35 +593,33 @@ No adapter may call a second model to repair output.
 
 ---
 
-# 13. Adapter conformance is per model profile
+# 13. Adapter conformance is per transport and exact model profile
 
-Conformance must be recorded for the exact:
+Conformance and support must be recorded for the exact identity:
 
 ```text
-provider family + model profile
+provider family
++ transport
++ exact model profile
++ conformance suite version
++ exact runtime version where the transport is an external executable
 ```
 
-Not just the family.
+Not just the provider family or model name. A conformance result earned by one transport can never authorize another transport, even when both use the same provider family and model.
 
 Examples:
 
 ```text
-Anthropic
-├── Opus profile + recordings
-├── Sonnet profile + recordings
-└── Haiku profile + recordings
+anthropic / direct-api / claude-opus-5
+→ SUPPORTED
 
-OpenAI
-├── Sol profile + recordings
-├── Terra profile + recordings
-├── Luna profile + recordings
-├── Mini profile + recordings
-└── Spark profile + recordings
+anthropic / claude-code-cli / claude-opus-5
+→ SUPPORTED
 ```
 
-Transport tests may share family fixtures, but **support status belongs to the model profile**.
+Transport tests may share provider-neutral suite fixtures, but **support status belongs to the exact transport/profile identity and its integrity-bound record**.
 
-A model is not advertised as supported until that exact profile passes the current conformance suite.
+A profile is not advertised as supported until that exact identity passes the current conformance suite. Stale suite or executable-runtime evidence fails closed.
 
 Same provider does not imply same capabilities or same response behavior.
 
@@ -524,12 +627,17 @@ Same provider does not imply same capabilities or same response behavior.
 
 # 14. Reference provider
 
-Use **Anthropic / Claude** as the first direct-API reference family.
+The first direct-API reference family is **Anthropic / Claude**.
 
-Initial reference model proposed by the architecture spec:
+The proven reference profile is:
 
 ```text
-anthropic:claude-opus-5
+family:             anthropic
+transport:          direct-api
+profile:            anthropic:claude-opus-5
+model:              claude-opus-5
+requestAccounting:  exact
+tier:               SUPPORTED
 ```
 
 Reasons:
@@ -539,7 +647,21 @@ Reasons:
 - exercises the adapter normalization/conformance layer instead of trivially bypassing it;
 - does not force the initial IR design around OpenAI strict-schema limitations.
 
-The **second provider family must be OpenAI** to stress the same semantic wire contract under stricter JSON Schema behavior.
+The independently proven subscription transport is:
+
+```text
+family:             anthropic
+transport:          claude-code-cli
+profile:            anthropic:claude-code-cli:claude-opus-5
+model:              claude-opus-5
+requestAccounting:  opaque
+tier:               SUPPORTED
+runtime gating:     exact recorded Claude Code version
+```
+
+Opaque accounting is a supported capability mode, not degraded conformance. It means the Harness can count and bound its own CLI process invocation but does not fabricate visibility into provider-internal work.
+
+Additional provider families, including OpenAI, remain future separately approved work rather than Phase 3 scope.
 
 This is a reference implementation only.
 
@@ -584,6 +706,9 @@ This makes several invalid states unrepresentable at the provider boundary.
 
 ```text
 2 Harness semantic calls
+
+intent: 1
+work:   1
 ```
 
 No formatter calls.
@@ -592,7 +717,30 @@ No document-plan calls.
 
 No document-part calls.
 
-No model repair calls.
+No representation or document repair calls.
+
+## Controlled semantic recovery
+
+The old `max semantic retries: 0` policy is superseded. A bounded whole-slice corrective regeneration is allowed when Core decoding or semantic validation rejects a generated slice:
+
+```text
+semantic slice generation
+        ↓
+Core decode / semantic validation fails
+        ↓
+deterministic findings
+        ↓
+regenerate the COMPLETE SAME semantic slice using:
+  original authoritative inputs
+  resolved interview decisions
+  deterministic validation findings
+        ↓
+full decode / resolution / canonicalization / validation again
+```
+
+This is semantic recovery, not formatter repair. It must regenerate the complete same slice. It must not patch an individual field, fix JSON with another model, patch Markdown, splice document regions or invoke another model/profile.
+
+The model continues to produce semantics. Core continues to validate semantics. TypeScript continues to serialize artifacts.
 
 ---
 
@@ -600,32 +748,80 @@ No model repair calls.
 
 Do not recreate multiplicative nested ceilings.
 
-For the first vertical slice:
+For the initial Phase 3 vertical slice:
 
 ```text
-max Harness semantic calls:          4
-normal semantic calls:               2
+normal intent generation:                 1
+normal work generation:                   1
+normal semantic operations:               2
 
-max transport retries per call:      1
-max transport retries per RUN:       2
+max corrective regeneration per slice:    1
+max corrective regenerations per run:     2
+max semantic operations per run:          4
 
-max underlying provider requests:    6
+max Harness transport retries per call:   1
+max Harness transport retries per run:    2
+max Harness transport invocations/run:    6
 
-max semantic retries:                0
-max formatter calls:                 0
-max model repair calls:              0
-
-max interview rounds:                1
-max blocking questions asked:        3
+max formatter calls:                      0
+max representation/document repair calls: 0
+max cross-profile fallback calls:         0
 ```
 
-Important correction:
+Non-normative worked example of the ceiling:
 
-Four semantic calls with one retry each could theoretically make eight provider requests.
+```text
+worst allowed Phase 3 run:
 
-Therefore the **global six-request limit is authoritative**, with at most two transport retries across the whole run.
+4 semantic operations
+  2 normal
+  2 corrective
 
-No stage-specific allowance may bypass the global ceilings.
++ at most 2 Harness transport retries across the run
+
+= maximum 6 Harness transport invocations
+```
+
+The per-call transport retry allowance does not multiply independently across all four semantic operations. The per-run ceiling of two Harness transport retries remains authoritative.
+
+The exact numeric recovery ceiling is authoritative unless implementation discovers a compelling technical reason to change it. Such a reason must be reported for approval rather than silently increasing the budget.
+
+The universal budget covers what the Harness controls:
+
+```text
+semantic operations
+transport invocations
+Harness transport retries
+semantic corrective regenerations
+formatter calls
+repair calls
+fallback calls
+deadlines
+```
+
+It does **not** require universal visibility into transport-internal provider work.
+
+```ts
+type RequestAccounting = "exact" | "opaque";
+```
+
+For `exact` transports, `providerRequests` may be reported as measured when the provider transaction exposes it. The direct Anthropic API profile is `exact` and normally reports one measured provider request per adapter invocation.
+
+For `opaque` transports, `providerRequests` remains `unmeasured`. The Claude Code CLI profile is `opaque`: one `adapter.request()` owns exactly one Harness-started CLI process, while undocumented provider-internal structured-output work remains transport-owned.
+
+Do not infer provider requests from process count, `num_turns`, assistant-message count or token arithmetic. Opaque accounting does not weaken deadlines or cancellation:
+
+```text
+one adapter request
+→ one Harness-owned transport invocation
+→ bounded by the Core-supplied deadline / cancellation
+→ no adapter retry
+→ no second model/profile
+```
+
+Provider-internal retries are not Harness recovery. Harness corrective regeneration is a separate, explicit semantic operation initiated only after Core returns deterministic findings.
+
+No stage-specific allowance may bypass the Harness-controlled global ceilings, and no adapter may hide its own Harness retry loop.
 
 Unknown telemetry is reported as:
 
@@ -729,7 +925,7 @@ Final Ralph verification must never be the first place a semantic rule appears.
 Architecture:
 
 ```text
-semantic response
+semantic response or whole-slice corrective regeneration
    ↓
 Core decode
    ↓
@@ -750,9 +946,11 @@ Ralph consumer verification
 publish
 ```
 
+Every regenerated slice re-enters this full deterministic closure. A recovery result has no privileged validation, rendering or publication path. Where applicable it must pass Core decode, resolution, canonicalization, IR validation, `ExecutionDocument` derivation, deterministic rendering, round-trip fidelity, Ralph verification and manifest/tree verification.
+
 If rendered output fails a semantic Ralph rule that the IR validator allowed, that is a **bug in the invariant mapping**, not a new repair opportunity.
 
-No model repair loop exists in Phase 1.
+Controlled semantic recovery happens before accepted IR/render publication and responds only to deterministic Core findings. Final Ralph failure is not a model-repair opportunity.
 
 ---
 
@@ -903,13 +1101,13 @@ Do not port:
 
 ---
 
-# 24. Phase 1 implementation objective
+# 24. Phase 1 completed implementation objective
 
-**Phase 1 uses zero providers.**
+**Phase 1 used zero providers.**
 
-This is intentional.
+This was intentional and is now proven.
 
-Implement and prove:
+The completed milestone proved:
 
 ```text
 hand-written InitProjectModel fixture
@@ -939,7 +1137,7 @@ staging
 atomic publication in test fixture
 ```
 
-There must not yet be:
+That milestone intentionally contained no:
 
 - provider adapter implementation;
 - semantic gateway;
@@ -951,9 +1149,9 @@ There must not yet be:
 
 ---
 
-# 25. Phase 1 acceptance fixture
+# 25. Phase 1 completed acceptance fixture
 
-Use a trivial greenfield CLI request equivalent to:
+The completed deterministic fixture used a trivial greenfield CLI request equivalent to:
 
 > Create a Node.js CLI named `hello`. Running `hello <name>` prints `Hello, <name>!`; running without a name prints `Hello, world!`; include automated tests.
 
@@ -1052,50 +1250,81 @@ Non-negotiable:
 - splash untouched;
 - capybara untouched.
 
-Future planned simplifications, **not part of Phase 1**:
+Future planned simplifications, **not part of Phase 3**:
 
 - remove RB Memory integration;
 - remove Claude Code plugin-style integration;
 - remove Codex plugin-style integration;
 - standalone CLI becomes the product surface.
 
-These removals must not be mixed into deterministic-core implementation.
+These removals must not be mixed into the Phase 3 semantic vertical slice.
+
+Removing legacy Claude Code plugin-style integration does not mean removing the independently supported standalone `claude-code-cli` provider transport.
 
 ---
 
-# 29. Reference provider roadmap
+# 29. Completed milestones and provider roadmap
 
-After deterministic Phase 1 succeeds:
+## Phase 1 — COMPLETE / PASS
 
-### Phase 2
-
-Implement provider/adaptation/conformance layer with:
+The deterministic Core is proven:
 
 ```text
-Anthropic / Claude Opus
+fixture semantic IR
+→ code-owned identity
+→ canonicalization
+→ one semantic validation closure
+→ deterministic PHASES + BRIEF + manifest
+→ round-trip and Ralph READY
+→ atomic publication
 ```
 
-as reference.
+The approved properties include workflow-specific IR, literal `parallelSafe: false` for the current init slice, exact three-artifact output, BRIEF as non-executable context, manifest hashes from exact staged bytes and post-publication hash-only verification.
 
-No Core provider-specific logic.
+## Phase 2 — COMPLETE / PASS
 
-### Next adapter
-
-OpenAI / Codex.
-
-Purpose:
-
-stress the same semantic wire schema against a different and stricter structured-output environment.
-
-### Later
+The reference direct-API adapter is independently conformant:
 
 ```text
+family:             anthropic
+transport:          direct-api
+profile:            anthropic:claude-opus-5
+model:              claude-opus-5
+requestAccounting:  exact
+tier:               SUPPORTED
+```
+
+It preserves the semantic-blind provider boundary, protocol-only normalization, exact request accounting and source-controlled exact-profile conformance evidence.
+
+## Phase 2B — COMPLETE / PASS
+
+The subscription CLI adapter is independently conformant:
+
+```text
+family:             anthropic
+transport:          claude-code-cli
+profile:            anthropic:claude-code-cli:claude-opus-5
+model:              claude-opus-5
+requestAccounting:  opaque
+tier:               SUPPORTED
+```
+
+Opaque accounting is a first-class supported capability mode. The Harness proves and budgets one owned CLI invocation per adapter request, enforces deadline/cancellation, and reports underlying provider requests as unmeasured.
+
+Direct API and Claude Code CLI conformance are independent. Neither transport inherits the other's support result or falls back to it.
+
+## Future providers
+
+Not part of Phase 3 without separate approval:
+
+```text
+OpenAI
 MiMo
 MiniMax
 DeepSeek
 ```
 
-Each provider/model profile must pass conformance before it is marked supported.
+Every future provider/transport/model identity must pass conformance before it is marked supported.
 
 ---
 
@@ -1108,21 +1337,37 @@ Each provider/model profile must pass conformance before it is marked supported.
 5. **No semantic rule exists only at final verification.**
 6. **No document is required without a consumer.**
 7. **No recovery result bypasses the full deterministic closure.**
-8. **No provider/model is supported without per-profile conformance.**
+8. **No provider/transport/model identity is supported without exact-profile conformance.**
 9. **No publication before semantic and Ralph validation succeed.**
-10. **No nested call/retry budget may exceed the global run ceiling.**
+10. **No nested Harness call/retry budget may exceed the Harness-controlled global run ceiling.**
 11. **No IR field exists without an identified consumer.**
 12. **Adapter normalization is protocol-only.**
 13. **Adapters author no semantic prompt policy.**
 14. **Parallel safety is conservative until isolation is provable.**
 15. **Telemetry reports unknown metrics as `unmeasured`, never fake zero.**
 16. **Interview blocking is decided in Core from typed policy.**
-17. **A model default never overrides a RIGID material product/architecture decision.**
+17. **An underspecified initial request is not itself a terminal failure.**
 18. **Legacy and vNext dependency flow is one-way.**
 19. **No fallback to a second model/profile on semantic failure.**
 20. **Semantic output is produced as slices, never document parts.**
 21. **The IR is workflow-specific over a shared core, not one universal optional-field model.**
 22. **Hard user authority requires verifiable provenance.**
+23. **Every interview question has one concrete recommended answer.**
+24. **Blank interview input accepts the presented recommendation.**
+25. **Accepted-recommendation provenance is distinct from explicit user answer and silent model default.**
+26. **A presented, uncontested recommendation may resolve a `RIGID` product/architecture decision.**
+27. **A silent model default may not become hard user authority for a `RIGID` material decision.**
+28. **Interview termination is based on semantic sufficiency, not raw question count.**
+29. **Controlled recovery regenerates one complete semantic slice and is globally bounded.**
+30. **Formatter, representation repair, document repair and region splicing remain forbidden.**
+31. **Provider support identity includes transport and applicable suite/runtime constraints.**
+32. **Supported transports may use exact or opaque request accounting.**
+33. **The Harness budgets what it initiates; opaque provider-internal work remains unmeasured.**
+34. **One adapter request owns one Harness transport invocation; adapters contain no hidden Harness retry.**
+35. **The ultimate init success condition is Ralph-executable `.rb` artifacts.**
+36. **The user need not understand software architecture merely to request an MVP.**
+37. **Run state is orchestration/evidence state, never an independent semantic authority.**
+38. **Interview, provider, budget and recovery history stays outside workflow IR unless a deterministic consumer requires it.**
 
 ---
 
@@ -1130,48 +1375,251 @@ Each provider/model profile must pass conformance before it is marked supported.
 
 Do **not** ask for another broad architecture report.
 
-The architecture is sufficiently decided for the first implementation milestone.
+The architecture is sufficiently decided for the first real semantic vertical slice.
 
 Next action:
 
-> Ask Codex to implement **Phase 1 — deterministic core only**, from this checkpoint and the full vNext architecture spec.
+> Ask Codex to implement **Phase 3 — semantic `vnext init` vertical slice**, using this checkpoint as authority and the older architecture spec only as non-conflicting background.
 
-Implementation must be constrained to:
+Phase 3 is the first time the approved provider layer and deterministic Core are connected:
 
 ```text
-identity
-shared/project core types
-InitProjectModel
-resolution
-canonicalization
-validation
-ExecutionDocument derivation
-PHASES renderer
-BRIEF renderer
-manifest renderer
-round-trip/Ralph fidelity
-staging/publication fixture
-tests
+vnext init request
+        ↓
+supported provider/profile selection
+        ↓
+intent semantic generation
+        ↓
+typed ambiguity discovery
+        ↓
+interview with recommended answers
+        ↓
+explicit answers and blank/recommendation acceptance
+        ↓
+resolved determinations with verifiable provenance
+        ↓
+work semantic generation
+        ↓
+bounded whole-slice recovery if needed
+        ↓
+existing deterministic Phase 1 Core
+        ↓
+exact 3-artifact tree
+        ↓
+Ralph READY
+        ↓
+atomic publication
 ```
 
-No provider code.
+## Phase 3 implementation scope
 
-No adapter code.
+- Semantic Gateway/orchestration;
+- Core-owned semantic wire decoder;
+- intent wire schema;
+- work wire schema generated after intent resolution;
+- typed interview questions and selection policy;
+- recommended-answer presentation and handling;
+- accepted-recommendation provenance and persisted verification state;
+- interactive interview runtime;
+- headless recommendation acceptance behavior;
+- semantic sufficiency policy;
+- bounded whole-slice corrective regeneration;
+- Harness-controlled semantic/transport invocation budget;
+- supported transport/profile selection without fallback;
+- experimental `rb-harness vnext init` CLI wiring;
+- run state required for interview and recovery continuity;
+- end-to-end hello-style and intentionally underspecified request fixtures.
 
-No interview runtime yet.
+## Phase 3 run-state authority boundary
 
-No provider calls.
+Phase 3 run state is orchestration/evidence state. It is not an independent semantic authority and must not become a second source of project truth.
 
-No legacy deletion.
+The authoritative semantic project state remains:
+
+```text
+verified request/interview authority
+        ↓
+workflow-specific IR
+```
+
+Run state may preserve the evidence needed to reconstruct or verify that authority, including interview continuity, presented recommendations, explicit answers, acceptance modes, attempt state, budget state and recovery continuity. It must not independently define:
+
+```text
+requirements
+tasks
+phases
+acceptance criteria
+ownership
+execution ordering
+commands
+```
+
+Do not recreate legacy checkpoint/document graphs under a `run state` name.
+
+## Phase 3 non-goals
+
+Do not implement without separate approval:
+
+```text
+formatter LLM
+representation repair model
+document-plan protocol
+document-part protocol
+region splicing
+post-publication semantic repair
+automatic provider/profile fallback
+OPERATIONS.json
+legacy deletion
+RB Memory removal
+plugin removals
+OpenAI adapter
+MiMo adapter
+MiniMax adapter
+DeepSeek adapter
+parallelSafe inference
+```
+
+Do not broaden Phase 3 into the entire provider or workflow roadmap.
+
+## Required scenario A — interactive underspecified MVP
+
+Use an intentionally incomplete request equivalent to:
+
+> Build me a simple inventory system.
+
+Expected behavior:
+
+```text
+request received
+→ Harness identifies missing material MVP decisions
+→ every generated question includes one recommended answer
+→ user explicitly answers some questions
+→ user leaves some answers blank
+→ blank answers adopt the recommendations
+→ determinations and provenance become complete
+→ intent resolves
+→ work generates
+→ deterministic .rb artifacts render
+→ Ralph reports READY
+```
+
+The exact fixture domain may change if a smaller fixture proves the same behavior, but it must intentionally omit material information. The test must prove that Harness adds semantic value rather than merely reformatting a complete specification.
+
+## Required scenario B — headless underspecified MVP
+
+Use the same intentionally incomplete request, or an equivalent:
+
+> Build me a simple inventory system.
+
+Expected behavior:
+
+```text
+underspecified request
+        ↓
+intent generation discovers material ambiguity
+        ↓
+questions generated
+        ↓
+every question contains exactly one recommendation
+        ↓
+questions and recommendations persisted
+        ↓
+no interactive answer channel exists
+        ↓
+recommendations selected through non-interactive policy
+        ↓
+accepted-recommendation provenance
+with non-interactive acceptance mode
+        ↓
+semantic sufficiency reached
+        ↓
+work schema constrained from resolved intent
+        ↓
+work generation
+        ↓
+existing deterministic Core
+        ↓
+exact three-artifact tree
+        ↓
+round-trip / manifest / Ralph green
+        ↓
+Ralph READY
+```
+
+This is a required product-level Phase 3 end-to-end test. It must prove that headless execution does not skip question generation, silently invent unrecorded decisions, require interactive input or return `INTERVIEW_BLOCKED` for ordinary ambiguity.
+
+Persisted evidence must distinguish non-interactive recommendation acceptance from an explicit user answer, blank interactive acceptance and a silent model default. The question and its exact recommendation must exist in persisted state before non-interactive policy accepts it.
+
+## Required scenario C — controlled semantic recovery
+
+Prove both bounded outcomes:
+
+```text
+provider-valid structured response
+→ Core semantic validation failure
+→ deterministic findings
+→ one complete same-slice corrective regeneration
+→ full deterministic closure
+→ success
+```
+
+and:
+
+```text
+first semantic attempt invalid
+→ one complete corrective attempt invalid
+→ bounded terminal failure
+```
+
+There is no formatter, document patch, partial-field patch, third hidden attempt or fallback profile.
+
+In addition to the product-level recovery scenario, deterministic unit/orchestration tests must independently prove both recovery ceilings:
+
+```text
+intent:
+  initial attempt
+  + at most 1 corrective regeneration
+
+work:
+  initial attempt
+  + at most 1 corrective regeneration
+```
+
+and globally:
+
+```text
+intent correction + work correction
+→ 2 corrective regenerations total
+→ permitted
+
+second correction of intent
+→ forbidden
+
+second correction of work
+→ forbidden
+
+third corrective regeneration anywhere in the run
+→ forbidden
+```
+
+These budget proofs may use deterministic or fake-provider orchestration fixtures. Separate paid/provider-backed end-to-end calls for intent and work are not required.
 
 ---
 
 # 32. Success condition for the next conversation
 
-The next conversation should consider Phase 1 successful only when:
+Phase 3 is successful only when complete requests and all three required scenario families—interactive underspecified MVP, headless underspecified MVP and controlled semantic recovery—can reach the applicable deterministic closure and produce the required bounded outcome through an explicitly supported provider/transport/profile.
 
 ```text
-fixture IR
+request
+   ↓
+supported transport/profile
+   ↓
+semantic intent
+   ↓
+semantically sufficient persisted decisions
+   ↓
+semantic work
    ↓
 deterministic core
    ↓
@@ -1187,13 +1635,19 @@ Ralph-compatible READY
 with:
 
 ```text
-0 provider calls
+every question carrying a recommendation
+blank and headless acceptance carrying accepted-recommendation provenance
+headless questions/recommendations persisted before policy acceptance
+bounded whole-slice semantic recovery
+per-slice and per-run recovery ceilings independently enforced
+Harness-controlled transport invocation accounting
+opaque provider requests remaining unmeasured
 0 formatter calls
-0 repair calls
-0 provider-specific branches
+0 representation/document repair calls
+0 provider/profile fallback calls
+0 provider-specific branches in Core
+no recovery path bypassing deterministic closure
 ```
-
-Once that is proven, move to adapter/conformance work.
 
 ---
 
