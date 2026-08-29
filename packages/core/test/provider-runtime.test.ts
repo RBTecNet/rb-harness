@@ -10,6 +10,7 @@ import { credentialStorePaths, listCredentials, resolveCredential, saveCredentia
 import { renderHarnessDashboard } from "../src/harness-dashboard.js";
 import { providerInvocation } from "../src/harness-provider.js";
 import { collectProviderTestWizardOptions, providerListValue } from "../src/provider-cli.js";
+import { saveApiKeyLoginCredential } from "../src/auth-cli.js";
 
 const originalCredentialHome = process.env.RB_CREDENTIAL_HOME;
 
@@ -115,6 +116,67 @@ describe("shared direct-provider credentials", () => {
       question: async () => "",
       write: () => undefined,
     })).rejects.toThrow("requires --provider and --model outside an interactive terminal");
+  });
+
+  test("persists optional Anthropic workspace metadata while keeping the API key encrypted", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "rb-anthropic-login-"));
+    process.env.RB_CREDENTIAL_HOME = root;
+    const hidden = vi.fn(async () => "anthropic-login-secret-sentinel");
+    const visible = vi.fn(async () => "wrkspc_TEST123");
+    await saveApiKeyLoginCredential(
+      { provider: "anthropic", providerLabel: "Anthropic", label: "workspace" },
+      { hidden, visible },
+    );
+    const resolved = await resolveCredential("anthropic", "workspace");
+    const metadata = await readFile(credentialStorePaths().metadata, "utf8");
+    expect(resolved.record.attributes).toEqual({ workspaceId: "wrkspc_TEST123" });
+    expect(metadata).toContain("wrkspc_TEST123");
+    expect(metadata).not.toContain("anthropic-login-secret-sentinel");
+    expect(hidden).toHaveBeenCalledWith(expect.stringContaining("entrada oculta"));
+    expect(visible).toHaveBeenCalledWith(expect.stringContaining("Workspace ID"));
+
+    await saveApiKeyLoginCredential(
+      { provider: "anthropic", providerLabel: "Anthropic", label: "workspace" },
+      { hidden: async () => "replacement-secret-sentinel", visible: async () => "wrkspc_UPDATED456" },
+    );
+    expect((await listCredentials("anthropic"))).toHaveLength(1);
+    expect((await resolveCredential("anthropic", "workspace")).record.attributes).toEqual({ workspaceId: "wrkspc_UPDATED456" });
+  });
+
+  test("supports blank Anthropic workspace and leaves other API-key login behavior unchanged", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "rb-api-key-login-"));
+    process.env.RB_CREDENTIAL_HOME = root;
+    await saveApiKeyLoginCredential(
+      { provider: "anthropic", providerLabel: "Anthropic", label: "blank" },
+      { hidden: async () => "blank-workspace-secret", visible: async () => "" },
+    );
+    expect((await resolveCredential("anthropic", "blank")).record.attributes).toBeUndefined();
+
+    const otherVisible = vi.fn(async () => "must-not-be-read");
+    await saveApiKeyLoginCredential(
+      { provider: "deepseek", providerLabel: "DeepSeek", label: "default" },
+      { hidden: async () => "deepseek-login-secret", visible: otherVisible },
+    );
+    expect(otherVisible).not.toHaveBeenCalled();
+    expect((await resolveCredential("deepseek", "default")).record.attributes).toBeUndefined();
+  });
+
+  test("rejects malformed Anthropic workspace metadata before saving and never includes the API key in the error", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "rb-anthropic-login-invalid-"));
+    process.env.RB_CREDENTIAL_HOME = root;
+    const secret = "invalid-workspace-secret-sentinel";
+    let message = "";
+    try {
+      await saveApiKeyLoginCredential(
+        { provider: "anthropic", providerLabel: "Anthropic", label: "invalid" },
+        { hidden: async () => secret, visible: async () => "not-a-workspace" },
+      );
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toMatch(/must match wrkspc_/);
+    expect(message).not.toContain(secret);
+    expect(await listCredentials()).toEqual([]);
   });
 });
 

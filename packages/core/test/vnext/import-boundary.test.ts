@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 const LEGACY_ALLOWLIST = new Set([
   "types", "fs-utils", "hash", "path-policy", "path-ownership",
   "execution-contract", "go-plan-convergence", "manifest", "version",
+  "credential-store",
+  "anthropic-credential",
 ]);
 
 async function typescriptFiles(root: string): Promise<string[]> {
@@ -41,7 +43,8 @@ describe("vNext import boundary", () => {
 
     const legacyFiles = (await typescriptFiles(sourceRoot)).filter((path) => !path.startsWith(`${vnextRoot}/`));
     for (const file of legacyFiles) {
-      expect(imports(await readFile(file, "utf8")).some((specifier) => specifier.includes("/vnext/")), file).toBe(false);
+      const mayRegisterVnextCli = file === resolve(sourceRoot, "cli-program.ts");
+      expect(imports(await readFile(file, "utf8")).some((specifier) => specifier.includes("/vnext/")), file).toBe(mayRegisterVnextCli);
     }
   });
 

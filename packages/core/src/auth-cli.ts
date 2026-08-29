@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
-import { listCredentials, removeCredential, saveCredential, credentialStorePaths } from "./credential-store.js";
+import { listCredentials, removeCredential, saveCredential, credentialStorePaths, type CredentialRecord } from "./credential-store.js";
 import {
   DIRECT_PROVIDERS,
   directProvider,
@@ -13,11 +13,17 @@ import {
   type AuthProtocol,
   type DirectProviderId,
 } from "./provider-registry.js";
+import { isAnthropicWorkspaceId } from "./anthropic-credential.js";
 
 interface LoginOptions {
   provider?: string;
   protocol?: string;
   label?: string;
+}
+
+interface ApiKeyLoginPrompts {
+  readonly hidden: (prompt: string) => Promise<string>;
+  readonly visible: (prompt: string, defaultValue?: string) => Promise<string>;
 }
 
 function requireInteractive(): void {
@@ -81,6 +87,31 @@ async function hiddenQuestion(prompt: string): Promise<string> {
     stdin.setRawMode?.(false);
     stdin.pause();
   }
+}
+
+/** Provider-auth collection only; the generic credential store remains provider-neutral. */
+export async function saveApiKeyLoginCredential(input: {
+  provider: DirectProviderId;
+  providerLabel: string;
+  label: string;
+}, prompts: ApiKeyLoginPrompts = { hidden: hiddenQuestion, visible: question }): Promise<CredentialRecord> {
+  const secret = await prompts.hidden(`API key de ${input.providerLabel} (entrada oculta)`);
+  if (!secret) throw new Error("API key cannot be empty");
+  let attributes: Record<string, string> | undefined;
+  if (input.provider === "anthropic") {
+    const workspaceId = await prompts.visible("Workspace ID da Anthropic (opcional; obrigatório para chaves vinculadas a identidade/múltiplos workspaces)");
+    if (workspaceId && !isAnthropicWorkspaceId(workspaceId)) {
+      throw new Error("Anthropic workspace ID must match wrkspc_ followed by letters or digits");
+    }
+    if (workspaceId) attributes = { workspaceId };
+  }
+  return saveCredential({
+    provider: input.provider,
+    protocol: "api-key",
+    label: input.label,
+    secret,
+    ...(attributes ? { attributes } : {}),
+  });
 }
 
 function runCommand(command: string, args: string[], options: { inherit?: boolean } = {}): Promise<{ code: number; output: string }> {
@@ -204,9 +235,7 @@ export async function runLoginWizard(options: LoginOptions = {}): Promise<void> 
   const label = options.label?.trim() || await question("Nome desta credencial", "default");
 
   if (protocol === "api-key") {
-    const secret = await hiddenQuestion(`API key de ${definition.label} (entrada oculta)`);
-    if (!secret) throw new Error("API key cannot be empty");
-    const record = await saveCredential({ provider: providerId, protocol, label, secret });
+    const record = await saveApiKeyLoginCredential({ provider: providerId, providerLabel: definition.label, label });
     stdout.write(`Credencial ${record.id} salva no cofre local compartilhado.\n`);
     return;
   }

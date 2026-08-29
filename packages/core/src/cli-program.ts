@@ -52,6 +52,7 @@ import {
 } from "./manifest.js";
 import type { ArtifactRecord, ArtifactStatus, ValidationIssue } from "./types.js";
 import type { HarnessWorkflow, ProviderConfiguration } from "./standalone-types.js";
+import { runVnextConformanceCommand } from "./vnext/providers/conformance/cli.js";
 
 const program = new Command();
 
@@ -616,6 +617,16 @@ providerCommands.command("test")
     timeout: Number(options.timeout),
     json: Boolean(options.json),
   }));
+
+const vnext = program.command("vnext").description("Run experimental vNext laboratories");
+vnext.command("conformance")
+  .description("Replay or explicitly record exact-profile adapter conformance")
+  .argument("<profile-id>")
+  .option("--record", "perform explicit live recording")
+  .option("--credential <id-or-label>", "saved direct API credential selector")
+  .action(async (profileId: string, options: { record?: boolean; credential?: string }) => {
+    await runVnextConformanceCommand({ profileId, record: Boolean(options.record), credential: options.credential });
+  });
 
 program.command("_provider-run")
   .description("Internal direct API agent adapter")
