@@ -67,10 +67,10 @@ describe("Phase 2 provider boundaries", () => {
       .not.toMatch(/Respond with valid JSON|Do not output Markdown|Harness requirements|Repair your answer/i);
   });
 
-  it("adds only conformance beneath vnext and does not register vnext init", () => {
+  it("registers the experimental vnext init surface without changing legacy init", () => {
     const surface = harnessCommandSurface();
     expect(surface["rb-harness vnext conformance"]).toEqual(expect.arrayContaining(["--record", "--credential"]));
-    expect(surface["rb-harness vnext init"]).toBeUndefined();
+    expect(surface["rb-harness vnext init"]).toEqual(expect.arrayContaining(["--profile", "--credential", "--headless"]));
     expect(surface["rb-harness init"]).toBeDefined();
   });
 });

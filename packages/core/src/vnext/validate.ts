@@ -23,7 +23,7 @@ import type {
   SemanticTask,
 } from "./ir.js";
 import { INIT_PROJECT_MODEL_VERSION } from "./ir.js";
-import { requestEvidenceIsVerified, userAnswerIsVerified } from "./provenance.js";
+import { acceptedRecommendationIsVerified, requestEvidenceIsVerified, userAnswerIsVerified } from "./provenance.js";
 import type { Finding, FindingClass, IrInvariantId, ValidationOutcome } from "./result.js";
 
 function codeUnitCompare(left: string, right: string): number {
@@ -79,6 +79,8 @@ export function canonicalize(model: InitProjectModel): InitProjectModel {
         ...model.core.provenance,
         answers: Object.fromEntries(Object.entries(model.core.provenance.answers)
           .sort(([left], [right]) => codeUnitCompare(left, right))),
+        acceptedRecommendations: Object.fromEntries(Object.entries(model.core.provenance.acceptedRecommendations)
+          .sort(([left], [right]) => codeUnitCompare(left, right))),
       },
     },
     requirements: model.requirements.map((entry) => ({ ...entry, statement: cleanText(entry.statement) })),
@@ -129,7 +131,7 @@ function duplicates(values: readonly string[]): readonly string[] {
   return [...result].sort(codeUnitCompare);
 }
 
-function pathIsSafe(value: string): boolean {
+export function projectRelativePathIsSafe(value: string): boolean {
   if (!value || /[\0\n\r\t`]/.test(value) || value.includes("\\")) return false;
   if (value.startsWith("/") || /^[A-Za-z]:\//.test(value)) return false;
   const parts = value.split("/");
@@ -141,7 +143,7 @@ function pathsIntersect(left: string, right: string): boolean {
   return scopeTokenCoversPath(left, right) || scopeTokenCoversPath(right, left);
 }
 
-function validSingleLine(value: string): boolean {
+export function semanticSingleLineIsValid(value: string): boolean {
   return value.trim().length > 0 && !/[\n\r\t]/.test(value);
 }
 
@@ -157,8 +159,8 @@ function proseCommand(command: string): boolean {
     || /^(?:rodar|executar|verificar|inspecionar|testar)\s+(?:o|a|os|as|que)\b/i.test(command);
 }
 
-function commandSafetyIssue(command: string): string | undefined {
-  if (!validSingleLine(command) || command.includes("`")) return "must be one non-empty single-line command without Markdown delimiters";
+export function qualityCommandSafetyIssue(command: string): string | undefined {
+  if (!semanticSingleLineIsValid(command) || command.includes("`")) return "must be one non-empty single-line command without Markdown delimiters";
   if (interactiveCommand(command)) return "must be non-interactive";
   if (/(?:^|[;&|]\s*)exit\s+0(?:\s|$)/i.test(command)) return "must not force a successful exit";
   if (proseCommand(command)) return "is prose disguised as an executable command";
@@ -173,13 +175,17 @@ function isIsoDateTime(value: string): boolean {
 function sourceIsVerified(source: DeterminationSource, model: InitProjectModel): boolean {
   if (source.kind === "model-default") return true;
   if (source.kind === "request") return requestEvidenceIsVerified(model.core.provenance.originalRequest, source.evidence);
-  return userAnswerIsVerified(model.core.provenance.answers, source.questionKey);
+  return source.kind === "user-answer"
+    ? userAnswerIsVerified(model.core.provenance.answers, source.questionKey)
+    : acceptedRecommendationIsVerified(model.core.provenance.acceptedRecommendations, source.questionKey);
 }
 
 function protectedSourceIsVerified(path: ProtectedPath, model: InitProjectModel): boolean {
   if (path.source.kind === "built-in") return [".rb", ".rb-harness", ".git"].includes(path.path);
   if (path.source.kind === "request") return requestEvidenceIsVerified(model.core.provenance.originalRequest, path.source.evidence);
-  return userAnswerIsVerified(model.core.provenance.answers, path.source.questionKey);
+  return path.source.kind === "user-answer"
+    ? userAnswerIsVerified(model.core.provenance.answers, path.source.questionKey)
+    : acceptedRecommendationIsVerified(model.core.provenance.acceptedRecommendations, path.source.questionKey);
 }
 
 function graphHasCycle<T extends { readonly id: string; readonly dependsOn: readonly string[] }>(values: readonly T[]): boolean {
@@ -281,7 +287,7 @@ export function validate(model: InitProjectModel): ValidationOutcome {
   for (const [taskIndex, task] of tasks.entries()) {
     if (task.ownedPaths.length === 0) add(findings, "I-06", `${task.id} has no executable owned-path scope`, `/phases/tasks/${taskIndex}/ownedPaths`);
     for (const [pathIndex, path] of task.ownedPaths.entries()) {
-      if (!pathIsSafe(path)) add(findings, "I-06", `Unsafe owned path: ${path}`, `/phases/tasks/${taskIndex}/ownedPaths/${pathIndex}`, "fatal", [path]);
+      if (!projectRelativePathIsSafe(path)) add(findings, "I-06", `Unsafe owned path: ${path}`, `/phases/tasks/${taskIndex}/ownedPaths/${pathIndex}`, "fatal", [path]);
       const intersections = model.core.protectedPaths.filter((protectedPath) => pathsIntersect(path, protectedPath.path));
       if (intersections.length) add(findings, "I-07", `Owned path intersects protected authority: ${path}`, `/phases/tasks/${taskIndex}/ownedPaths/${pathIndex}`, "fatal", intersections.map((entry) => entry.path));
       if ([".rb", ".rb-harness", ".git"].some((control) => pathsIntersect(path, control))) {
@@ -291,8 +297,8 @@ export function validate(model: InitProjectModel): ValidationOutcome {
     if (changeReferencesPlanningArtifacts(task.intent)) {
       add(findings, "I-08", `${task.id} change intent directs a control-plane mutation`, `/phases/tasks/${taskIndex}/intent`);
     }
-    if (!validSingleLine(task.intent) || task.ownedPaths.length === 0 || task.covers.length === 0 || task.acceptance.length === 0
-      || task.validation.length === 0 || !validSingleLine(task.expectedEvidence)) {
+    if (!semanticSingleLineIsValid(task.intent) || task.ownedPaths.length === 0 || task.covers.length === 0 || task.acceptance.length === 0
+      || task.validation.length === 0 || !semanticSingleLineIsValid(task.expectedEvidence)) {
       add(findings, "I-09", `${task.id} lacks required intent, scope, acceptance, validation, or evidence`, `/phases/tasks/${taskIndex}`);
     }
     for (const [acceptanceIndex, acceptance] of task.acceptance.entries()) {
@@ -314,16 +320,16 @@ export function validate(model: InitProjectModel): ValidationOutcome {
   for (const [taskIndex, task] of tasks.entries()) {
     for (const [validationIndex, intent] of task.validation.entries()) {
       if (intent.kind === "command" && !commands.has(intent.commandKey)) add(findings, "I-11", `Unknown quality-command key ${intent.commandKey}`, `/phases/tasks/${taskIndex}/validation/${validationIndex}`);
-      if (intent.kind === "manual" && !validSingleLine(intent.inspection)) add(findings, "I-09", "Manual validation inspection is empty or multiline", `/phases/tasks/${taskIndex}/validation/${validationIndex}`);
+      if (intent.kind === "manual" && !semanticSingleLineIsValid(intent.inspection)) add(findings, "I-09", "Manual validation inspection is empty or multiline", `/phases/tasks/${taskIndex}/validation/${validationIndex}`);
       if (intent.kind === "manual") {
         const issue = ambiguousValidationInstruction({ kind: "manual", value: intent.inspection });
         if (issue) add(findings, "I-12", `Manual validation ${issue}`, `/phases/tasks/${taskIndex}/validation/${validationIndex}`, "semantic-invalid");
       }
-      if (intent.kind === "human" && !validSingleLine(intent.evidence)) add(findings, "I-09", "Human validation evidence is empty or multiline", `/phases/tasks/${taskIndex}/validation/${validationIndex}`);
+      if (intent.kind === "human" && !semanticSingleLineIsValid(intent.evidence)) add(findings, "I-09", "Human validation evidence is empty or multiline", `/phases/tasks/${taskIndex}/validation/${validationIndex}`);
     }
   }
   for (const [index, command] of model.qualityCommands.entries()) {
-    const issue = commandSafetyIssue(command.command);
+    const issue = qualityCommandSafetyIssue(command.command);
     if (issue) add(findings, "I-12", `Quality command ${command.key} ${issue}`, `/qualityCommands/${index}/command`, "semantic-invalid", [command.command]);
   }
 
@@ -342,14 +348,22 @@ export function validate(model: InitProjectModel): ValidationOutcome {
 
   for (const [index, determination] of model.core.determinations.entries()) {
     if (!sourceIsVerified(determination.source, model)) add(findings, "I-17", "Determination authority provenance is not verifiable", `/core/determinations/${index}/source`);
+    if (determination.source.kind === "accepted-recommendation"
+      && model.core.provenance.acceptedRecommendations[determination.source.questionKey]?.value.trim() !== determination.statement.trim()) {
+      add(findings, "I-17", "Accepted-recommendation determination differs from the verified selected value", `/core/determinations/${index}/statement`);
+    }
     if (determination.source.kind === "model-default" && determination.rigidity === "RIGID"
       && (determination.materiality === "product" || determination.materiality === "architecture")) {
       add(findings, "I-17", "A model default cannot decide a RIGID product or architecture determination", `/core/determinations/${index}/source`, "user-decision-required");
     }
   }
   for (const [index, path] of model.core.protectedPaths.entries()) {
-    if (!pathIsSafe(path.path)) add(findings, "I-06", "Protected path is not a safe single-line project-relative path", `/core/protectedPaths/${index}/path`, "fatal", [path.path]);
+    if (!projectRelativePathIsSafe(path.path)) add(findings, "I-06", "Protected path is not a safe single-line project-relative path", `/core/protectedPaths/${index}/path`, "fatal", [path.path]);
     if (!protectedSourceIsVerified(path, model)) add(findings, "I-17", "Protected-path authority provenance is not verifiable", `/core/protectedPaths/${index}/source`);
+    if (path.source.kind === "accepted-recommendation"
+      && model.core.provenance.acceptedRecommendations[path.source.questionKey]?.value.trim() !== path.path.trim()) {
+      add(findings, "I-17", "Accepted-recommendation protected path differs from the verified selected value", `/core/protectedPaths/${index}/path`);
+    }
   }
   const protectedRoots = new Set(model.core.protectedPaths.map((entry) => entry.path));
   for (const required of [".rb", ".rb-harness", ".git"]) {
@@ -381,7 +395,7 @@ export function validate(model: InitProjectModel): ValidationOutcome {
       ]),
     ]),
   ];
-  for (const [pointer, value] of singleLines) if (!validSingleLine(value)) add(findings, "I-18", "Rendered semantic field must be non-empty and single-line", pointer);
+  for (const [pointer, value] of singleLines) if (!semanticSingleLineIsValid(value)) add(findings, "I-18", "Rendered semantic field must be non-empty and single-line", pointer);
 
   for (const [index, task] of tasks.entries()) if (task.parallelSafe !== false) add(findings, "I-19", `${task.id} parallel safety must be code-owned false`, `/phases/tasks/${index}/parallelSafe`);
   if (model.requirements.length === 0) add(findings, "I-20", "At least one requirement is required", "/requirements", "user-decision-required");

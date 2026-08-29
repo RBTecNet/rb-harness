@@ -1,4 +1,4 @@
-# vNext Phase 1 IR consumer register
+# vNext IR consumer register
 
 Every production `InitProjectModel` surface is witnessed by a `satisfies Record<keyof …>` registration in `vnext/ir.ts`. Adding a field to any model interface or discriminated-union variant fails typecheck until a present Phase 1 consumer is declared. The executable register test also requires this table to match the typed registrations exactly and requires every code registration to have a non-empty consumer.
 
@@ -30,6 +30,7 @@ Every production `InitProjectModel` surface is witnessed by a `satisfies Record<
 | core.protectedPaths[].source.questionKey | verified answer | supplied-answer resolution | I-17 |
 | core.provenance | Core | closure and manifest provenance | typed witness |
 | core.provenance.answers | supplied answers | user-answer verification | I-17 |
+| core.provenance.acceptedRecommendations | Core-verified accepted recommendation proofs | accepted-recommendation verification | I-17 |
 | core.provenance.generatedAt | injected run clock | manifest generatedAt | I-17 |
 | core.provenance.originalRequest | request | request-evidence verification | I-17 |
 | core.provenance.requestSha256 | Core | binds provenance to request bytes | I-17 |

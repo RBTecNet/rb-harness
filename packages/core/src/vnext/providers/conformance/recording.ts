@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import type { Measured, ProviderErrorKind } from "../contract.js";
+import type { Measured, ModelInvocationConfigurationEvidence, ProviderErrorKind } from "../contract.js";
 import {
   isProviderTransportId,
   isRequestAccounting,
@@ -64,23 +64,9 @@ export type LiveRuntimeAttestation =
       readonly executable: string;
     };
 
-export interface ModelInvocationConfigurationEvidence {
-  readonly modelId: string;
-  readonly effort: string;
-  readonly inputMode: "stdin";
-  readonly systemPromptMode: "replacement-file" | "other";
-  readonly settingSources: "none" | "configured";
-  readonly strictMcpConfig: boolean;
-  readonly configuredMcpServers: number;
-  readonly toolsMode: "disabled-except-structured-output" | "other";
-  readonly fallbackModelConfigured: boolean;
-  readonly sessionPersistence: "disabled" | "enabled-or-unspecified";
-  readonly restrictedMode: boolean;
-}
-
 /** Sanitized, provider-neutral evidence about an external transport runtime. */
 export interface TransportRuntimeEvidence {
-  readonly format: "rb-external-runtime-evidence/v2";
+  readonly format: "rb-external-runtime-evidence/v3";
   readonly cliInvocations: number;
   readonly observedProviderRequests: Measured<number>;
   readonly observedTopLevelModelSteps: readonly number[];

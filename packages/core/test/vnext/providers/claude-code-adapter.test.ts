@@ -173,7 +173,7 @@ describe("Claude Code CLI adapter", () => {
     expect(invocation.stdin).toBe(request().input);
     expect(invocation.args).toEqual(expect.arrayContaining([
       "-p", "--safe-mode", "--restricted", "--strict-mcp-config", "--disable-slash-commands",
-      "--no-chrome", "--no-session-persistence", "--max-turns", "1", "--model", "claude-opus-5",
+      "--no-chrome", "--no-session-persistence", "--max-turns", "6", "--model", "claude-opus-5",
       "--effort", "low", "--tools", "", "--disallowedTools", "mcp__*", "--json-schema",
     ]));
     expect(invocation.args).not.toContain("--fallback-model");
@@ -193,7 +193,7 @@ describe("Claude Code CLI adapter", () => {
       expect(child[name], name).toBeUndefined();
     }
     expect(child.CLAUDE_CODE_MAX_RETRIES).toBe("0");
-    expect(child.MAX_STRUCTURED_OUTPUT_RETRIES).toBe("0");
+    expect(child.MAX_STRUCTURED_OUTPUT_RETRIES).toBe("5");
     expect(child.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBe("777");
     expect(child.UNRELATED_VALUE).toBe("preserved");
   });

@@ -116,7 +116,7 @@ function deriveRuntimeAssertion(input: {
   const { key, adapter, profile, cases, record } = input;
   const evidence = record.runtimeEvidence;
   if (!evidence) return runtimeFail("external runtime evidence is missing");
-  if (evidence.format !== "rb-external-runtime-evidence/v2") return runtimeFail("external runtime evidence format is stale or missing");
+  if (evidence.format !== "rb-external-runtime-evidence/v3") return runtimeFail("external runtime evidence format is stale or missing");
   const invocations = replayRuntimeInvocations(adapter, record);
   const configuration = evidence.invocationConfiguration;
 
@@ -291,8 +291,8 @@ export function replayConformance(input: {
     if (test.expect.kind === "live-smoke") {
       const smoke = record.liveSmoke[test.expect.errorKind === "cancelled" ? "cancellation" : "timeout"];
       const invocations = smoke?.transportInvocations ?? smoke?.providerRequests;
-      const externalV2 = record.runtimeEvidence?.format === "rb-external-runtime-evidence/v2";
-      const passed = externalV2
+      const externalV3 = record.runtimeEvidence?.format === "rb-external-runtime-evidence/v3";
+      const passed = externalV3
         ? smoke?.errorKind === test.expect.errorKind
           && invocations === 1
           && smoke.promptAbort
@@ -384,8 +384,13 @@ export function validateConformanceRecord(input: {
     if (record.modelId !== profile.modelId) throw new Error(`conformance record model '${String(record.modelId)}' does not match profile model '${profile.modelId}'`);
     if (!record.transportVersion?.trim()) throw new Error("external transport conformance record is missing transportVersion");
     if (!record.runtimeEvidence) throw new Error("external transport conformance record is missing runtime evidence");
-    if (record.runtimeEvidence.format !== "rb-external-runtime-evidence/v2") {
+    if (record.runtimeEvidence.format !== "rb-external-runtime-evidence/v3") {
       throw new Error(`external transport runtime evidence format '${String(record.runtimeEvidence.format)}' is stale or invalid`);
+    }
+    const currentConfiguration = input.adapter.invocationConfigurationEvidence?.(profile);
+    if (!currentConfiguration) throw new Error(`external transport ${profile.transport} does not expose current invocation policy evidence`);
+    if (!isDeepStrictEqual(record.runtimeEvidence.invocationConfiguration, currentConfiguration)) {
+      throw new Error("external transport invocation policy differs from the conformance record");
     }
     if (record.requestAccounting !== profile.requestAccounting) {
       throw new Error(`conformance record request accounting '${String(record.requestAccounting)}' does not match profile request accounting '${profile.requestAccounting}'`);

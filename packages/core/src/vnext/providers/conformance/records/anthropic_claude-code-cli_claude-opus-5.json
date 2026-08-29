@@ -8,8 +8,8 @@
   "requestAccounting": "opaque",
   "transportVersion": "2.1.251 (Claude Code)",
   "suiteVersion": "rb-adapter-conformance/v1",
-  "runId": "b0d5bf6b-e804-4f02-9ee0-99eb83937172",
-  "recordedAt": "2026-08-29T02:53:09.285Z",
+  "runId": "6a8baf17-777d-4a3f-aef8-5e60b75717e7",
+  "recordedAt": "2026-08-29T05:23:51.090Z",
   "rawResponses": {
     "representation-comprehensive": {
       "origin": "live-recorded",
@@ -70,13 +70,13 @@
             "type": "assistant",
             "message": {
               "model": "claude-opus-5",
-              "id": "msg_011CeWHMtfD7E7aRxkMg9JQP",
+              "id": "msg_011CeWUs98T1XP9R3sqEW5FH",
               "type": "message",
               "role": "assistant",
               "content": [
                 {
                   "type": "tool_use",
-                  "id": "toolu_01KqrGFrKmNEoJ3C352YaUqw",
+                  "id": "toolu_01PVdZQT9pp7M9zC2oWhP95G",
                   "name": "StructuredOutput",
                   "input": {
                     "title": "transport-probe",
@@ -110,11 +110,11 @@
               "stop_details": null,
               "usage": {
                 "input_tokens": 2,
-                "cache_creation_input_tokens": 0,
-                "cache_read_input_tokens": 952,
+                "cache_creation_input_tokens": 952,
+                "cache_read_input_tokens": 0,
                 "cache_creation": {
                   "ephemeral_5m_input_tokens": 0,
-                  "ephemeral_1h_input_tokens": 0
+                  "ephemeral_1h_input_tokens": 952
                 },
                 "output_tokens": 24,
                 "service_tier": "standard",
@@ -124,8 +124,8 @@
               "context_management": null
             },
             "parent_tool_use_id": null,
-            "timestamp": "2026-08-29T02:52:51.337Z",
-            "request_id": "req_011CeWHMstLA2FwsVVJjASqx"
+            "timestamp": "2026-08-29T05:23:37.703Z",
+            "request_id": "req_011CeWUs8DsqYPcX67E2sacW"
           },
           {
             "type": "user",
@@ -133,29 +133,29 @@
               "role": "user",
               "content": [
                 {
-                  "tool_use_id": "toolu_01KqrGFrKmNEoJ3C352YaUqw",
+                  "tool_use_id": "toolu_01PVdZQT9pp7M9zC2oWhP95G",
                   "type": "tool_result",
                   "content": "Structured output provided successfully"
                 }
               ]
             },
             "parent_tool_use_id": null,
-            "timestamp": "2026-08-29T02:52:51.344Z",
+            "timestamp": "2026-08-29T05:23:37.711Z",
             "tool_use_result": "Structured output provided successfully"
           },
           {
             "type": "rate_limit_event",
             "rate_limit_info": {
               "status": "allowed",
-              "resetsAt": 1787977800,
+              "resetsAt": 1787997000,
               "rateLimitType": "five_hour",
               "overageStatus": "rejected",
               "overageDisabledReason": "out_of_credits",
               "isUsingOverage": false,
               "unifiedWindows": {
                 "five_hour": {
-                  "utilization": 0.1,
-                  "resetsAt": 1787977800
+                  "utilization": 0.03,
+                  "resetsAt": 1787997000
                 },
                 "seven_day": {
                   "utilization": 0.04,
@@ -166,13 +166,13 @@
           },
           {
             "is_error": false,
-            "duration_api_ms": 7580,
+            "duration_api_ms": 2167,
             "num_turns": 2,
             "stop_reason": "tool_use",
             "usage": {
               "input_tokens": 2,
-              "cache_creation_input_tokens": 0,
-              "cache_read_input_tokens": 952,
+              "cache_creation_input_tokens": 952,
+              "cache_read_input_tokens": 0,
               "output_tokens": 179,
               "output_tokens_details": {
                 "thinking_tokens": 0
@@ -183,7 +183,7 @@
               },
               "service_tier": "standard",
               "cache_creation": {
-                "ephemeral_1h_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 952,
                 "ephemeral_5m_input_tokens": 0
               },
               "inference_geo": "not_available",
@@ -194,8 +194,8 @@
               "claude-opus-5": {
                 "inputTokens": 2,
                 "outputTokens": 179,
-                "cacheReadInputTokens": 952,
-                "cacheCreationInputTokens": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 952,
                 "webSearchRequests": 0,
                 "contextWindow": 1000000,
                 "maxOutputTokens": 64000,
@@ -257,19 +257,19 @@
               ],
               "optional": null
             },
-            "ttft_ms": 7591,
-            "ttft_stream_ms": 6375,
-            "time_to_request_ms": 31,
+            "ttft_ms": 2176,
+            "ttft_stream_ms": 954,
+            "time_to_request_ms": 27,
             "type": "result",
-            "duration_ms": 7606,
+            "duration_ms": 2190,
             "queued_turn_count": 0
           }
         ],
         "exitCode": 0,
         "exitSignal": null,
-        "startedAt": "2026-08-29T02:52:43.143Z",
-        "completedAt": "2026-08-29T02:52:51.378Z",
-        "firstOutputMs": 615,
+        "startedAt": "2026-08-29T05:23:34.881Z",
+        "completedAt": "2026-08-29T05:23:37.742Z",
+        "firstOutputMs": 657,
         "streamComplete": true,
         "treeQuiescent": true,
         "treeVerified": true
@@ -315,13 +315,13 @@
             "type": "assistant",
             "message": {
               "model": "claude-opus-5",
-              "id": "msg_011CeWHNVq47E832E8pB13ZD",
+              "id": "msg_011CeWUsLii1saGjSVhHDTsP",
               "type": "message",
               "role": "assistant",
               "content": [
                 {
                   "type": "tool_use",
-                  "id": "toolu_01NDH9PdFUgBzSktmmKnCzeg",
+                  "id": "toolu_01HiiWyeRZXFFmBwQg7vgavW",
                   "name": "StructuredOutput",
                   "input": {
                     "items": []
@@ -336,11 +336,11 @@
               "stop_details": null,
               "usage": {
                 "input_tokens": 2,
-                "cache_creation_input_tokens": 0,
-                "cache_read_input_tokens": 687,
+                "cache_creation_input_tokens": 687,
+                "cache_read_input_tokens": 0,
                 "cache_creation": {
                   "ephemeral_5m_input_tokens": 0,
-                  "ephemeral_1h_input_tokens": 0
+                  "ephemeral_1h_input_tokens": 687
                 },
                 "output_tokens": 24,
                 "service_tier": "standard",
@@ -350,8 +350,8 @@
               "context_management": null
             },
             "parent_tool_use_id": null,
-            "timestamp": "2026-08-29T02:53:06.626Z",
-            "request_id": "req_011CeWHNV3BHmf7nBjWWQi11"
+            "timestamp": "2026-08-29T05:23:39.785Z",
+            "request_id": "req_011CeWUsKyokwJPKxH9tTSt4"
           },
           {
             "type": "user",
@@ -359,29 +359,29 @@
               "role": "user",
               "content": [
                 {
-                  "tool_use_id": "toolu_01NDH9PdFUgBzSktmmKnCzeg",
+                  "tool_use_id": "toolu_01HiiWyeRZXFFmBwQg7vgavW",
                   "type": "tool_result",
                   "content": "Structured output provided successfully"
                 }
               ]
             },
             "parent_tool_use_id": null,
-            "timestamp": "2026-08-29T02:53:06.634Z",
+            "timestamp": "2026-08-29T05:23:39.793Z",
             "tool_use_result": "Structured output provided successfully"
           },
           {
             "type": "rate_limit_event",
             "rate_limit_info": {
               "status": "allowed",
-              "resetsAt": 1787977800,
+              "resetsAt": 1787997000,
               "rateLimitType": "five_hour",
               "overageStatus": "rejected",
               "overageDisabledReason": "out_of_credits",
               "isUsingOverage": false,
               "unifiedWindows": {
                 "five_hour": {
-                  "utilization": 0.1,
-                  "resetsAt": 1787977800
+                  "utilization": 0.03,
+                  "resetsAt": 1787997000
                 },
                 "seven_day": {
                   "utilization": 0.04,
@@ -392,13 +392,13 @@
           },
           {
             "is_error": false,
-            "duration_api_ms": 14638,
+            "duration_api_ms": 1459,
             "num_turns": 2,
             "stop_reason": "tool_use",
             "usage": {
               "input_tokens": 2,
-              "cache_creation_input_tokens": 0,
-              "cache_read_input_tokens": 687,
+              "cache_creation_input_tokens": 687,
+              "cache_read_input_tokens": 0,
               "output_tokens": 52,
               "output_tokens_details": {
                 "thinking_tokens": 0
@@ -409,7 +409,7 @@
               },
               "service_tier": "standard",
               "cache_creation": {
-                "ephemeral_1h_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 687,
                 "ephemeral_5m_input_tokens": 0
               },
               "inference_geo": "not_available",
@@ -420,8 +420,8 @@
               "claude-opus-5": {
                 "inputTokens": 2,
                 "outputTokens": 52,
-                "cacheReadInputTokens": 687,
-                "cacheCreationInputTokens": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 687,
                 "webSearchRequests": 0,
                 "contextWindow": 1000000,
                 "maxOutputTokens": 64000,
@@ -464,19 +464,19 @@
             "structured_output": {
               "items": []
             },
-            "ttft_ms": 14649,
-            "ttft_stream_ms": 14648,
-            "time_to_request_ms": 31,
+            "ttft_ms": 1469,
+            "ttft_stream_ms": 896,
+            "time_to_request_ms": 30,
             "type": "result",
-            "duration_ms": 14664,
+            "duration_ms": 1485,
             "queued_turn_count": 0
           }
         ],
         "exitCode": 0,
         "exitSignal": null,
-        "startedAt": "2026-08-29T02:52:51.381Z",
-        "completedAt": "2026-08-29T02:53:06.667Z",
-        "firstOutputMs": 609,
+        "startedAt": "2026-08-29T05:23:37.747Z",
+        "completedAt": "2026-08-29T05:23:39.825Z",
+        "firstOutputMs": 581,
         "streamComplete": true,
         "treeQuiescent": true,
         "treeVerified": true
@@ -519,13 +519,13 @@
             "type": "assistant",
             "message": {
               "model": "claude-opus-5",
-              "id": "msg_011CeWHMtfD7E7aRxkMg9JQP",
+              "id": "msg_011CeWUs98T1XP9R3sqEW5FH",
               "type": "message",
               "role": "assistant",
               "content": [
                 {
                   "type": "tool_use",
-                  "id": "toolu_01KqrGFrKmNEoJ3C352YaUqw",
+                  "id": "toolu_01PVdZQT9pp7M9zC2oWhP95G",
                   "name": "StructuredOutput",
                   "input": {
                     "title": "transport-probe",
@@ -559,11 +559,11 @@
               "stop_details": null,
               "usage": {
                 "input_tokens": 2,
-                "cache_creation_input_tokens": 0,
-                "cache_read_input_tokens": 952,
+                "cache_creation_input_tokens": 952,
+                "cache_read_input_tokens": 0,
                 "cache_creation": {
                   "ephemeral_5m_input_tokens": 0,
-                  "ephemeral_1h_input_tokens": 0
+                  "ephemeral_1h_input_tokens": 952
                 },
                 "output_tokens": 24,
                 "service_tier": "standard",
@@ -573,8 +573,8 @@
               "context_management": null
             },
             "parent_tool_use_id": null,
-            "timestamp": "2026-08-29T02:52:51.337Z",
-            "request_id": "req_011CeWHMstLA2FwsVVJjASqx"
+            "timestamp": "2026-08-29T05:23:37.703Z",
+            "request_id": "req_011CeWUs8DsqYPcX67E2sacW"
           },
           {
             "type": "user",
@@ -582,29 +582,29 @@
               "role": "user",
               "content": [
                 {
-                  "tool_use_id": "toolu_01KqrGFrKmNEoJ3C352YaUqw",
+                  "tool_use_id": "toolu_01PVdZQT9pp7M9zC2oWhP95G",
                   "type": "tool_result",
                   "content": "Structured output provided successfully"
                 }
               ]
             },
             "parent_tool_use_id": null,
-            "timestamp": "2026-08-29T02:52:51.344Z",
+            "timestamp": "2026-08-29T05:23:37.711Z",
             "tool_use_result": "Structured output provided successfully"
           },
           {
             "type": "rate_limit_event",
             "rate_limit_info": {
               "status": "allowed",
-              "resetsAt": 1787977800,
+              "resetsAt": 1787997000,
               "rateLimitType": "five_hour",
               "overageStatus": "rejected",
               "overageDisabledReason": "out_of_credits",
               "isUsingOverage": false,
               "unifiedWindows": {
                 "five_hour": {
-                  "utilization": 0.1,
-                  "resetsAt": 1787977800
+                  "utilization": 0.03,
+                  "resetsAt": 1787997000
                 },
                 "seven_day": {
                   "utilization": 0.04,
@@ -616,9 +616,9 @@
         ],
         "exitCode": 0,
         "exitSignal": null,
-        "startedAt": "2026-08-29T02:52:43.143Z",
-        "completedAt": "2026-08-29T02:52:51.378Z",
-        "firstOutputMs": 615,
+        "startedAt": "2026-08-29T05:23:34.881Z",
+        "completedAt": "2026-08-29T05:23:37.742Z",
+        "firstOutputMs": 657,
         "streamComplete": false,
         "treeQuiescent": true,
         "treeVerified": true
@@ -636,9 +636,9 @@
         ],
         "exitCode": 0,
         "exitSignal": null,
-        "startedAt": "2026-08-29T02:52:43.143Z",
-        "completedAt": "2026-08-29T02:52:51.378Z",
-        "firstOutputMs": 615,
+        "startedAt": "2026-08-29T05:23:34.881Z",
+        "completedAt": "2026-08-29T05:23:37.742Z",
+        "firstOutputMs": 657,
         "streamComplete": true,
         "treeQuiescent": true,
         "treeVerified": true
@@ -688,21 +688,21 @@
           {
             "type": "system",
             "subtype": "thinking_tokens",
-            "estimated_tokens": 103,
-            "estimated_tokens_delta": 53
+            "estimated_tokens": 104,
+            "estimated_tokens_delta": 54
           },
           {
             "type": "assistant",
             "message": {
               "model": "claude-opus-5",
-              "id": "msg_011CeWHPd69QqWubm2TvLLnh",
+              "id": "msg_011CeWUsVgDViDWEF687MY29",
               "type": "message",
               "role": "assistant",
               "content": [
                 {
                   "type": "thinking",
                   "thinking": "",
-                  "signature": "CAISkwMKpgEIERgCKkAylFpEvrv7i55KCrawo0EvgSJouQ7qCch6Uo/h7rII/czFKlxV8Etek6gddPVPbdgRuDOvQMqck3zUDX3YmOzWMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQyYTM0MzUwMS1jYmY4LTQ1NDgtYWI4MS02NGFmMWFjMDQ0OTVyEMxdYGUd5cUvJeoxF7AUPAaIAQGoAZSTydQGsAECEgzfG18KFBg8HaTTVEkaDEs+2G6D6/HbA0cwWyIw1FLOBfuvdXRAAcHLlTOaDG+lf1ggDn7uD+a3X17s1v6bAW96EErRZ2x9zrjHR12eKpkBElCAStVfSyJAQzUMXU0QX06Kz/Dj4e685S7OWda11fdJX6hZvJK/b2orrLxv3EAJubdHa1HgLstiP8eSNZjXx8j4EbF5PLCjm1u4/0Fo+bpP5zMGMWwH3Y+WrLRNc0B5czER8oVIEpdgu12QUk6LBMTLn+bNF/CiJd0L6Em+1bhtHDGDu/ruKZfV4Jfb/oMUOv+C+XzuwOCeGAE="
+                  "signature": "CAISlwMKpgEIERgCKkC90b2takqaOFUkjcNVSsCPUAd6XRc/Mcy91N2rx3DqvoXxgix6JBas814q07t22HyyEvsvxBpCIrVe7V7MBfezMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQyYTM0MzUwMS1jYmY4LTQ1NDgtYWI4MS02NGFmMWFjMDQ0OTVyEMxdYGUd5cUvJeoxF7AUPAaIAQGoAd7ZydQGsAECEgwK0d0TalFJ8+eWm3kaDE8zobUQSd7qtS7IWiIwZ4brF0xkZhRefDsEluQPVUDoTp2X8axZatAmpq+L2myeOAxz/En8+dg8YsFqAxwTKp0B20CQ2I+F3ZzbUq/PyuU0CsLTy0naRSB5yC5KCLy21f1QLte4ufMz0QNIImbsJ47OReeWDMGG2modhBsiG5IeIJPgPsiVGzdvIyLizNGzGD7feDRcD7l8toemPJ0IhdlrzI5VNxxYcTiQJ4BF1SoQo++aE0mC1fdh6kMprtqMYAUPD9n+uj3SKPKNQPw2BwtRNl9iRP69uwtMHPZMRBgB"
                 }
               ],
               "stop_reason": null,
@@ -724,20 +724,20 @@
               "context_management": null
             },
             "parent_tool_use_id": null,
-            "timestamp": "2026-08-29T02:53:08.813Z",
-            "request_id": "req_011CeWHPcHGxLH8NbAyfHbiM"
+            "timestamp": "2026-08-29T05:23:42.607Z",
+            "request_id": "req_011CeWUsUznfbs5rGf1ar6Xp"
           },
           {
             "type": "assistant",
             "message": {
               "model": "claude-opus-5",
-              "id": "msg_011CeWHPd69QqWubm2TvLLnh",
+              "id": "msg_011CeWUsVgDViDWEF687MY29",
               "type": "message",
               "role": "assistant",
               "content": [
                 {
                   "type": "tool_use",
-                  "id": "toolu_012YqANZUxybEN2SZwnwcLe6",
+                  "id": "toolu_01RB26BekDS6xBo2swSLsV4g",
                   "name": "StructuredOutput",
                   "input": {
                     "value": "-"
@@ -766,8 +766,8 @@
               "context_management": null
             },
             "parent_tool_use_id": null,
-            "timestamp": "2026-08-29T02:53:09.054Z",
-            "request_id": "req_011CeWHPcHGxLH8NbAyfHbiM"
+            "timestamp": "2026-08-29T05:23:42.612Z",
+            "request_id": "req_011CeWUsUznfbs5rGf1ar6Xp"
           },
           {
             "type": "user",
@@ -778,43 +778,339 @@
                   "type": "tool_result",
                   "content": "Output does not match required schema: /value: must NOT have fewer than 2 characters",
                   "is_error": true,
-                  "tool_use_id": "toolu_012YqANZUxybEN2SZwnwcLe6"
+                  "tool_use_id": "toolu_01RB26BekDS6xBo2swSLsV4g"
                 }
               ]
             },
             "parent_tool_use_id": null,
-            "timestamp": "2026-08-29T02:53:09.064Z",
+            "timestamp": "2026-08-29T05:23:42.622Z",
             "tool_use_result": "Error: Output does not match required schema: /value: must NOT have fewer than 2 characters"
           },
           {
-            "is_error": true,
-            "duration_api_ms": 0,
-            "num_turns": 2,
-            "stop_reason": null,
-            "usage": {
-              "output_tokens_details": {
-                "thinking_tokens": 0
+            "type": "rate_limit_event",
+            "rate_limit_info": {
+              "status": "allowed",
+              "resetsAt": 1787997000,
+              "rateLimitType": "five_hour",
+              "overageStatus": "rejected",
+              "overageDisabledReason": "out_of_credits",
+              "isUsingOverage": false,
+              "unifiedWindows": {
+                "five_hour": {
+                  "utilization": 0.03,
+                  "resetsAt": 1787997000
+                },
+                "seven_day": {
+                  "utilization": 0.04,
+                  "resetsAt": 1788368400
+                }
+              }
+            }
+          },
+          {
+            "type": "assistant",
+            "message": {
+              "model": "claude-opus-5",
+              "id": "msg_011CeWUsf71Asxj8C98AW262",
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_01HFGuum6GaLe5xUiKM2i5ov",
+                  "name": "StructuredOutput",
+                  "input": {
+                    "value": "NA"
+                  },
+                  "caller": {
+                    "type": "direct"
+                  }
+                }
+              ],
+              "stop_reason": null,
+              "stop_sequence": null,
+              "stop_details": null,
+              "usage": {
+                "input_tokens": 2,
+                "cache_creation_input_tokens": 163,
+                "cache_read_input_tokens": 689,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 163
+                },
+                "output_tokens": 25,
+                "service_tier": "standard",
+                "inference_geo": "not_available"
               },
-              "input_tokens": 0,
-              "cache_creation_input_tokens": 0,
-              "cache_read_input_tokens": 0,
-              "output_tokens": 0,
+              "diagnostics": null,
+              "context_management": null
+            },
+            "parent_tool_use_id": null,
+            "timestamp": "2026-08-29T05:23:43.973Z",
+            "request_id": "req_011CeWUseCvTe2ZHUpXxiweh"
+          },
+          {
+            "type": "user",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "content": "Output does not match required schema: /value: must NOT have more than 1 characters",
+                  "is_error": true,
+                  "tool_use_id": "toolu_01HFGuum6GaLe5xUiKM2i5ov"
+                }
+              ]
+            },
+            "parent_tool_use_id": null,
+            "timestamp": "2026-08-29T05:23:43.976Z",
+            "tool_use_result": "Error: Output does not match required schema: /value: must NOT have more than 1 characters"
+          },
+          {
+            "type": "assistant",
+            "message": {
+              "model": "claude-opus-5",
+              "id": "msg_011CeWUski6aJeu8dVAaFgom",
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "The output schema is unsatisfiable: it requires `value` to have at least 2 characters and at most 1 character simultaneously. No value can be produced until the schema constraints are corrected (e.g., `minLength: 1, maxLength: 2`)."
+                }
+              ],
+              "stop_reason": null,
+              "stop_sequence": null,
+              "stop_details": null,
+              "usage": {
+                "input_tokens": 2,
+                "cache_creation_input_tokens": 111,
+                "cache_read_input_tokens": 852,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 111
+                },
+                "output_tokens": 1,
+                "service_tier": "standard",
+                "inference_geo": "not_available"
+              },
+              "diagnostics": null,
+              "context_management": null
+            },
+            "parent_tool_use_id": null,
+            "timestamp": "2026-08-29T05:23:46.126Z",
+            "request_id": "req_011CeWUsjzSNPgK6KkNd3pq7"
+          },
+          {
+            "type": "user",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "[structured-output-enforce] You MUST call the StructuredOutput tool to complete this request. Call this tool now."
+                }
+              ]
+            },
+            "parent_tool_use_id": null,
+            "timestamp": "2026-08-29T05:23:46.142Z",
+            "isSynthetic": true
+          },
+          {
+            "type": "assistant",
+            "message": {
+              "model": "claude-opus-5",
+              "id": "msg_011CeWUsutzapAv6CASmuQv9",
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_01M28nGmD7wmQrR2Kz6ic12Y",
+                  "name": "StructuredOutput",
+                  "input": {
+                    "value": "N"
+                  },
+                  "caller": {
+                    "type": "direct"
+                  }
+                }
+              ],
+              "stop_reason": null,
+              "stop_sequence": null,
+              "stop_details": null,
+              "usage": {
+                "input_tokens": 2,
+                "cache_creation_input_tokens": 122,
+                "cache_read_input_tokens": 963,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 122
+                },
+                "output_tokens": 25,
+                "service_tier": "standard",
+                "inference_geo": "not_available"
+              },
+              "diagnostics": null,
+              "context_management": null
+            },
+            "parent_tool_use_id": null,
+            "timestamp": "2026-08-29T05:23:47.745Z",
+            "request_id": "req_011CeWUsuE4NtJpFVpfTepGK"
+          },
+          {
+            "type": "user",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "content": "Output does not match required schema: /value: must NOT have fewer than 2 characters",
+                  "is_error": true,
+                  "tool_use_id": "toolu_01M28nGmD7wmQrR2Kz6ic12Y"
+                }
+              ]
+            },
+            "parent_tool_use_id": null,
+            "timestamp": "2026-08-29T05:23:47.746Z",
+            "tool_use_result": "Error: Output does not match required schema: /value: must NOT have fewer than 2 characters"
+          },
+          {
+            "type": "assistant",
+            "message": {
+              "model": "claude-opus-5",
+              "id": "msg_011CeWUt2oifY6wWkSuNyukM",
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_01VAshgPXcUuyTozHPrsXpqF",
+                  "name": "StructuredOutput",
+                  "input": {
+                    "value": "NA"
+                  },
+                  "caller": {
+                    "type": "direct"
+                  }
+                }
+              ],
+              "stop_reason": null,
+              "stop_sequence": null,
+              "stop_details": null,
+              "usage": {
+                "input_tokens": 2,
+                "cache_creation_input_tokens": 112,
+                "cache_read_input_tokens": 1085,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 112
+                },
+                "output_tokens": 24,
+                "service_tier": "standard",
+                "inference_geo": "not_available"
+              },
+              "diagnostics": null,
+              "context_management": null
+            },
+            "parent_tool_use_id": null,
+            "timestamp": "2026-08-29T05:23:48.944Z",
+            "request_id": "req_011CeWUt27Yw6b9eVknxdfMt"
+          },
+          {
+            "type": "user",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "content": "Output does not match required schema: /value: must NOT have more than 1 characters",
+                  "is_error": true,
+                  "tool_use_id": "toolu_01VAshgPXcUuyTozHPrsXpqF"
+                }
+              ]
+            },
+            "parent_tool_use_id": null,
+            "timestamp": "2026-08-29T05:23:48.946Z",
+            "tool_use_result": "Error: Output does not match required schema: /value: must NOT have more than 1 characters"
+          },
+          {
+            "type": "assistant",
+            "message": {
+              "model": "claude-opus-5",
+              "id": "msg_011CeWUt8AvmrYdairTBAPyh",
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "I attempted the required tool call, but the schema is impossible to satisfy (`minLength: 2` and `maxLength: 1` conflict). Please fix the schema and I'll produce the value immediately."
+                }
+              ],
+              "stop_reason": null,
+              "stop_sequence": null,
+              "stop_details": null,
+              "usage": {
+                "input_tokens": 2,
+                "cache_creation_input_tokens": 111,
+                "cache_read_input_tokens": 1197,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 111
+                },
+                "output_tokens": 1,
+                "service_tier": "standard",
+                "inference_geo": "not_available"
+              },
+              "diagnostics": null,
+              "context_management": null
+            },
+            "parent_tool_use_id": null,
+            "timestamp": "2026-08-29T05:23:50.826Z",
+            "request_id": "req_011CeWUt7HMHXoJjKuLADF1v"
+          },
+          {
+            "is_error": false,
+            "duration_api_ms": 10375,
+            "num_turns": 6,
+            "stop_reason": "end_turn",
+            "usage": {
+              "input_tokens": 12,
+              "cache_creation_input_tokens": 1308,
+              "cache_read_input_tokens": 4786,
+              "output_tokens": 406,
+              "output_tokens_details": {
+                "thinking_tokens": 50
+              },
               "server_tool_use": {
                 "web_search_requests": 0,
                 "web_fetch_requests": 0
               },
               "service_tier": "standard",
               "cache_creation": {
-                "ephemeral_1h_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 1308,
                 "ephemeral_5m_input_tokens": 0
               },
-              "inference_geo": "",
+              "inference_geo": "not_available",
               "iterations": [],
               "speed": "standard"
             },
-            "modelUsage": {},
+            "modelUsage": {
+              "claude-opus-5": {
+                "inputTokens": 12,
+                "outputTokens": 406,
+                "cacheReadInputTokens": 4786,
+                "cacheCreationInputTokens": 1308,
+                "webSearchRequests": 0,
+                "contextWindow": 1000000,
+                "maxOutputTokens": 64000,
+                "canonicalModel": "claude-opus-5",
+                "provider": "firstParty",
+                "costBasis": "list"
+              }
+            },
             "permission_denials": [],
-            "terminal_reason": "structured_output_retry_exhausted",
+            "terminal_reason": "completed",
             "fast_mode_state": "off",
             "fast_mode_disabled_reason": "sdk_opt_in_required",
             "subagent_stats": {
@@ -841,20 +1137,22 @@
               },
               "by_type": {}
             },
-            "subtype": "error_max_structured_output_retries",
-            "errors": [
-              "Failed to provide valid structured output after 0 attempts"
-            ],
+            "subtype": "success",
+            "api_error_status": null,
+            "result": "I attempted the required tool call, but the schema is impossible to satisfy (`minLength: 2` and `maxLength: 1` conflict). Please fix the schema and I'll produce the value immediately.",
+            "ttft_ms": 2186,
+            "ttft_stream_ms": 964,
+            "time_to_request_ms": 34,
             "type": "result",
-            "duration_ms": 1822,
+            "duration_ms": 10423,
             "queued_turn_count": 0
           }
         ],
-        "exitCode": 1,
+        "exitCode": 0,
         "exitSignal": null,
-        "startedAt": "2026-08-29T02:53:06.669Z",
-        "completedAt": "2026-08-29T02:53:09.089Z",
-        "firstOutputMs": 587,
+        "startedAt": "2026-08-29T05:23:39.828Z",
+        "completedAt": "2026-08-29T05:23:50.869Z",
+        "firstOutputMs": 604,
         "streamComplete": true,
         "treeQuiescent": true,
         "treeVerified": true
@@ -865,7 +1163,7 @@
     "cancellation": {
       "passed": true,
       "errorKind": "cancelled",
-      "durationMs": 149,
+      "durationMs": 159,
       "transportInvocations": 1,
       "providerRequestMeasurement": {
         "measured": false,
@@ -878,7 +1176,7 @@
     "timeout": {
       "passed": true,
       "errorKind": "timeout",
-      "durationMs": 45,
+      "durationMs": 57,
       "transportInvocations": 1,
       "providerRequestMeasurement": {
         "measured": false,
@@ -890,7 +1188,7 @@
     }
   },
   "runtimeEvidence": {
-    "format": "rb-external-runtime-evidence/v2",
+    "format": "rb-external-runtime-evidence/v3",
     "cliInvocations": 5,
     "observedProviderRequests": {
       "measured": false,
@@ -899,7 +1197,7 @@
     "observedTopLevelModelSteps": [
       1,
       1,
-      1
+      6
     ],
     "observedModelIds": [
       "claude-opus-5"
@@ -907,14 +1205,14 @@
     "liveAttestations": [
       {
         "check": "subscription-auth",
-        "checkedAt": "2026-08-29T02:53:09.285Z",
+        "checkedAt": "2026-08-29T05:23:51.090Z",
         "transport": "claude-code-cli",
         "transportVersion": "2.1.251 (Claude Code)",
         "authMode": "subscription"
       },
       {
         "check": "environment-api-key-isolation",
-        "checkedAt": "2026-08-29T02:53:09.285Z",
+        "checkedAt": "2026-08-29T05:23:51.090Z",
         "transport": "claude-code-cli",
         "transportVersion": "2.1.251 (Claude Code)",
         "providerCredentialVariablesPresent": false,
@@ -923,7 +1221,7 @@
       },
       {
         "check": "transport-version",
-        "checkedAt": "2026-08-29T02:53:09.285Z",
+        "checkedAt": "2026-08-29T05:23:51.090Z",
         "transport": "claude-code-cli",
         "transportVersion": "2.1.251 (Claude Code)",
         "executable": "claude"
@@ -932,15 +1230,24 @@
     "invocationConfiguration": {
       "modelId": "claude-opus-5",
       "effort": "low",
+      "maxTurns": 6,
+      "structuredOutputRetryLimit": 5,
+      "transportRetryLimit": 0,
       "inputMode": "stdin",
+      "outputMode": "stream-json",
       "systemPromptMode": "replacement-file",
       "settingSources": "none",
       "strictMcpConfig": true,
       "configuredMcpServers": 0,
       "toolsMode": "disabled-except-structured-output",
+      "disallowedMcpTools": true,
       "fallbackModelConfigured": false,
       "sessionPersistence": "disabled",
-      "restrictedMode": true
+      "safeMode": true,
+      "restrictedMode": true,
+      "slashCommands": "disabled",
+      "chrome": "disabled",
+      "promptSuggestions": "disabled"
     },
     "invocations": [
       {
@@ -972,20 +1279,20 @@
         "recordingKey": "structured-output-retry-probe",
         "transportInvocations": 1,
         "cwdIsolated": true,
-        "numTurns": 2,
-        "topLevelModelSteps": 1,
+        "numTurns": 6,
+        "topLevelModelSteps": 6,
         "modelIds": [
           "claude-opus-5"
         ],
-        "resultSubtype": "error_max_structured_output_retries"
+        "resultSubtype": "success"
       }
     ]
   },
   "result": {
     "profileId": "anthropic:claude-code-cli:claude-opus-5",
     "suiteVersion": "rb-adapter-conformance/v1",
-    "runId": "b0d5bf6b-e804-4f02-9ee0-99eb83937172",
-    "recordedAt": "2026-08-29T02:53:09.285Z",
+    "runId": "6a8baf17-777d-4a3f-aef8-5e60b75717e7",
+    "recordedAt": "2026-08-29T05:23:51.090Z",
     "tier": "SUPPORTED",
     "cases": [
       {
@@ -1193,5 +1500,5 @@
       "usage-reporting"
     ]
   },
-  "integritySha256": "ef6c79e6640eff775575ca3d9a707e9be40d0f50df1dd6e2a1991b8a02b36526"
+  "integritySha256": "dd5c6cca2b2a1e5eb3409843e4768862de62dc3c24d88bdc50d375278580e95a"
 }

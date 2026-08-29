@@ -94,7 +94,7 @@ function record(): ConformanceRecord {
       timeout: { passed: true, errorKind: "timeout", durationMs: 10, transportInvocations: 1, promptAbort: true, treeQuiescent: true, treeVerified: true },
     },
     runtimeEvidence: {
-      format: "rb-external-runtime-evidence/v2",
+      format: "rb-external-runtime-evidence/v3",
       cliInvocations: 5,
       observedProviderRequests: unmeasured("unsupported-by-provider"),
       observedTopLevelModelSteps: [1, 1, 1],
@@ -116,14 +116,23 @@ function record(): ConformanceRecord {
         modelId: "claude-opus-5",
         effort: "low",
         inputMode: "stdin",
+        outputMode: "stream-json",
         systemPromptMode: "replacement-file",
         settingSources: "none",
         strictMcpConfig: true,
         configuredMcpServers: 0,
         toolsMode: "disabled-except-structured-output",
+        disallowedMcpTools: true,
         fallbackModelConfigured: false,
         sessionPersistence: "disabled",
+        safeMode: true,
         restrictedMode: true,
+        slashCommands: "disabled",
+        chrome: "disabled",
+        promptSuggestions: "disabled",
+        maxTurns: 6,
+        structuredOutputRetryLimit: 5,
+        transportRetryLimit: 0,
       },
       invocations: [
         { id: "valid-structured-response", recordingKey: "representation-comprehensive", transportInvocations: 1, cwdIsolated: true, numTurns: 2, topLevelModelSteps: 1, modelIds: ["claude-opus-5"], resultSubtype: "success" },
@@ -182,6 +191,36 @@ describe("Claude Code independent conformance", () => {
     const source = record();
     expect(() => assertProviderRuntimeVersion(CLAUDE_CODE_OPUS_5_PROFILE, source, "2.1.251 (Claude Code)")).not.toThrow();
     expect(() => assertProviderRuntimeVersion(CLAUDE_CODE_OPUS_5_PROFILE, source, "2.1.252 (Claude Code)")).toThrow(/does not match/);
+  });
+
+  it("fails closed when any integrity-bound invocation-policy field drifts before spawning Claude", () => {
+    const source = record();
+    const { integritySha256: _integrity, ...body } = source;
+    const current = body.runtimeEvidence!.invocationConfiguration;
+    for (const key of Object.keys(current) as Array<keyof typeof current>) {
+      const value = current[key];
+      const changed = typeof value === "boolean" ? !value : typeof value === "number" ? value + 1 : `${value}-stale`;
+      const invocationConfiguration = { ...current, [key]: changed } as typeof current;
+      const stale = sealRecord({
+        ...body,
+        runtimeEvidence: { ...body.runtimeEvidence!, invocationConfiguration },
+      });
+      const process = { run: vi.fn(() => { throw new Error("Claude must not spawn for stale policy evidence"); }) };
+      expect(() => validateConformanceRecord({
+        adapter: new ClaudeCodeAdapter(process),
+        profile: CLAUDE_CODE_OPUS_5_PROFILE,
+        cases: CLAUDE_CODE_CONFORMANCE_CASES,
+        record: stale,
+      })).toThrow(/invocation policy differs/);
+      expect(process.run).not.toHaveBeenCalled();
+    }
+
+    expect(() => validateConformanceRecord({
+      adapter: new ClaudeCodeAdapter({ run: vi.fn(() => { throw new Error("offline validation must not spawn Claude"); }) }),
+      profile: CLAUDE_CODE_OPUS_5_PROFILE,
+      cases: CLAUDE_CODE_CONFORMANCE_CASES,
+      record: source,
+    })).not.toThrow();
   });
 
   it("does not let arbitrary resealed legacy conclusions enter the migration path", () => {
@@ -350,7 +389,7 @@ describe("Claude Code independent conformance", () => {
     })).toThrow(/stored conformance result does not match deterministic replay/);
   });
 
-  it("derives v2 smoke results from typed process observations rather than passed booleans", () => {
+  it("derives smoke results from typed process observations rather than passed booleans", () => {
     const source = record();
     const { integritySha256: _integrity, ...body } = source;
     const falseConclusion = sealRecord({

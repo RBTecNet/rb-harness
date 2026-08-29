@@ -1,5 +1,6 @@
 import {
   type CanonicalSemanticResponse,
+  type ModelInvocationConfigurationEvidence,
   type ModelProfile,
   type ProviderAdapter,
   type ProviderOutcome,
@@ -15,6 +16,7 @@ import {
 } from "./normalize.js";
 import {
   CLAUDE_CODE_EXECUTABLE,
+  CLAUDE_CODE_INVOCATION_POLICY,
   SpawnClaudeCodeProcess,
   claudeCodeChildEnvironment,
   withClaudeCodeIsolation,
@@ -63,27 +65,36 @@ export function claudeCodeInvocationArgs(input: {
   readonly request: SemanticRequest;
   readonly systemPromptFile: string;
 }): string[] {
-  return [
+  const args = [
     "-p",
-    "--output-format", "stream-json",
+    "--output-format", CLAUDE_CODE_INVOCATION_POLICY.outputMode,
     "--verbose",
-    "--safe-mode",
-    "--restricted",
-    "--setting-sources", "",
-    "--strict-mcp-config",
     "--mcp-config", JSON.stringify({ mcpServers: {} }),
-    "--tools", "",
-    "--disallowedTools", "mcp__*",
-    "--disable-slash-commands",
-    "--no-chrome",
-    "--no-session-persistence",
-    "--prompt-suggestions", "false",
-    "--max-turns", "1",
+    "--max-turns", String(CLAUDE_CODE_INVOCATION_POLICY.maxTurns),
     "--model", input.profile.modelId,
     "--effort", input.request.reasoning.mode === "on" ? input.request.reasoning.effort : "low",
     "--system-prompt-file", input.systemPromptFile,
     "--json-schema", JSON.stringify(input.request.schema),
   ];
+  if (CLAUDE_CODE_INVOCATION_POLICY.safeMode) args.push("--safe-mode");
+  if (CLAUDE_CODE_INVOCATION_POLICY.restrictedMode) args.push("--restricted");
+  if (CLAUDE_CODE_INVOCATION_POLICY.settingSources === "none") args.push("--setting-sources", "");
+  if (CLAUDE_CODE_INVOCATION_POLICY.strictMcpConfig) args.push("--strict-mcp-config");
+  if (CLAUDE_CODE_INVOCATION_POLICY.toolsMode === "disabled-except-structured-output") args.push("--tools", "");
+  if (CLAUDE_CODE_INVOCATION_POLICY.disallowedMcpTools) args.push("--disallowedTools", "mcp__*");
+  if (CLAUDE_CODE_INVOCATION_POLICY.slashCommands === "disabled") args.push("--disable-slash-commands");
+  if (CLAUDE_CODE_INVOCATION_POLICY.chrome === "disabled") args.push("--no-chrome");
+  if (CLAUDE_CODE_INVOCATION_POLICY.sessionPersistence === "disabled") args.push("--no-session-persistence");
+  if (CLAUDE_CODE_INVOCATION_POLICY.promptSuggestions === "disabled") args.push("--prompt-suggestions", "false");
+  return args;
+}
+
+export function claudeCodeInvocationConfigurationEvidence(profile: ModelProfile): ModelInvocationConfigurationEvidence {
+  return {
+    modelId: profile.modelId,
+    effort: profile.reasoning.supported ? profile.reasoning.efforts[0] ?? "" : "",
+    ...CLAUDE_CODE_INVOCATION_POLICY,
+  };
 }
 
 function parseVersion(stdout: string): string | undefined {
@@ -161,6 +172,10 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
       treeQuiescent: response.treeQuiescent,
       treeVerified: response.treeVerified,
     };
+  }
+
+  invocationConfigurationEvidence(profile: ModelProfile): ModelInvocationConfigurationEvidence {
+    return claudeCodeInvocationConfigurationEvidence(profile);
   }
 
   async runtimePreflight(): Promise<ProviderOutcome<ClaudeCodeRuntimePreflight>> {

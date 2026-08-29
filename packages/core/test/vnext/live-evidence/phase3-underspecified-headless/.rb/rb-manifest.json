@@ -1,0 +1,26 @@
+{
+  "manifestVersion": "rb-manifest/v1",
+  "project": {
+    "id": "simple-inventory",
+    "name": "simple-inventory"
+  },
+  "artifactRoot": ".rb",
+  "generatedAt": "2026-08-29T05:27:01.811Z",
+  "artifacts": [
+    {
+      "id": "simple-inventory-brief",
+      "kind": "project-brief",
+      "path": ".rb/init/BRIEF.md",
+      "status": "ready",
+      "sha256": "496fbcea955054979fc55bdeb8eb50758531559022af080f1d4695a2a74d0bda"
+    },
+    {
+      "id": "simple-inventory-execution",
+      "kind": "execution-plan",
+      "path": ".rb/init/PHASES.md",
+      "status": "ready",
+      "sha256": "ea4911896de3b4d10fa9b1bcefb2c7df5774bd2b4884b5d9b175dac2c20802bb",
+      "contract": "rb-execution/v1"
+    }
+  ]
+}

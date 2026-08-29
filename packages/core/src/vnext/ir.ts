@@ -14,11 +14,19 @@ export const INIT_PROJECT_MODEL_VERSION = "rb-init-project-model/v1" as const;
 export type Materiality = "product" | "architecture" | "implementation" | "preference";
 export type Rigidity = "RIGID" | "FLEXIBLE";
 export type QualityCommandKind = "test" | "build" | "lint" | "typecheck" | "run";
+export type RecommendationAcceptanceMode = "blank-interactive" | "non-interactive-policy";
+
+/** Minimal Core-verified authority retained by the resolved model, not interview history. */
+export interface AcceptedRecommendationProof {
+  readonly value: string;
+  readonly acceptanceMode: RecommendationAcceptanceMode;
+}
 
 /** Authored provenance claim. Core verifies it before constructing the canonical model. */
 export type DeterminationSourceInput =
   | { readonly kind: "request"; readonly evidence: string }
   | { readonly kind: "user-answer"; readonly questionKey: string }
+  | { readonly kind: "accepted-recommendation"; readonly questionKey: string }
   | { readonly kind: "model-default" };
 
 export interface SemanticDeterminationInput {
@@ -89,6 +97,7 @@ export interface SemanticInitProject {
 export type DeterminationSource =
   | { readonly kind: "request"; readonly evidence: string }
   | { readonly kind: "user-answer"; readonly questionKey: SemanticKey }
+  | { readonly kind: "accepted-recommendation"; readonly questionKey: SemanticKey }
   | { readonly kind: "model-default" };
 
 export interface Determination {
@@ -115,7 +124,8 @@ export interface QualityCommand {
 export type ProtectedPathSource =
   | { readonly kind: "built-in" }
   | { readonly kind: "request"; readonly evidence: string }
-  | { readonly kind: "user-answer"; readonly questionKey: SemanticKey };
+  | { readonly kind: "user-answer"; readonly questionKey: SemanticKey }
+  | { readonly kind: "accepted-recommendation"; readonly questionKey: SemanticKey };
 
 export interface ProtectedPath {
   readonly path: RelPath;
@@ -168,6 +178,7 @@ export interface Provenance {
   readonly requestSha256: Sha256;
   readonly originalRequest: string;
   readonly answers: Readonly<Record<string, string>>;
+  readonly acceptedRecommendations: Readonly<Record<string, AcceptedRecommendationProof>>;
   readonly generatedAt: string;
 }
 
@@ -190,6 +201,7 @@ export interface InitProjectModel {
 export interface ResolutionContext {
   readonly originalRequest: string;
   readonly answers?: Readonly<Record<string, string>>;
+  readonly acceptedRecommendations?: Readonly<Record<string, AcceptedRecommendationProof>>;
   readonly runId: string;
   readonly generatedAt: string;
 }
@@ -201,10 +213,12 @@ export interface IrConsumerRegistration {
 
 type RequestDeterminationSource = Extract<DeterminationSource, { readonly kind: "request" }>;
 type AnswerDeterminationSource = Extract<DeterminationSource, { readonly kind: "user-answer" }>;
+type AcceptedDeterminationSource = Extract<DeterminationSource, { readonly kind: "accepted-recommendation" }>;
 type DefaultDeterminationSource = Extract<DeterminationSource, { readonly kind: "model-default" }>;
 type BuiltInProtectedPathSource = Extract<ProtectedPathSource, { readonly kind: "built-in" }>;
 type RequestProtectedPathSource = Extract<ProtectedPathSource, { readonly kind: "request" }>;
 type AnswerProtectedPathSource = Extract<ProtectedPathSource, { readonly kind: "user-answer" }>;
+type AcceptedProtectedPathSource = Extract<ProtectedPathSource, { readonly kind: "accepted-recommendation" }>;
 type CommandValidationIntent = Extract<ValidationIntent, { readonly kind: "command" }>;
 type ManualValidationIntent = Extract<ValidationIntent, { readonly kind: "manual" }>;
 type HumanValidationIntent = Extract<ValidationIntent, { readonly kind: "human" }>;
@@ -241,6 +255,7 @@ const PROVENANCE_CONSUMERS = {
   requestSha256: { path: "core.provenance.requestSha256", consumer: "validate binds provenance to originalRequest" },
   originalRequest: { path: "core.provenance.originalRequest", consumer: "authority validation verifies request evidence" },
   answers: { path: "core.provenance.answers", consumer: "authority validation verifies referenced user answers" },
+  acceptedRecommendations: { path: "core.provenance.acceptedRecommendations", consumer: "authority validation verifies referenced accepted recommendations" },
   generatedAt: { path: "core.provenance.generatedAt", consumer: "manifest generatedAt uses the single frozen run clock" },
 } satisfies Record<keyof Provenance, IrConsumerRegistration>;
 
@@ -261,6 +276,10 @@ const ANSWER_DETERMINATION_SOURCE_CONSUMERS = {
   kind: { path: "core.determinations[].source.kind", consumer: "authority validation selects the answer proof rule" },
   questionKey: { path: "core.determinations[].source.questionKey", consumer: "authority validation resolves persisted answer data" },
 } satisfies Record<keyof AnswerDeterminationSource, IrConsumerRegistration>;
+const ACCEPTED_DETERMINATION_SOURCE_CONSUMERS = {
+  kind: { path: "core.determinations[].source.kind", consumer: "authority validation selects the accepted-recommendation proof rule" },
+  questionKey: { path: "core.determinations[].source.questionKey", consumer: "authority validation resolves Core-verified recommendation evidence" },
+} satisfies Record<keyof AcceptedDeterminationSource, IrConsumerRegistration>;
 const DEFAULT_DETERMINATION_SOURCE_CONSUMERS = {
   kind: { path: "core.determinations[].source.kind", consumer: "authority validation applies model-default rigidity policy" },
 } satisfies Record<keyof DefaultDeterminationSource, IrConsumerRegistration>;
@@ -281,6 +300,10 @@ const ANSWER_PATH_SOURCE_CONSUMERS = {
   kind: { path: "core.protectedPaths[].source.kind", consumer: "authority validation selects the answer proof rule" },
   questionKey: { path: "core.protectedPaths[].source.questionKey", consumer: "authority validation resolves persisted answer data" },
 } satisfies Record<keyof AnswerProtectedPathSource, IrConsumerRegistration>;
+const ACCEPTED_PATH_SOURCE_CONSUMERS = {
+  kind: { path: "core.protectedPaths[].source.kind", consumer: "authority validation selects the accepted-recommendation proof rule" },
+  questionKey: { path: "core.protectedPaths[].source.questionKey", consumer: "authority validation resolves Core-verified recommendation evidence" },
+} satisfies Record<keyof AcceptedProtectedPathSource, IrConsumerRegistration>;
 
 const REQUIREMENT_CONSUMERS = {
   key: { path: "requirements[].key", consumer: "resolution binds authored coverage keys" },
@@ -336,9 +359,9 @@ export const INIT_PROJECT_IR_CONSUMERS: readonly IrConsumerRegistration[] = [...
   ...Object.values(MODEL_CONSUMERS), ...Object.values(CORE_CONSUMERS), ...Object.values(IDENTITY_CONSUMERS),
   ...Object.values(PROVENANCE_CONSUMERS), ...Object.values(DETERMINATION_CONSUMERS),
   ...Object.values(REQUEST_DETERMINATION_SOURCE_CONSUMERS), ...Object.values(ANSWER_DETERMINATION_SOURCE_CONSUMERS),
-  ...Object.values(DEFAULT_DETERMINATION_SOURCE_CONSUMERS), ...Object.values(PROTECTED_PATH_CONSUMERS),
+  ...Object.values(ACCEPTED_DETERMINATION_SOURCE_CONSUMERS), ...Object.values(DEFAULT_DETERMINATION_SOURCE_CONSUMERS), ...Object.values(PROTECTED_PATH_CONSUMERS),
   ...Object.values(BUILTIN_PATH_SOURCE_CONSUMERS), ...Object.values(REQUEST_PATH_SOURCE_CONSUMERS),
-  ...Object.values(ANSWER_PATH_SOURCE_CONSUMERS), ...Object.values(REQUIREMENT_CONSUMERS),
+  ...Object.values(ANSWER_PATH_SOURCE_CONSUMERS), ...Object.values(ACCEPTED_PATH_SOURCE_CONSUMERS), ...Object.values(REQUIREMENT_CONSUMERS),
   ...Object.values(QUALITY_COMMAND_CONSUMERS), ...Object.values(PHASE_CONSUMERS), ...Object.values(TASK_CONSUMERS),
   ...Object.values(ACCEPTANCE_CONSUMERS), ...Object.values(COMMAND_VALIDATION_CONSUMERS),
   ...Object.values(MANUAL_VALIDATION_CONSUMERS), ...Object.values(HUMAN_VALIDATION_CONSUMERS),

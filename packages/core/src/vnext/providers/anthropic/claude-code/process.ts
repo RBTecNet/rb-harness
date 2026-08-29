@@ -61,15 +61,38 @@ export const CLAUDE_CODE_GUARDED_ENVIRONMENT = Object.freeze([
   "MAX_THINKING_TOKENS",
 ] as const);
 
+/** One typed source for every Harness-controlled Claude Code invocation policy value. */
+export const CLAUDE_CODE_INVOCATION_POLICY = Object.freeze({
+  maxTurns: 6,
+  structuredOutputRetryLimit: 5,
+  transportRetryLimit: 0,
+  inputMode: "stdin",
+  outputMode: "stream-json",
+  systemPromptMode: "replacement-file",
+  settingSources: "none",
+  strictMcpConfig: true,
+  configuredMcpServers: 0,
+  toolsMode: "disabled-except-structured-output",
+  disallowedMcpTools: true,
+  fallbackModelConfigured: false,
+  sessionPersistence: "disabled",
+  safeMode: true,
+  restrictedMode: true,
+  slashCommands: "disabled",
+  chrome: "disabled",
+  promptSuggestions: "disabled",
+} as const);
+
 export function claudeCodeChildEnvironment(
   source: NodeJS.ProcessEnv = process.env,
   maxOutputTokens?: number,
 ): NodeJS.ProcessEnv {
   const clean: NodeJS.ProcessEnv = { ...source };
   for (const name of CLAUDE_CODE_GUARDED_ENVIRONMENT) delete clean[name];
-  clean.CLAUDE_CODE_SAFE_MODE = "1";
-  clean.CLAUDE_CODE_MAX_RETRIES = "0";
-  clean.MAX_STRUCTURED_OUTPUT_RETRIES = "0";
+  if (CLAUDE_CODE_INVOCATION_POLICY.safeMode) clean.CLAUDE_CODE_SAFE_MODE = "1";
+  else delete clean.CLAUDE_CODE_SAFE_MODE;
+  clean.CLAUDE_CODE_MAX_RETRIES = String(CLAUDE_CODE_INVOCATION_POLICY.transportRetryLimit);
+  clean.MAX_STRUCTURED_OUTPUT_RETRIES = String(CLAUDE_CODE_INVOCATION_POLICY.structuredOutputRetryLimit);
   clean.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
   clean.DISABLE_TELEMETRY = "1";
   clean.DISABLE_ERROR_REPORTING = "1";

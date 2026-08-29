@@ -55,6 +55,30 @@ export interface TransportTelemetry {
   readonly stopReason: Measured<string>;
 }
 
+/** Integrity-bound, sanitized configuration for a conformed external model invocation. */
+export interface ModelInvocationConfigurationEvidence {
+  readonly modelId: string;
+  readonly effort: string;
+  readonly inputMode: "stdin";
+  readonly outputMode: "stream-json" | "other";
+  readonly systemPromptMode: "replacement-file" | "other";
+  readonly settingSources: "none" | "configured";
+  readonly strictMcpConfig: boolean;
+  readonly configuredMcpServers: number;
+  readonly toolsMode: "disabled-except-structured-output" | "other";
+  readonly disallowedMcpTools: boolean;
+  readonly fallbackModelConfigured: boolean;
+  readonly sessionPersistence: "disabled" | "enabled-or-unspecified";
+  readonly safeMode: boolean;
+  readonly restrictedMode: boolean;
+  readonly slashCommands: "disabled" | "enabled-or-unspecified";
+  readonly chrome: "disabled" | "enabled-or-unspecified";
+  readonly promptSuggestions: "disabled" | "enabled-or-unspecified";
+  readonly maxTurns: number;
+  readonly structuredOutputRetryLimit: number;
+  readonly transportRetryLimit: number;
+}
+
 export interface CanonicalSemanticResponse {
   readonly slice: string;
   readonly payload: unknown;
@@ -208,4 +232,6 @@ export interface ProviderAdapter {
   ): ProviderOutcome<CanonicalSemanticResponse>;
   /** Offline-only protocol observation. It must not perform transport. */
   observeRuntime?(raw: unknown): ProviderRuntimeObservation | undefined;
+  /** Current production policy used to reject stale external-transport evidence before execution. */
+  invocationConfigurationEvidence?(profile: ModelProfile): ModelInvocationConfigurationEvidence;
 }

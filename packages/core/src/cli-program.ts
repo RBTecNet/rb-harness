@@ -53,6 +53,7 @@ import {
 import type { ArtifactRecord, ArtifactStatus, ValidationIssue } from "./types.js";
 import type { HarnessWorkflow, ProviderConfiguration } from "./standalone-types.js";
 import { runVnextConformanceCommand } from "./vnext/providers/conformance/cli.js";
+import { runVnextInitCommand } from "./vnext/init-cli.js";
 
 const program = new Command();
 
@@ -619,6 +620,26 @@ providerCommands.command("test")
   }));
 
 const vnext = program.command("vnext").description("Run experimental vNext laboratories");
+vnext.command("init")
+  .description("Generate a Ralph-ready init plan through the vNext semantic pipeline")
+  .argument("[request...]", "project request text")
+  .requiredOption("--profile <profile-id>", "exact supported provider/transport/model profile")
+  .option("--file <path>", "read request text from a file")
+  .option("--credential <id-or-label>", "saved direct API credential selector")
+  .option("--project <path>", "project root", ".")
+  .option("--headless", "accept generated recommendations through non-interactive policy")
+  .option("--timeout <seconds>", "deadline for each provider transport invocation", "120")
+  .action(async (request: string[], options: {
+    profile: string; file?: string; credential?: string; project: string; headless?: boolean; timeout: string;
+  }) => runVnextInitCommand({
+    requestParts: request,
+    requestFile: options.file,
+    profileId: options.profile,
+    credential: options.credential,
+    projectRoot: options.project,
+    headless: Boolean(options.headless),
+    deadlineSeconds: Number(options.timeout),
+  }));
 vnext.command("conformance")
   .description("Replay or explicitly record exact-profile adapter conformance")
   .argument("<profile-id>")

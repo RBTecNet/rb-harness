@@ -1,4 +1,5 @@
 import type { SemanticKey } from "./identity.js";
+import type { AcceptedRecommendationProof } from "./ir.js";
 
 const EVIDENCE_MINIMUM_CHARACTERS = 12;
 const EVIDENCE_MINIMUM_TOKENS = 2;
@@ -37,4 +38,13 @@ export function userAnswerIsVerified(
   questionKey: SemanticKey | string,
 ): boolean {
   return Boolean(answers[questionKey]?.trim());
+}
+
+export function acceptedRecommendationIsVerified(
+  accepted: Readonly<Record<string, AcceptedRecommendationProof>>,
+  questionKey: SemanticKey | string,
+): boolean {
+  const proof = accepted[questionKey];
+  return Boolean(proof?.value.trim())
+    && (proof?.acceptanceMode === "blank-interactive" || proof?.acceptanceMode === "non-interactive-policy");
 }

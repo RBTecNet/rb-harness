@@ -1,0 +1,124 @@
+{
+  "format": "rb-vnext-phase3-live-evidence/v1",
+  "recordedAt": "2026-08-29T05:28:34.469Z",
+  "originalRequest": "Build me a simple inventory system.",
+  "selectedProfileId": "anthropic:claude-code-cli:claude-opus-5",
+  "transport": "claude-code-cli",
+  "requestAccounting": "opaque",
+  "questions": [
+    {
+      "key": "interface-surface",
+      "question": "What interface should the inventory system expose?",
+      "materiality": "product",
+      "rigidity": "RIGID",
+      "recommendedValue": "An HTTP REST API (JSON) with no user interface.",
+      "recommendedRationale": "A REST API is the smallest testable surface and can be driven by scripts or a UI added later.",
+      "acceptanceMode": "non-interactive-policy",
+      "selectedValue": "An HTTP REST API (JSON) with no user interface."
+    },
+    {
+      "key": "storage-backend",
+      "question": "Which persistence backend should store inventory data?",
+      "materiality": "architecture",
+      "rigidity": "RIGID",
+      "recommendedValue": "SQLite via a local file database.",
+      "recommendedRationale": "Provides durable, transactional storage with zero external service setup, matching a simple system.",
+      "acceptanceMode": "non-interactive-policy",
+      "selectedValue": "SQLite via a local file database."
+    },
+    {
+      "key": "auth-required",
+      "question": "Does the MVP need authentication or is it a trusted single-user tool?",
+      "materiality": "product",
+      "rigidity": "RIGID",
+      "recommendedValue": "No authentication; single trusted local user.",
+      "recommendedRationale": "Keeps the MVP simple; auth can be layered on later without changing the data model.",
+      "acceptanceMode": "non-interactive-policy",
+      "selectedValue": "No authentication; single trusted local user."
+    }
+  ],
+  "counters": {
+    "semanticOperations": 4,
+    "transportInvocations": 4,
+    "transportRetries": 0,
+    "correctiveRegenerations": 2,
+    "correctiveBySlice": {
+      "intent": 1,
+      "work": 1
+    },
+    "providerRequests": {
+      "measured": false,
+      "reason": "unsupported-by-provider"
+    }
+  },
+  "attempts": [
+    {
+      "slice": "intent",
+      "ordinal": 1,
+      "corrective": false,
+      "status": "semantic-invalid",
+      "findings": [
+        {
+          "code": "semantic-invalid",
+          "pointer": "/determinations/1/sourceKind",
+          "message": "RIGID product/architecture decisions require a question instead of a silent model default"
+        },
+        {
+          "code": "semantic-invalid",
+          "pointer": "/qualityCommands/3/command",
+          "message": "quality command starts a long-running service or watcher and never exits; a validation must run to completion and return its real exit code, so prove the running service through OPERATIONS.json instead"
+        }
+      ]
+    },
+    {
+      "slice": "intent",
+      "ordinal": 2,
+      "corrective": true,
+      "status": "accepted",
+      "findings": []
+    },
+    {
+      "slice": "work",
+      "ordinal": 3,
+      "corrective": false,
+      "status": "semantic-invalid",
+      "findings": [
+        {
+          "code": "semantic-invalid",
+          "pointer": "/phases/tasks/7/validation/1",
+          "message": "Manual validation uses manual prose for an executable check; declare the exact command or use human: for evidence unavailable to the executor"
+        }
+      ]
+    },
+    {
+      "slice": "work",
+      "ordinal": 4,
+      "corrective": true,
+      "status": "accepted",
+      "findings": []
+    }
+  ],
+  "terminalState": "published",
+  "publicationOccurred": true,
+  "ralph": {
+    "status": "READY",
+    "executionIssues": 0,
+    "manifestValid": true,
+    "treeValid": true,
+    "readyExecutionPlans": 1
+  },
+  "artifactTree": [
+    ".rb/init/BRIEF.md",
+    ".rb/init/PHASES.md",
+    ".rb/rb-manifest.json"
+  ],
+  "semanticQuality": {
+    "requirements": 7,
+    "phases": 3,
+    "tasks": 7,
+    "allTasksHaveOwnedPaths": true,
+    "allTasksHaveAcceptance": true,
+    "allTasksHaveValidation": true,
+    "allTasksHaveExpectedEvidence": true
+  }
+}

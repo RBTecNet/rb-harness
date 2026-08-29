@@ -3,7 +3,7 @@ import type { InitProjectModel } from "../../src/vnext/ir.js";
 import { resolveInitProject } from "../../src/vnext/resolve.js";
 import { canonicalize, validate } from "../../src/vnext/validate.js";
 import { deriveExecutionDocument, renderPhases } from "../../src/vnext/render/execution.js";
-import { requestEvidenceIsVerified, userAnswerIsVerified } from "../../src/vnext/provenance.js";
+import { acceptedRecommendationIsVerified, requestEvidenceIsVerified, userAnswerIsVerified } from "../../src/vnext/provenance.js";
 import { HELLO_REQUEST, HELLO_SEMANTIC_FIXTURE } from "./fixtures/hello.js";
 
 function hello(): InitProjectModel {
@@ -119,6 +119,33 @@ describe("vNext semantic validation closure", () => {
     expect(userAnswerIsVerified({ "runtime-choice": "Node.js" }, "runtime-choice")).toBe(true);
     expect(userAnswerIsVerified({}, "runtime-choice")).toBe(false);
     expect(userAnswerIsVerified({ "runtime-choice": "Node.js" }, "other-choice")).toBe(false);
+    expect(acceptedRecommendationIsVerified({ "runtime-choice": { value: "Node.js", acceptanceMode: "blank-interactive" } }, "runtime-choice")).toBe(true);
+    expect(acceptedRecommendationIsVerified({}, "runtime-choice")).toBe(false);
+  });
+
+  it("accepts only Core-verified recommendation authority whose selected value matches the determination", () => {
+    const semantic = structuredClone(HELLO_SEMANTIC_FIXTURE) as any;
+    semantic.determinations[0] = {
+      ...semantic.determinations[0],
+      statement: "Use Node.js for the command-line implementation.",
+      source: { kind: "accepted-recommendation", questionKey: "runtime-choice" },
+    };
+    const context = {
+      originalRequest: HELLO_REQUEST,
+      acceptedRecommendations: {
+        "runtime-choice": { value: "Use Node.js for the command-line implementation.", acceptanceMode: "blank-interactive" as const },
+      },
+      runId: "accepted-recommendation-run",
+      generatedAt: "2026-08-28T12:00:00.000Z",
+    };
+    const accepted = resolveInitProject(semantic, context);
+    expect(accepted.ok).toBe(true);
+    if (!accepted.ok) return;
+    expect(validate(accepted.value).valid).toBe(true);
+
+    const tampered = structuredClone(semantic);
+    tampered.determinations[0].statement = "Use a different unpresented architecture.";
+    expect(resolveInitProject(tampered, context).ok).toBe(false);
   });
 
   it("verifies supplied user answers and rejects missing or mismatched references", () => {

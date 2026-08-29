@@ -1,7 +1,7 @@
 import { unmeasured, type Measured, type ModelProfile, type ResolvedProviderAuth, type SemanticRequest } from "../../contract.js";
 import {
   ClaudeCodeAdapter,
-  claudeCodeInvocationArgs,
+  claudeCodeInvocationConfigurationEvidence,
   type ClaudeCodeRequestResult,
 } from "./adapter.js";
 import {
@@ -18,7 +18,6 @@ import {
   type ConformanceRecord,
   type ConformanceRecordBody,
   type LiveSmokeRecord,
-  type ModelInvocationConfigurationEvidence,
   type RecordedRawResponse,
   type TransportRuntimeEvidence,
 } from "../../conformance/recording.js";
@@ -37,38 +36,6 @@ function requestFor(id: string): SemanticRequest {
   const test = CLAUDE_CODE_CONFORMANCE_CASES.find((candidate) => candidate.id === id);
   if (!test) throw new Error(`Claude Code conformance request '${id}' is missing`);
   return test.request();
-}
-
-function argumentValue(args: readonly string[], name: string): string | undefined {
-  const index = args.indexOf(name);
-  return index >= 0 ? args[index + 1] : undefined;
-}
-
-function invocationConfigurationEvidence(profile: ModelProfile): ModelInvocationConfigurationEvidence {
-  const args = claudeCodeInvocationArgs({ profile, request: requestFor("valid-structured-response"), systemPromptFile: "/private/system-prompt" });
-  const configuredMcpServers = (() => {
-    try {
-      const parsed = JSON.parse(argumentValue(args, "--mcp-config") ?? "{}") as { mcpServers?: unknown };
-      return parsed.mcpServers && typeof parsed.mcpServers === "object"
-        ? Object.keys(parsed.mcpServers as Record<string, unknown>).length
-        : 0;
-    } catch {
-      return -1;
-    }
-  })();
-  return {
-    modelId: argumentValue(args, "--model") ?? "",
-    effort: argumentValue(args, "--effort") ?? "",
-    inputMode: "stdin",
-    systemPromptMode: args.includes("--system-prompt-file") ? "replacement-file" : "other",
-    settingSources: argumentValue(args, "--setting-sources") === "" ? "none" : "configured",
-    strictMcpConfig: args.includes("--strict-mcp-config"),
-    configuredMcpServers,
-    toolsMode: argumentValue(args, "--tools") === "" ? "disabled-except-structured-output" : "other",
-    fallbackModelConfigured: args.includes("--fallback-model"),
-    sessionPersistence: args.includes("--no-session-persistence") ? "disabled" : "enabled-or-unspecified",
-    restrictedMode: args.includes("--restricted"),
-  };
 }
 
 function derived(raw: ClaudeCodeRawResponse): { truncated: ClaudeCodeRawResponse; malformed: ClaudeCodeRawResponse } {
@@ -249,7 +216,7 @@ export async function recordClaudeCodeConformance(
     rawResponses,
     liveSmoke: { cancellation, timeout },
     runtimeEvidence: {
-      format: "rb-external-runtime-evidence/v2",
+      format: "rb-external-runtime-evidence/v3",
       cliInvocations: adapter.modelInvocations,
       observedProviderRequests: unmeasured("unsupported-by-provider"),
       observedTopLevelModelSteps: observedSteps,
@@ -281,7 +248,7 @@ export async function recordClaudeCodeConformance(
           executable: "claude",
         },
       ],
-      invocationConfiguration: invocationConfigurationEvidence(profile),
+      invocationConfiguration: claudeCodeInvocationConfigurationEvidence(profile),
       invocations: captures.map((capture) => ({
         id: capture.id,
         recordingKey: capture.recordingKey,
@@ -362,7 +329,7 @@ export function migrateClaudeCodeRuntimeEvidence(
   const observedModelIds = [...new Set(invocations.flatMap((item) => item.modelIds))].sort();
   const observedTopLevelModelSteps = invocations.map((item) => item.topLevelModelSteps);
   const runtimeEvidence: TransportRuntimeEvidence = {
-    format: "rb-external-runtime-evidence/v2",
+    format: "rb-external-runtime-evidence/v3",
     cliInvocations: legacy.cliInvocations ?? 0,
     observedProviderRequests: legacy.observedProviderRequests ?? unmeasured("unsupported-by-provider"),
     observedTopLevelModelSteps,
@@ -392,7 +359,7 @@ export function migrateClaudeCodeRuntimeEvidence(
         executable: "claude",
       },
     ],
-    invocationConfiguration: invocationConfigurationEvidence(profile),
+    invocationConfiguration: claudeCodeInvocationConfigurationEvidence(profile),
     invocations,
   };
   const placeholder: ConformanceResult = {

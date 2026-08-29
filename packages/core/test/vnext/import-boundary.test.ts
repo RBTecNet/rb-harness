@@ -54,4 +54,15 @@ describe("vNext import boundary", () => {
     const source = await readFile(resolve(coreRoot, "src/vnext/publish.ts"), "utf8");
     expect(source).not.toMatch(/provider|gateway|formatter|repair/i);
   });
+
+  it("keeps Phase 3 run state non-semantic and model prompts free of artifact grammar", async () => {
+    const coreRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+    const runState = await readFile(resolve(coreRoot, "src/vnext/run-state.ts"), "utf8");
+    expect(runState).not.toMatch(/InitProjectModel|SemanticPhase|SemanticTask|Requirement\[|AcceptanceSemantics|ExecutionDocument/);
+    const prompts = await readFile(resolve(coreRoot, "src/vnext/prompts.ts"), "utf8");
+    expect(prompts).not.toMatch(/PHASES\.md|BRIEF\.md|AC-T001|T001|rb-manifest|Ralph document/);
+    const gateway = await readFile(resolve(coreRoot, "src/vnext/gateway.ts"), "utf8");
+    expect(gateway).not.toMatch(/anthropic|claude|direct-api|claude-code-cli/i);
+    expect(gateway).not.toMatch(/formatter|field patch|document repair/i);
+  });
 });

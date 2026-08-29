@@ -23,7 +23,7 @@ import {
   type ValidationIntent,
 } from "./ir.js";
 import type { Finding, IrInvariantId, Outcome } from "./result.js";
-import { canonicalEvidenceText, requestEvidenceIsVerified, userAnswerIsVerified } from "./provenance.js";
+import { acceptedRecommendationIsVerified, canonicalEvidenceText, requestEvidenceIsVerified, userAnswerIsVerified } from "./provenance.js";
 
 function finding(
   invariant: IrInvariantId,
@@ -66,6 +66,7 @@ function stableTopological<T>(
 function verifiedSource(
   source: { readonly kind: "request"; readonly evidence: string }
     | { readonly kind: "user-answer"; readonly questionKey: string }
+    | { readonly kind: "accepted-recommendation"; readonly questionKey: string }
     | { readonly kind: "model-default" },
   context: ResolutionContext,
   pointer: string,
@@ -81,11 +82,14 @@ function verifiedSource(
     return { kind: "request", evidence };
   }
   const key = semanticKey(source.questionKey);
-  if (!key || !userAnswerIsVerified(context.answers ?? {}, source.questionKey)) {
-    findings.push(finding("I-17", "User-answer provenance does not resolve to supplied answer data", pointer, [source.questionKey]));
+  const verified = source.kind === "user-answer"
+    ? userAnswerIsVerified(context.answers ?? {}, source.questionKey)
+    : acceptedRecommendationIsVerified(context.acceptedRecommendations ?? {}, source.questionKey);
+  if (!key || !verified) {
+    findings.push(finding("I-17", `${source.kind} provenance does not resolve to supplied authority evidence`, pointer, [source.questionKey]));
     return undefined;
   }
-  return { kind: "user-answer", questionKey: key };
+  return { kind: source.kind, questionKey: key };
 }
 
 function parsedKeys(
@@ -213,6 +217,11 @@ export function resolveInitProject(
   const determinations = input.determinations.flatMap((entry, index) => {
     const source = verifiedSource(entry.source, context, `/determinations/${index}/source`, findings);
     if (!source) return [];
+    if (source.kind === "accepted-recommendation"
+      && context.acceptedRecommendations?.[source.questionKey]?.value.trim() !== entry.statement.trim()) {
+      findings.push(finding("I-17", "Accepted-recommendation determination does not equal the verified selected recommendation", `/determinations/${index}/statement`, [entry.statement]));
+      return [];
+    }
     return [{
       key: determinationKeys[index]!,
       statement: entry.statement,
@@ -234,14 +243,21 @@ export function resolveInitProject(
       if (source?.kind === "model-default") findings.push(finding("I-17", "A model default cannot create an authoritative protected path", `/protectedPaths/${index}/source`));
       continue;
     }
+    if (source.kind === "accepted-recommendation"
+      && context.acceptedRecommendations?.[source.questionKey]?.value.trim() !== entry.path.trim()) {
+      findings.push(finding("I-17", "Accepted-recommendation protected path does not equal the verified selected recommendation", `/protectedPaths/${index}/path`, [entry.path]));
+      continue;
+    }
     const protectedSource: ProtectedPathSource = source.kind === "request"
       ? source
-      : { kind: "user-answer", questionKey: source.questionKey };
+      : { kind: source.kind, questionKey: source.questionKey };
     protectedPaths.push({ path: entry.path as RelPath, reason: entry.reason, source: protectedSource });
   }
   if (findings.length > 0) return { ok: false, findings };
 
   const answers = Object.fromEntries(Object.entries(context.answers ?? {}).sort(([left], [right]) => codeUnitCompare(left, right)));
+  const acceptedRecommendations = Object.fromEntries(Object.entries(context.acceptedRecommendations ?? {})
+    .sort(([left], [right]) => codeUnitCompare(left, right)));
   const model: InitProjectModel = {
     version: INIT_PROJECT_MODEL_VERSION,
     workflow: "init",
@@ -254,6 +270,7 @@ export function resolveInitProject(
         requestSha256: sha256Text(context.originalRequest) as Sha256,
         originalRequest: context.originalRequest,
         answers,
+        acceptedRecommendations,
         generatedAt: context.generatedAt,
       },
     },
