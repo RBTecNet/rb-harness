@@ -12,6 +12,9 @@ export type Sha256 = Brand<string, "Sha256">;
 export type RelPath = Brand<string, "RelPath">;
 export type SemanticKey = Brand<string, "SemanticKey">;
 
+/** Shared Core/wire-schema grammar for model-authored symbolic references. */
+export const SEMANTIC_KEY_PATTERN = "^[a-z][a-z0-9-]{1,47}$" as const;
+
 export function projectId(name: string): ProjectId {
   const normalized = name
     .normalize("NFKD")
@@ -53,6 +56,5 @@ export function briefArtifactId(project: ProjectId): ArtifactId {
 }
 
 export function semanticKey(value: string): SemanticKey | undefined {
-  return /^[a-z][a-z0-9-]{1,47}$/.test(value) ? value as SemanticKey : undefined;
+  return new RegExp(SEMANTIC_KEY_PATTERN).test(value) ? value as SemanticKey : undefined;
 }
-

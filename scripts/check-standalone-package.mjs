@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
@@ -33,6 +34,8 @@ try {
     "dist/contracts/rb-headless-interview-v1.md",
     "dist/contracts/rb-headless-interview-v1.schema.json",
     "dist/headless-interview-bundle.json",
+    "dist/records/anthropic_claude-opus-5.json",
+    "dist/records/anthropic_claude-code-cli_claude-opus-5.json",
   ]) {
     assert(packedFiles.has(path), `Packed standalone package is missing ${path}`);
   }
@@ -42,6 +45,11 @@ try {
   await mkdir(unpacked, { recursive: true });
   execFileSync("tar", ["-xzf", archive, "-C", unpacked]);
   const extractedPackage = resolve(unpacked, "package");
+  for (const name of ["anthropic_claude-opus-5.json", "anthropic_claude-code-cli_claude-opus-5.json"]) {
+    const source = await readFile(resolve(packageRoot, "src/vnext/providers/conformance/records", name));
+    const packed = await readFile(resolve(extractedPackage, "dist/records", name));
+    assert(createHash("sha256").update(source).digest("hex") === createHash("sha256").update(packed).digest("hex"), `Packed conformance record differs from source authority: ${name}`);
+  }
   await symlink(resolve(root, "node_modules"), resolve(extractedPackage, "node_modules"), "dir");
 
   const binDirectory = resolve(temporaryRoot, "bin");
@@ -88,6 +96,11 @@ try {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
+
+  const directReplay = cli(["vnext", "conformance", "anthropic:claude-opus-5"]);
+  assert(directReplay.includes("Transport: direct-api") && directReplay.includes("Tier: SUPPORTED"), "Packed direct-API conformance replay failed");
+  const cliReplay = cli(["vnext", "conformance", "anthropic:claude-code-cli:claude-opus-5"]);
+  assert(cliReplay.includes("Transport: claude-code-cli") && cliReplay.includes("Tier: SUPPORTED"), "Packed Claude CLI conformance replay failed");
 
   const plan = resolve(project, ".rb/features/standalone-test/PHASES.md");
   assert(cli(["contract", "validate", plan]).includes("OK"), "Published PHASES.md failed contract validate");

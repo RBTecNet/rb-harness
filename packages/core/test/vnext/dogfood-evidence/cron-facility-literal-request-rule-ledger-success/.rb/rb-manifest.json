@@ -1,0 +1,26 @@
+{
+  "manifestVersion": "rb-manifest/v1",
+  "project": {
+    "id": "cron-helper-web",
+    "name": "cron-helper-web"
+  },
+  "artifactRoot": ".rb",
+  "generatedAt": "2026-08-29T11:05:05.936Z",
+  "artifacts": [
+    {
+      "id": "cron-helper-web-brief",
+      "kind": "project-brief",
+      "path": ".rb/init/BRIEF.md",
+      "status": "ready",
+      "sha256": "1b238556d4b090344497c026f911d42c68ee981709cd235350ee15e5b09a72b5"
+    },
+    {
+      "id": "cron-helper-web-execution",
+      "kind": "execution-plan",
+      "path": ".rb/init/PHASES.md",
+      "status": "ready",
+      "sha256": "7a83d9ad64ff00100b78907ec31fe5672bfc716bbbe363de1752cc239339d6cb",
+      "contract": "rb-execution/v1"
+    }
+  ]
+}

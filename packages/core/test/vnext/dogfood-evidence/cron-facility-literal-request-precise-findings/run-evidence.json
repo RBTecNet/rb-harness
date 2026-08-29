@@ -1,0 +1,165 @@
+{
+  "format": "rb-vnext-phase35-dogfood-failure-evidence/v1",
+  "recordedAt": "2026-08-29T06:47:59.204Z",
+  "sourceProject": "cron_facility",
+  "safetyApproach": "disposable project-content copy excluding existing RB state, dependencies, build output, and Git metadata",
+  "originalRequest": "Crie um projeto web em nodejs e typescript para facilitar o uso de contrab no linux, a interface deverá ser divida em 2 abras onde a primeira aba deverá conter um campo para o usuario digitar uma linha cron existente e o sistema devolver o que aquela linha faz, e a segunda aba deveremos ter uma caixa de texto para o usuario digitar um prompt solicitando a um modelo de ia que informe a linha do cron para o agendamento da forma que foi solicitado por ele, o prompt deve retornar a linha inteira e a explicação de cada campo da linha cron, o modelo de ia deverá ser configurado por arquivos de variaves .env onde as variaveis deverão ser: AI_BASE_URL,AI_API_KEY,AI_MODEL,AI_TIMEOUT_MS,AI_TEMPERATURE,AI_MAX_OUTPUT_TOKENS",
+  "installedPackage": {
+    "name": "@rb-harness/core",
+    "version": "0.6.2",
+    "tarballSha256": "6f99e51cda3a4d8cabdccbfbdeca835362d06630ae0ca84836b404a3a373d2e4"
+  },
+  "runId": "vnext-6a27e7ed-7c1c-4147-94e3-47a4ec24d17a",
+  "selectedProfileId": "anthropic:claude-code-cli:claude-opus-5",
+  "transport": "claude-code-cli",
+  "requestAccounting": "opaque",
+  "executionMode": "headless",
+  "questions": [
+    {
+      "key": "ai-provider-protocol",
+      "question": "Qual protocolo o cliente de IA deve usar dado AI_BASE_URL?",
+      "materiality": "architecture",
+      "rigidity": "RIGID",
+      "recommendedValue": "API compatível com OpenAI (/v1/chat/completions)",
+      "recommendedRationale": "As variáveis exigidas mapeiam diretamente nesse padrão e cobrem OpenAI, Ollama, OpenRouter e vLLM.",
+      "acceptanceMode": "non-interactive-policy",
+      "selectedValue": "API compatível com OpenAI (/v1/chat/completions)"
+    },
+    {
+      "key": "frontend-stack",
+      "question": "Como a interface web de duas abas deve ser construída?",
+      "materiality": "architecture",
+      "rigidity": "RIGID",
+      "recommendedValue": "SPA React + Vite consumindo uma API Express em TypeScript",
+      "recommendedRationale": "Abas com estado são simples em React e mantêm separação clara entre API e UI, sem o peso de um framework full-stack.",
+      "acceptanceMode": "non-interactive-policy",
+      "selectedValue": "SPA React + Vite consumindo uma API Express em TypeScript"
+    },
+    {
+      "key": "cron-format-scope",
+      "question": "Qual formato de cron deve ser suportado?",
+      "materiality": "product",
+      "rigidity": "RIGID",
+      "recommendedValue": "5 campos padrão do crontab Linux, com suporte adicional a macros (@daily, @hourly, @reboot)",
+      "recommendedRationale": "É o formato do crontab no Linux citado no pedido; macros são triviais e comuns no uso real.",
+      "acceptanceMode": "non-interactive-policy",
+      "selectedValue": "5 campos padrão do crontab Linux, com suporte adicional a macros (@daily, @hourly, @reboot)"
+    }
+  ],
+  "attempts": [
+    {
+      "slice": "intent",
+      "ordinal": 1,
+      "corrective": false,
+      "status": "semantic-invalid",
+      "findings": [
+        {
+          "code": "semantic-invalid",
+          "pointer": "/qualityCommands/3/command",
+          "message": "quality command starts a long-running service or watcher and never exits; a validation must run to completion and return its real exit code, so prove the running service through OPERATIONS.json instead"
+        }
+      ],
+      "modelFacingFindings": [
+        {
+          "code": "semantic-invalid",
+          "pointer": "/qualityCommands/3/command",
+          "message": "Validation commands must terminate and return their real exit status. Do not use a long-running server or watcher as validation. Express non-command evidence using the supported manual or human validation intent."
+        }
+      ],
+      "modelFacingFindingsUsedForCorrection": true
+    },
+    {
+      "slice": "intent",
+      "ordinal": 2,
+      "corrective": true,
+      "status": "accepted",
+      "findings": []
+    },
+    {
+      "slice": "work",
+      "ordinal": 3,
+      "corrective": false,
+      "status": "semantic-invalid",
+      "findings": [
+        {
+          "code": "semantic-invalid",
+          "pointer": "/requirements/7",
+          "message": "Requirement R-008 is not covered by any task"
+        },
+        {
+          "code": "semantic-invalid",
+          "pointer": "/phases/3/tasks/0/acceptance/2",
+          "message": "T007 contains visual acceptance semantics outside the Phase 1 model"
+        },
+        {
+          "code": "semantic-invalid",
+          "pointer": "/phases/0/tasks/1/validation/1",
+          "message": "Manual validation uses manual prose for an executable check; declare the exact command or use human: for evidence unavailable to the executor"
+        }
+      ],
+      "modelFacingFindings": [
+        {
+          "code": "semantic-invalid",
+          "pointer": "/requirements/7",
+          "message": "Requirement coverage must reference declared semantic requirement keys, and every declared requirement must be covered by at least one task."
+        },
+        {
+          "code": "semantic-invalid",
+          "pointer": "/phases/3/tasks/0/acceptance/2",
+          "message": "This acceptance statement uses visual-only semantics, which are not supported by the current init semantic model. Express the criterion as observable functional behavior or use an appropriate human validation intent."
+        },
+        {
+          "code": "semantic-invalid",
+          "pointer": "/phases/0/tasks/1/validation/1",
+          "message": "Use command with an exact declared quality-command key for an executable check, manual for a non-command inspection the executor can perform, or human for evidence that requires human judgement."
+        }
+      ],
+      "modelFacingFindingsUsedForCorrection": true
+    },
+    {
+      "slice": "work",
+      "ordinal": 4,
+      "corrective": true,
+      "status": "semantic-invalid",
+      "findings": [
+        {
+          "code": "semantic-invalid",
+          "pointer": "/phases/3/tasks/0/acceptance/3",
+          "message": "T007 contains visual acceptance semantics outside the Phase 1 model"
+        }
+      ],
+      "modelFacingFindings": [
+        {
+          "code": "semantic-invalid",
+          "pointer": "/phases/3/tasks/0/acceptance/3",
+          "message": "This acceptance statement uses visual-only semantics, which are not supported by the current init semantic model. Express the criterion as observable functional behavior or use an appropriate human validation intent."
+        }
+      ],
+      "modelFacingFindingsUsedForCorrection": false
+    }
+  ],
+  "counters": {
+    "semanticOperations": 4,
+    "transportInvocations": 4,
+    "transportRetries": 0,
+    "correctiveRegenerations": 2,
+    "correctiveBySlice": {
+      "intent": 1,
+      "work": 1
+    },
+    "providerRequests": {
+      "measured": false,
+      "reason": "unsupported-by-provider"
+    }
+  },
+  "terminalState": "failed",
+  "failureKind": "semantic-invalid-after-recovery",
+  "publicationOccurred": false,
+  "artifactTree": [],
+  "remediationObservation": {
+    "aggregateTaskCompletenessFindingRecurred": false,
+    "machineIdentityKeyFailureRecurred": false,
+    "taskStructureSchemaWasActive": true,
+    "newFailureBoundary": "The corrective work slice fixed requirement coverage and validation-intent defects but authored another visual-only acceptance statement. Core rejected it at a precise semantic pointer after the single allowed correction."
+  }
+}

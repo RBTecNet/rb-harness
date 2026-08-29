@@ -12,6 +12,7 @@ import {
   phaseId,
   projectId,
   requirementId,
+  semanticKey,
   taskId,
   type RelPath,
   type Sha256,
@@ -24,7 +25,9 @@ import type {
 } from "./ir.js";
 import { INIT_PROJECT_MODEL_VERSION } from "./ir.js";
 import { acceptedRecommendationIsVerified, requestEvidenceIsVerified, userAnswerIsVerified } from "./provenance.js";
+import { projectRelativePathSyntaxIsSafe } from "./path-contract.js";
 import type { Finding, FindingClass, IrInvariantId, ValidationOutcome } from "./result.js";
+import { TASK_ACCEPTANCE_MAX_ITEMS, taskStructuralRule } from "./task-contract.js";
 
 function codeUnitCompare(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
@@ -132,11 +135,7 @@ function duplicates(values: readonly string[]): readonly string[] {
 }
 
 export function projectRelativePathIsSafe(value: string): boolean {
-  if (!value || /[\0\n\r\t`]/.test(value) || value.includes("\\")) return false;
-  if (value.startsWith("/") || /^[A-Za-z]:\//.test(value)) return false;
-  const parts = value.split("/");
-  if (parts.some((part) => part === ".." || part === "." || part === "")) return false;
-  return !["*", "**", "**/*"].includes(value);
+  return projectRelativePathSyntaxIsSafe(value);
 }
 
 function pathsIntersect(left: string, right: string): boolean {
@@ -244,12 +243,12 @@ export function validate(model: InitProjectModel): ValidationOutcome {
   for (const [pointer, values] of keyGroups) {
     const repeated = duplicates(values);
     if (repeated.length) add(findings, "I-02", "Semantic keys must be unique within their kind", pointer, "fatal", repeated);
-    const invalid = values.filter((value) => !/^[a-z][a-z0-9-]{1,47}$/.test(value));
+    const invalid = values.filter((value) => !semanticKey(value));
     if (invalid.length) add(findings, "I-02", "Semantic keys must use the canonical key grammar", pointer, "fatal", invalid);
   }
   const invalidDeterminationKeys = model.core.determinations
     .map((entry) => entry.key)
-    .filter((value) => !/^[a-z][a-z0-9-]{1,47}$/.test(value));
+    .filter((value) => !semanticKey(value));
   if (invalidDeterminationKeys.length) {
     add(findings, "I-16", "Determination keys must use the canonical key grammar", "/core/determinations", "fatal", invalidDeterminationKeys);
   }
@@ -284,48 +283,52 @@ export function validate(model: InitProjectModel): ValidationOutcome {
     }
   }
 
-  for (const [taskIndex, task] of tasks.entries()) {
-    if (task.ownedPaths.length === 0) add(findings, "I-06", `${task.id} has no executable owned-path scope`, `/phases/tasks/${taskIndex}/ownedPaths`);
+  const taskLocations = model.phases.flatMap((phase, phaseIndex) => phase.tasks.map((task, taskIndex) => ({ task, phaseIndex, taskIndex })));
+  for (const { task, phaseIndex, taskIndex } of taskLocations) {
+    const taskPointer = `/phases/${phaseIndex}/tasks/${taskIndex}`;
+    if (task.ownedPaths.length === 0) add(findings, "I-06", taskStructuralRule("ownedPaths").message, `${taskPointer}/ownedPaths`);
     for (const [pathIndex, path] of task.ownedPaths.entries()) {
-      if (!projectRelativePathIsSafe(path)) add(findings, "I-06", `Unsafe owned path: ${path}`, `/phases/tasks/${taskIndex}/ownedPaths/${pathIndex}`, "fatal", [path]);
+      if (!projectRelativePathIsSafe(path)) add(findings, "I-06", `Unsafe owned path: ${path}`, `${taskPointer}/ownedPaths/${pathIndex}`, "fatal", [path]);
       const intersections = model.core.protectedPaths.filter((protectedPath) => pathsIntersect(path, protectedPath.path));
-      if (intersections.length) add(findings, "I-07", `Owned path intersects protected authority: ${path}`, `/phases/tasks/${taskIndex}/ownedPaths/${pathIndex}`, "fatal", intersections.map((entry) => entry.path));
+      if (intersections.length) add(findings, "I-07", `Owned path intersects protected authority: ${path}`, `${taskPointer}/ownedPaths/${pathIndex}`, "fatal", intersections.map((entry) => entry.path));
       if ([".rb", ".rb-harness", ".git"].some((control) => pathsIntersect(path, control))) {
-        add(findings, "I-08", `Owned path mutates the control plane: ${path}`, `/phases/tasks/${taskIndex}/ownedPaths/${pathIndex}`, "fatal", [path]);
+        add(findings, "I-08", `Owned path mutates the control plane: ${path}`, `${taskPointer}/ownedPaths/${pathIndex}`, "fatal", [path]);
       }
     }
     if (changeReferencesPlanningArtifacts(task.intent)) {
-      add(findings, "I-08", `${task.id} change intent directs a control-plane mutation`, `/phases/tasks/${taskIndex}/intent`);
+      add(findings, "I-08", `${task.id} change intent directs a control-plane mutation`, `${taskPointer}/intent`);
     }
-    if (!semanticSingleLineIsValid(task.intent) || task.ownedPaths.length === 0 || task.covers.length === 0 || task.acceptance.length === 0
-      || task.validation.length === 0 || !semanticSingleLineIsValid(task.expectedEvidence)) {
-      add(findings, "I-09", `${task.id} lacks required intent, scope, acceptance, validation, or evidence`, `/phases/tasks/${taskIndex}`);
-    }
+    if (!semanticSingleLineIsValid(task.intent)) add(findings, "I-09", taskStructuralRule("intent").message, `${taskPointer}/intent`);
+    if (task.covers.length === 0) add(findings, "I-09", taskStructuralRule("covers").message, `${taskPointer}/covers`);
+    if (task.acceptance.length === 0) add(findings, "I-09", taskStructuralRule("acceptance").message, `${taskPointer}/acceptance`);
+    if (task.validation.length === 0) add(findings, "I-09", taskStructuralRule("validation").message, `${taskPointer}/validation`);
+    if (!semanticSingleLineIsValid(task.expectedEvidence)) add(findings, "I-09", taskStructuralRule("expectedEvidence").message, `${taskPointer}/expectedEvidence`);
     for (const [acceptanceIndex, acceptance] of task.acceptance.entries()) {
       const referenceOnly = /^(?:R|RF|RNF|UI|CT|AC)-[A-Z0-9-]+\.?$/i.test(acceptance.statement.trim());
       const ambiguity = ambiguousAcceptanceCriterion(acceptance.statement);
-      if (referenceOnly || ambiguity) add(findings, "I-10", `${task.id} acceptance is not self-contained${ambiguity ? `: ${ambiguity}` : ""}`, `/phases/tasks/${taskIndex}/acceptance/${acceptanceIndex}`, "semantic-invalid");
+      if (referenceOnly || ambiguity) add(findings, "I-10", `${task.id} acceptance is not self-contained${ambiguity ? `: ${ambiguity}` : ""}`, `${taskPointer}/acceptance/${acceptanceIndex}`, "semantic-invalid");
       if (requiresDirectGoDependency(acceptance.statement)) {
         const taskModules = goModulePaths(`${task.intent}\n${task.acceptance.map((entry) => entry.statement).join("\n")}`);
         const criterionModules = goModulePaths(acceptance.statement);
         if ((criterionModules.length ? criterionModules : taskModules).length === 0) {
-          add(findings, "I-10", `${task.id} direct Go dependency acceptance names no verifiable module path`, `/phases/tasks/${taskIndex}/acceptance/${acceptanceIndex}`, "semantic-invalid");
+          add(findings, "I-10", `${task.id} direct Go dependency acceptance names no verifiable module path`, `${taskPointer}/acceptance/${acceptanceIndex}`, "semantic-invalid");
         }
       }
-      if (isVisualAcceptanceCriterion(acceptance.statement)) add(findings, "I-13", `${task.id} contains visual acceptance semantics outside the Phase 1 model`, `/phases/tasks/${taskIndex}/acceptance/${acceptanceIndex}`);
+      if (isVisualAcceptanceCriterion(acceptance.statement)) add(findings, "I-13", `${task.id} contains visual acceptance semantics outside the Phase 1 model`, `${taskPointer}/acceptance/${acceptanceIndex}`);
     }
   }
 
   const commands = new Map(model.qualityCommands.map((entry) => [entry.key, entry]));
-  for (const [taskIndex, task] of tasks.entries()) {
+  for (const { task, phaseIndex, taskIndex } of taskLocations) {
+    const taskPointer = `/phases/${phaseIndex}/tasks/${taskIndex}`;
     for (const [validationIndex, intent] of task.validation.entries()) {
-      if (intent.kind === "command" && !commands.has(intent.commandKey)) add(findings, "I-11", `Unknown quality-command key ${intent.commandKey}`, `/phases/tasks/${taskIndex}/validation/${validationIndex}`);
-      if (intent.kind === "manual" && !semanticSingleLineIsValid(intent.inspection)) add(findings, "I-09", "Manual validation inspection is empty or multiline", `/phases/tasks/${taskIndex}/validation/${validationIndex}`);
+      if (intent.kind === "command" && !commands.has(intent.commandKey)) add(findings, "I-11", `Unknown quality-command key ${intent.commandKey}`, `${taskPointer}/validation/${validationIndex}`);
+      if (intent.kind === "manual" && !semanticSingleLineIsValid(intent.inspection)) add(findings, "I-09", "Manual validation inspection is empty or multiline", `${taskPointer}/validation/${validationIndex}`);
       if (intent.kind === "manual") {
         const issue = ambiguousValidationInstruction({ kind: "manual", value: intent.inspection });
-        if (issue) add(findings, "I-12", `Manual validation ${issue}`, `/phases/tasks/${taskIndex}/validation/${validationIndex}`, "semantic-invalid");
+        if (issue) add(findings, "I-12", `Manual validation ${issue}`, `${taskPointer}/validation/${validationIndex}`, "semantic-invalid");
       }
-      if (intent.kind === "human" && !semanticSingleLineIsValid(intent.evidence)) add(findings, "I-09", "Human validation evidence is empty or multiline", `/phases/tasks/${taskIndex}/validation/${validationIndex}`);
+      if (intent.kind === "human" && !semanticSingleLineIsValid(intent.evidence)) add(findings, "I-09", "Human validation evidence is empty or multiline", `${taskPointer}/validation/${validationIndex}`);
     }
   }
   for (const [index, command] of model.qualityCommands.entries()) {
@@ -338,7 +341,7 @@ export function validate(model: InitProjectModel): ValidationOutcome {
     if (phase.tasks.length === 0) add(findings, "I-14", `${phase.id} must contain at least one task`, `/phases/${index}/tasks`);
     if (phase.tasks.length > 12) add(findings, "I-15", `${phase.id} exceeds the 12-task ceiling`, `/phases/${index}/tasks`, "semantic-invalid");
     for (const [taskIndex, task] of phase.tasks.entries()) {
-      if (task.acceptance.length > 6) add(findings, "I-15", `${task.id} exceeds the acceptance ceiling`, `/phases/${index}/tasks/${taskIndex}/acceptance`, "semantic-invalid");
+      if (task.acceptance.length > TASK_ACCEPTANCE_MAX_ITEMS) add(findings, "I-15", `${task.id} exceeds the acceptance ceiling`, `/phases/${index}/tasks/${taskIndex}/acceptance`, "semantic-invalid");
       if (task.ownedPaths.length > 8) add(findings, "I-15", `${task.id} exceeds the owned-path ceiling`, `/phases/${index}/tasks/${taskIndex}/ownedPaths`, "semantic-invalid");
     }
   }

@@ -1,0 +1,103 @@
+{
+  "format": "rb-vnext-phase35-dogfood-evidence/v1",
+  "recordedAt": "2026-08-29T05:51:18.899Z",
+  "sourceProject": "cron_facility",
+  "sourceAuthority": ".rb/init/PROJECT.md",
+  "originalRequest": "Create a local educational web application for Linux users that explains user crontab lines and generates valid cron lines from Brazilian Portuguese requests without executing or installing anything.",
+  "selectedProfileId": "anthropic:claude-code-cli:claude-opus-5",
+  "transport": "claude-code-cli",
+  "requestAccounting": "opaque",
+  "executionMode": "headless",
+  "safetyApproach": "disposable project-content copy excluding existing RB state, dependencies, and build output",
+  "questions": [
+    {
+      "key": "stack",
+      "question": "Which stack should the local web app use?",
+      "materiality": "architecture",
+      "rigidity": "RIGID",
+      "recommendedValue": "Vite + React + TypeScript single-page app, fully client-side",
+      "recommendedRationale": "No backend is needed since nothing is executed; a static SPA enforces the no-execution constraint and runs locally with one command.",
+      "acceptanceMode": "non-interactive-policy",
+      "selectedValue": "Vite + React + TypeScript single-page app, fully client-side"
+    },
+    {
+      "key": "ptbr-coverage",
+      "question": "How broad should Brazilian Portuguese generation coverage be for the MVP?",
+      "materiality": "product",
+      "rigidity": "RIGID",
+      "recommendedValue": "A documented set of common patterns (every N minutes/hours, daily at a time, specific weekdays, monthly day, reboot), with a friendly 'nao entendi' message otherwise",
+      "recommendedRationale": "Keeps the deterministic parser reliable and testable while covering most educational cases.",
+      "acceptanceMode": "non-interactive-policy",
+      "selectedValue": "A documented set of common patterns (every N minutes/hours, daily at a time, specific weekdays, monthly day, reboot), with a friendly 'nao entendi' message otherwise"
+    },
+    {
+      "key": "timezone",
+      "question": "Which timezone should the next-run preview use?",
+      "materiality": "implementation",
+      "rigidity": "FLEXIBLE",
+      "recommendedValue": "The browser's local timezone, shown explicitly in the UI",
+      "recommendedRationale": "Matches how the user's own cron daemon behaves and needs no configuration.",
+      "acceptanceMode": "non-interactive-policy",
+      "selectedValue": "The browser's local timezone, shown explicitly in the UI"
+    }
+  ],
+  "counters": {
+    "semanticOperations": 3,
+    "transportInvocations": 3,
+    "transportRetries": 0,
+    "correctiveRegenerations": 1,
+    "correctiveBySlice": {
+      "intent": 1,
+      "work": 0
+    },
+    "providerRequests": {
+      "measured": false,
+      "reason": "unsupported-by-provider"
+    }
+  },
+  "acceptedAttempt": {
+    "intentAttempts": 2,
+    "workAttempts": 1,
+    "intentFindings": [
+      "long-running quality command rejected",
+      "unsafe protected-path proposals rejected"
+    ]
+  },
+  "precedingIdenticalAttempt": {
+    "terminalState": "failed",
+    "semanticOperations": 2,
+    "transportInvocations": 2,
+    "correctiveRegenerations": 1,
+    "finding": "The corrective intent retained one silent RIGID architecture default, so Core rejected it after the bounded second attempt."
+  },
+  "terminalState": "published",
+  "publicationOccurred": true,
+  "artifactTree": [
+    ".rb/init/BRIEF.md",
+    ".rb/init/PHASES.md",
+    ".rb/rb-manifest.json"
+  ],
+  "ralph": {
+    "status": "READY",
+    "executionIssues": 0,
+    "manifestValid": true,
+    "treeValid": true,
+    "readyExecutionPlans": 1
+  },
+  "semanticQuality": {
+    "requirements": 7,
+    "phases": 3,
+    "tasks": 8,
+    "allTasksScoped": true,
+    "allTasksHaveAcceptance": true,
+    "allTasksHaveValidation": true,
+    "allTasksHaveExpectedEvidence": true
+  },
+  "qualitativeAssessment": {
+    "ralphExecutable": true,
+    "greenfieldMvpCoherent": true,
+    "overInterviewingObserved": false,
+    "ceremonialQuestionsObserved": false,
+    "limitation": "vnext init did not inspect existing application source, so this greenfield plan diverges from cron_facility's implemented server and optional-AI architecture and must not replace its existing plan."
+  }
+}

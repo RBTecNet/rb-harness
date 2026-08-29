@@ -3,6 +3,8 @@ import { dirname, resolve } from "node:path";
 import { sha256Text } from "../hash.js";
 import type { InterviewQuestionEvidence } from "./interview.js";
 import type { Measured, ProviderTransportId, RequestAccounting } from "./providers/contract.js";
+import type { RecoveryRule } from "./recovery-findings.js";
+import type { RejectedFindingEvidence } from "./rejected-evidence.js";
 import type { WireFinding } from "./wire.js";
 
 export type InitRunStage =
@@ -17,12 +19,46 @@ export type InitRunStage =
   | "published"
   | "failed";
 
+export interface RecoveryScopeEvidence {
+  readonly completeSliceRegeneration: true;
+  readonly rulesApplyGlobally: true;
+  readonly pointersArePreviousAttemptEvidence: true;
+}
+
+export interface RecoveryInputAuditEvidence {
+  readonly recoveryScope: RecoveryScopeEvidence;
+  readonly violatedRules: readonly RecoveryRule[];
+  readonly specificPreviousFindings: readonly {
+    readonly pointer: string;
+    readonly guidance: string;
+  }[];
+  readonly hashes: {
+    readonly originalRequestSha256: string;
+    readonly authoritativeInputSha256: string;
+    readonly resolvedInterviewAuthoritySha256?: string;
+    readonly recoveryContextSha256: string;
+    readonly correctiveInputSha256: string;
+  };
+}
+
+export interface RecoveryAttemptEvidence extends RecoveryInputAuditEvidence {
+  readonly slice: "intent" | "work";
+  readonly ordinal: number;
+}
+
+export interface CorrectiveSemanticInput {
+  readonly input: string;
+  readonly audit: RecoveryInputAuditEvidence;
+}
+
 export interface SemanticAttemptEvidence {
   readonly slice: "intent" | "work";
   readonly ordinal: number;
   readonly corrective: boolean;
   readonly status: "requested" | "provider-failed" | "semantic-invalid" | "accepted";
   readonly findings: readonly WireFinding[];
+  readonly recovery?: RecoveryAttemptEvidence;
+  readonly rejectedFindings?: readonly RejectedFindingEvidence[];
 }
 
 export interface InitRunCounters {
@@ -34,7 +70,7 @@ export interface InitRunCounters {
   readonly providerRequests: Measured<number>;
 }
 
-/** Persisted orchestration/evidence only. It never contains requirements, phases or tasks. */
+/** Persisted orchestration/evidence only; rejected snippets are diagnostic and never project authority. */
 export interface VnextInitRunState {
   readonly format: "rb-vnext-init-run/v1";
   readonly runId: string;

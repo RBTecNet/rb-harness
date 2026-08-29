@@ -20,7 +20,7 @@ export function conformanceRecordsRootFromModulePath(modulePath: string): string
   if (sourceIndex >= 0) return resolve(absolute.slice(0, sourceIndex), ...SOURCE_RECORDS);
   const distMarker = `${sep}dist${sep}`;
   const distIndex = absolute.lastIndexOf(distMarker);
-  if (distIndex >= 0) return resolve(absolute.slice(0, distIndex), ...SOURCE_RECORDS);
+  if (distIndex >= 0) return resolve(absolute.slice(0, distIndex), "dist", "records");
   throw new Error(`cannot locate the @rb-harness/core package root from module path: ${modulePath}`);
 }
 

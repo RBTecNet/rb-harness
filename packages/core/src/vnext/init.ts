@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ClosureResult } from "./closure.js";
 import { closeInitProject, SemanticClosureError } from "./closure.js";
-import { SemanticGateway, SemanticGatewayError, type SemanticGatewaySnapshot } from "./gateway.js";
+import { SemanticGateway, SemanticGatewayError, type SemanticDecodeOutcome, type SemanticGatewaySnapshot } from "./gateway.js";
 import {
   pendingQuestionEvidence,
   selectInterviewAnswer,
@@ -34,6 +34,12 @@ import {
   type VnextInitRunState,
 } from "./run-state.js";
 import { validate } from "./validate.js";
+import {
+  rejectedFindingEvidence,
+  rejectedIntentFindingEvidence,
+  rejectedWorkFindingEvidence,
+  type RejectedFindingEvidence,
+} from "./rejected-evidence.js";
 import {
   decodeIntentWire,
   decodeWorkWire,
@@ -185,15 +191,21 @@ function buildResolvedIntent(intent: IntentWire, questions: readonly InterviewQu
   };
 }
 
-function resolvedWorkDecoder(intent: ResolvedIntent): (payload: unknown) => WireOutcome<{ readonly wire: WorkWire; readonly model: InitProjectModel }> {
+function resolvedWorkDecoder(intent: ResolvedIntent): (payload: unknown) => SemanticDecodeOutcome<{ readonly wire: WorkWire; readonly model: InitProjectModel }> {
   return (payload) => {
-    const decoded = decodeWorkWire(payload, intent.wire);
-    if (!decoded.ok) return decoded;
+    let wireRejectedFindings: readonly RejectedFindingEvidence[] = [];
+    const decoded = decodeWorkWire(payload, intent.wire, (candidate, findings) => {
+      wireRejectedFindings = rejectedWorkFindingEvidence(candidate, findings);
+    });
+    if (!decoded.ok) return wireRejectedFindings.length ? { ...decoded, rejectedFindings: wireRejectedFindings } : decoded;
     const semantic: SemanticInitProject = { ...intent.semanticBase, phases: decoded.value.phases };
     const resolved = resolveInitProject(semantic, intent.context);
     if (!resolved.ok) return { ok: false, findings: toWireFindings(resolved.findings) };
     const validation = validate(resolved.value);
-    if (!validation.valid) return { ok: false, findings: toWireFindings(validation.findings) };
+    if (!validation.valid) {
+      const findings = toWireFindings(validation.findings);
+      return { ok: false, findings, rejectedFindings: rejectedFindingEvidence(resolved.value, findings) };
+    }
     return { ok: true, value: { wire: decoded.value, model: resolved.value } };
   };
 }
@@ -244,7 +256,13 @@ export async function runSemanticInit(options: RunSemanticInitOptions): Promise<
       instructions: INTENT_INSTRUCTIONS,
       input: intentInput(originalRequest),
       correctiveInput: (findings) => correctiveIntentInput(originalRequest, findings),
-      decode: (payload) => decodeIntentWire(payload, originalRequest),
+      decode: (payload) => {
+        let rejectedFindings: readonly RejectedFindingEvidence[] = [];
+        const decoded = decodeIntentWire(payload, originalRequest, (candidate, findings) => {
+          rejectedFindings = rejectedIntentFindingEvidence(candidate, findings);
+        });
+        return !decoded.ok && rejectedFindings.length ? { ...decoded, rejectedFindings } : decoded;
+      },
       signal,
       deadlineMs: options.deadlineMs ?? 120_000,
       maxOutputTokens: options.maxOutputTokens ?? 16_000,
@@ -279,7 +297,10 @@ export async function runSemanticInit(options: RunSemanticInitOptions): Promise<
     statePath = await persistInitRunState(options.projectRoot, state);
     state = transitionInitRunState(state, "work-requested", now());
     statePath = await persistInitRunState(options.projectRoot, state);
-    const promptAuthority = resolvedIntentPromptAuthority(intent, questionEvidence);
+    const promptAuthority = resolvedIntentPromptAuthority(intent, questionEvidence, {
+      originalRequest,
+      protectedPaths: resolvedIntent.semanticBase.protectedPaths,
+    });
     const work = await gateway.generate({
       slice: "work",
       schema: deriveWorkSchema(intent),

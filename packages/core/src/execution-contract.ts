@@ -209,18 +209,14 @@ export function ambiguousAcceptanceCriterion(value: string): string | undefined 
   return undefined;
 }
 
+/** Explicit aesthetic requirements remain visual even when the criterion also contains functional behavior. */
+const AESTHETIC_VISUAL_BOUNDARY = /(?:\b(?:appearance|aesthetic(?:s|ally)?|styling|colou?rs?|spacing|pixel(?:s|[- ]perfect)?|visual\s+fidelity|visually\s+(?:prominent|distinct|correct)|looks?\s+correct|well[- ]organized|positioned\s+correctly|clearly\s+visible|layout\s+(?:quality|looks?|appearance)|match(?:es)?\s+(?:the\s+)?screenshots?)\b|\b(?:apar[eê]ncia|est[eé]tica|estilo|cores?|espa[cç]amento|pixels?|fidelidade\s+visual|visualmente\s+(?:destacad[oa]|distint[oa]|corret[oa])|parece\s+corret[oa]|bem[- ]organizad[oa]|posicionad[oa]\s+corretamente|claramente\s+vis[ií]vel)\b)/i;
 /**
- * User-visible presentation cannot be proved by DOM presence alone.
- *
- * This intentionally recognizes semantics rather than a particular frontend
- * stack. Strong visual words are sufficient; weaker "show/display" verbs only
- * count when the criterion also names a UI surface. The latter avoids treating
- * a CLI criterion such as "the command displays its version" as visual UI.
+ * Geometry, visual artifacts, and rendered motion require proof outside the
+ * current semantic model. Neutral presentation words such as screen, panel,
+ * display, render, visible, and hidden are deliberately absent.
  */
-const STRONG_VISUAL_CRITERION = /\b(?:visib(?:le|ility|ly|ilidade|ilidades)|vis[ií]v(?:el|eis)|visual(?:ly|mente|s)?|render(?:ed|ing|iza(?:do|da|dos|das|r|ção))?|responsive|responsiv[oa]s?|aligned?|alinhad[oa]s?|viewport|screen|tela|graphical|gr[aá]fic[oa]s?|stylesheet|css|animation|animated|anima(?:tion|ted|ção|do|da|dos|das))\b/i;
-const LAYOUT_CRITERION = /\blayout\b/i;
-const WEAK_VISUAL_VERB = /\b(?:show(?:s|n)?|display(?:s|ed)?|appear(?:s|ed)?|exib(?:e|em|ido|ida|idos|idas|ir)|aparec(?:e|em|er))\b/i;
-const UI_SURFACE = /\b(?:ui|interface|page|p[aá]gina|view|screen|tela|board|tabuleiro|button|bot[aã]o|panel|painel|dialog|modal|menu|form|formul[aá]rio|input|field|campo|message|mensagem|error|erro|image|imagem|icon|[ií]cone|vehicle|ve[ií]culo|chicken|galinha|flag|bandeirinha|element|elemento)\b/i;
+const UNSUPPORTED_RENDERED_VISUAL_BOUNDARY = /(?:\b(?:screenshots?|screen\s+captures?|pixel(?:s|[- ]perfect)?|stylesheet|css|responsive|aligned?|positioned|off[- ]?screen|overflow|overlapp?(?:ed|ing)?|obscured|clipped|cropped|zero[- ]area|animation|animated)\b|\b(?:capturas?\s+de\s+tela|responsiv[oa]s?|alinhad[oa]s?|posicionad[oa]s?|fora\s+(?:da|do)\s+viewport|sobrepost[oa]s?|sobreposi[cç][aã]o|ocultad[oa]s?|cortad[oa]s?|[aá]rea\s+zero|anima[cç][aã]o|animad[oa]s?)\b|\b(?:visib(?:le|ility|ly)|vis[ií]v(?:el|eis)|visivelmente|render(?:ed|ing|izad[oa]s?))\b.{0,100}\bviewport\b|\bviewport\b.{0,100}\b(?:visib(?:le|ility|ly)|vis[ií]v(?:el|eis)|visivelmente|render(?:ed|ing|izad[oa]s?))\b)/i;
 const META_VISUAL_CONTRACT = /\b(?:contract|criterion|criteria|plan|instruction|evidence|contrato|crit[eé]rio|crit[eé]rios|plano|instru[cç][aã]o|evid[eê]ncia)\b/i;
 const META_VISUAL_VALIDATOR = /\b(?:validator|validation|validador|valida[cç][aã]o)\b/i;
 const NEGATIVE_VISUAL_CONTROL = /(?:\b(?:off[- ]?screen|overflow|overlap(?:ping)?|obscured|clipped|cropped|hidden|zero[- ]area|source\s+text|stylesheet\s+text|fora\s+(?:da|do)\s+viewport|sobrepost[oa]s?|sobreposi[cç][aã]o|ocult[oa]s?|cortad[oa]s?|texto[- ]fonte|texto\s+(?:css|javascript))\b|\b(?:no|not|never|without|none|absence|absent|n[aã]o|nenhum[ao]?|sem)\b.{0,100}\b(?:hidden|obscured|clipped|cropped|outside|overflow|overlap|source\s+text|stylesheet|ocult[oa]|cortad[oa]|fora|sobrepost[oa]|texto[- ]fonte|css|javascript)\b)/i;
@@ -233,10 +229,10 @@ const BEFORE_EVIDENCE = /\b(?:before|initial|baseline|antes|inicial)\b/i;
 const AFTER_EVIDENCE = /\b(?:after|resulting|final|depois|ap[oó]s|resultante)\b/i;
 
 export function isVisualAcceptanceCriterion(value: string): boolean {
-  if (META_VISUAL_CONTRACT.test(value)) return false;
-  if (META_VISUAL_VALIDATOR.test(value) && !UI_SURFACE.test(value)) return false;
-  return STRONG_VISUAL_CRITERION.test(value)
-    || ((WEAK_VISUAL_VERB.test(value) || LAYOUT_CRITERION.test(value)) && UI_SURFACE.test(value));
+  const body = value.replace(/^AC-T[0-9]{3,}-[0-9]{2}:\s*/i, "").trim();
+  if (META_VISUAL_CONTRACT.test(body)) return false;
+  if (META_VISUAL_VALIDATOR.test(body)) return false;
+  return AESTHETIC_VISUAL_BOUNDARY.test(body) || UNSUPPORTED_RENDERED_VISUAL_BOUNDARY.test(body);
 }
 
 function validateVisualEvidenceContract(

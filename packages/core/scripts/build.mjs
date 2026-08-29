@@ -10,6 +10,7 @@ const pluginCli = resolve(pluginScripts, "rb-harness.cjs");
 const obsoletePluginCli = resolve(pluginScripts, "rb-harness.mjs");
 const resources = resolve(packageRoot, "../../resources");
 const contracts = resolve(packageRoot, "../../contracts");
+const conformanceRecords = resolve(packageRoot, "src/vnext/providers/conformance/records");
 const pluginResources = resolve(packageRoot, "../../plugins/rb-harness/standalone-resources");
 const pluginContracts = resolve(packageRoot, "../../plugins/rb-harness/contracts");
 
@@ -17,6 +18,7 @@ await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
 await cp(resources, resolve(dist, "resources"), { recursive: true });
 await cp(contracts, resolve(dist, "contracts"), { recursive: true });
+await cp(conformanceRecords, resolve(dist, "records"), { recursive: true });
 await rm(pluginResources, { recursive: true, force: true });
 await cp(resources, pluginResources, { recursive: true });
 await rm(pluginContracts, { recursive: true, force: true });

@@ -1,0 +1,204 @@
+{
+  "format": "rb-vnext-phase35-dogfood-evidence/v1",
+  "recordedAt": "2026-08-29T11:07:52.356Z",
+  "sourceProject": "cron_facility",
+  "safetyApproach": "disposable project-content copy excluding existing RB state, dependencies, build output, and Git metadata",
+  "originalRequest": "Crie um projeto web em nodejs e typescript para facilitar o uso de contrab no linux, a interface deverá ser divida em 2 abras onde a primeira aba deverá conter um campo para o usuario digitar uma linha cron existente e o sistema devolver o que aquela linha faz, e a segunda aba deveremos ter uma caixa de texto para o usuario digitar um prompt solicitando a um modelo de ia que informe a linha do cron para o agendamento da forma que foi solicitado por ele, o prompt deve retornar a linha inteira e a explicação de cada campo da linha cron, o modelo de ia deverá ser configurado por arquivos de variaves .env onde as variaveis deverão ser: AI_BASE_URL,AI_API_KEY,AI_MODEL,AI_TIMEOUT_MS,AI_TEMPERATURE,AI_MAX_OUTPUT_TOKENS",
+  "installedPackage": {
+    "name": "@rb-harness/core",
+    "version": "0.6.2",
+    "tarballSha256": "a335482a7bea8a4df9720acb830ed4894a672364f2a2212bcd9eb6077b69301b"
+  },
+  "runId": "vnext-8729f300-03ac-467c-b7bc-1b7727114c09",
+  "selectedProfileId": "anthropic:claude-code-cli:claude-opus-5",
+  "transport": "claude-code-cli",
+  "requestAccounting": "opaque",
+  "executionMode": "headless",
+  "questions": [
+    {
+      "key": "ai-api-protocol",
+      "question": "Qual protocolo o cliente de IA deve usar em AI_BASE_URL?",
+      "materiality": "architecture",
+      "rigidity": "RIGID",
+      "recommendedValue": "API compatível com OpenAI (POST /chat/completions)",
+      "recommendedRationale": "Formato mais suportado por provedores e servidores locais; troca de modelo apenas mudando AI_BASE_URL.",
+      "acceptanceMode": "non-interactive-policy",
+      "selectedValue": "API compatível com OpenAI (POST /chat/completions)"
+    },
+    {
+      "key": "frontend-approach",
+      "question": "Como implementar o frontend das duas abas?",
+      "materiality": "architecture",
+      "rigidity": "RIGID",
+      "recommendedValue": "HTML/TS estático servido pelo Express",
+      "recommendedRationale": "Duas abas simples não justificam framework; reduz build e dependências no MVP.",
+      "acceptanceMode": "non-interactive-policy",
+      "selectedValue": "HTML/TS estático servido pelo Express"
+    },
+    {
+      "key": "cron-field-count",
+      "question": "Quais formatos de cron devem ser aceitos?",
+      "materiality": "product",
+      "rigidity": "RIGID",
+      "recommendedValue": "5 campos + macros @daily/@reboot",
+      "recommendedRationale": "Cobre o crontab real do Linux, foco do projeto, sem extensões não-padrão.",
+      "acceptanceMode": "non-interactive-policy",
+      "selectedValue": "5 campos + macros @daily/@reboot"
+    }
+  ],
+  "attempts": [
+    {
+      "slice": "intent",
+      "ordinal": 1,
+      "corrective": false,
+      "status": "semantic-invalid",
+      "findings": [
+        {
+          "code": "semantic-invalid",
+          "pointer": "/qualityCommands/4/command",
+          "message": "quality command starts a long-running service or watcher and never exits; a validation must run to completion and return its real exit code, so prove the running service through OPERATIONS.json instead"
+        }
+      ],
+      "recovery": {
+        "violatedRules": [
+          {
+            "rule": "validation-command-terminating",
+            "constraint": "Every quality command in the complete regenerated slice must terminate and return its real exit status; long-running servers and watchers are not validation commands."
+          }
+        ],
+        "specificPreviousFindings": [
+          {
+            "code": "semantic-invalid",
+            "pointer": "/qualityCommands/4/command",
+            "message": "Validation commands must terminate and return their real exit status. Do not use a long-running server or watcher as validation. Express non-command evidence using the supported manual or human validation intent.",
+            "rule": "validation-command-terminating"
+          }
+        ]
+      }
+    },
+    {
+      "slice": "intent",
+      "ordinal": 2,
+      "corrective": true,
+      "status": "accepted",
+      "findings": []
+    },
+    {
+      "slice": "work",
+      "ordinal": 3,
+      "corrective": false,
+      "status": "semantic-invalid",
+      "findings": [
+        {
+          "code": "semantic-invalid",
+          "pointer": "/phases/2/tasks/1/acceptance/0",
+          "message": "T006 contains visual acceptance semantics outside the Phase 1 model"
+        },
+        {
+          "code": "semantic-invalid",
+          "pointer": "/phases/2/tasks/1/acceptance/2",
+          "message": "T006 contains visual acceptance semantics outside the Phase 1 model"
+        },
+        {
+          "code": "semantic-invalid",
+          "pointer": "/phases/2/tasks/1/acceptance/3",
+          "message": "T006 contains visual acceptance semantics outside the Phase 1 model"
+        },
+        {
+          "code": "semantic-invalid",
+          "pointer": "/phases/2/tasks/1/validation/1",
+          "message": "Manual validation uses manual prose for an executable check; declare the exact command or use human: for evidence unavailable to the executor"
+        }
+      ],
+      "recovery": {
+        "violatedRules": [
+          {
+            "rule": "acceptance-no-visual-only",
+            "constraint": "Every acceptance statement in the complete regenerated slice must define non-visual observable functional behavior or use an appropriate supported human validation intent; appearance, styling, screenshots, pixels, layout fidelity, and other visual-only success boundaries are not supported by this init model."
+          },
+          {
+            "rule": "validation-command-executable",
+            "constraint": "Across the complete regenerated slice, executable checks must use command with an exact declared quality-command key; manual is only for a non-command inspection the executor can perform, and human is only for evidence requiring human judgement."
+          }
+        ],
+        "specificPreviousFindings": [
+          {
+            "code": "semantic-invalid",
+            "pointer": "/phases/2/tasks/1/acceptance/0",
+            "message": "This acceptance statement uses visual-only semantics, which are not supported by the current init semantic model. Express the criterion as observable functional behavior or use an appropriate human validation intent.",
+            "rule": "acceptance-no-visual-only"
+          },
+          {
+            "code": "semantic-invalid",
+            "pointer": "/phases/2/tasks/1/acceptance/2",
+            "message": "This acceptance statement uses visual-only semantics, which are not supported by the current init semantic model. Express the criterion as observable functional behavior or use an appropriate human validation intent.",
+            "rule": "acceptance-no-visual-only"
+          },
+          {
+            "code": "semantic-invalid",
+            "pointer": "/phases/2/tasks/1/acceptance/3",
+            "message": "This acceptance statement uses visual-only semantics, which are not supported by the current init semantic model. Express the criterion as observable functional behavior or use an appropriate human validation intent.",
+            "rule": "acceptance-no-visual-only"
+          },
+          {
+            "code": "semantic-invalid",
+            "pointer": "/phases/2/tasks/1/validation/1",
+            "message": "Use command with an exact declared quality-command key for an executable check, manual for a non-command inspection the executor can perform, or human for evidence that requires human judgement.",
+            "rule": "validation-command-executable"
+          }
+        ]
+      }
+    },
+    {
+      "slice": "work",
+      "ordinal": 4,
+      "corrective": true,
+      "status": "accepted",
+      "findings": []
+    }
+  ],
+  "counters": {
+    "semanticOperations": 4,
+    "transportInvocations": 4,
+    "transportRetries": 0,
+    "correctiveRegenerations": 2,
+    "correctiveBySlice": {
+      "intent": 1,
+      "work": 1
+    },
+    "providerRequests": {
+      "measured": false,
+      "reason": "unsupported-by-provider"
+    }
+  },
+  "semanticResult": {
+    "requirements": 9,
+    "phases": 3,
+    "tasks": 6,
+    "taskTitles": [
+      "Configurar projeto Node.js + TypeScript",
+      "Carregar e validar variáveis .env de IA",
+      "Implementar parser e explicador de expressões cron",
+      "Implementar cliente de IA configurável",
+      "Expor endpoints de explicação e geração",
+      "Servir interface web com duas abas"
+    ]
+  },
+  "terminalState": "published",
+  "publicationOccurred": true,
+  "artifactTree": [
+    ".rb/init/BRIEF.md",
+    ".rb/init/PHASES.md",
+    ".rb/rb-manifest.json"
+  ],
+  "ralph": {
+    "status": "READY",
+    "executionContractIssues": 0,
+    "manifestValid": true,
+    "treeValid": true,
+    "readyExecutionPlans": 1,
+    "artifactHashesMatch": true,
+    "briefSha256": "1b238556d4b090344497c026f911d42c68ee981709cd235350ee15e5b09a72b5",
+    "phasesSha256": "7a83d9ad64ff00100b78907ec31fe5672bfc716bbbe363de1752cc239339d6cb"
+  }
+}

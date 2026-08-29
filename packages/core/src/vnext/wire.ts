@@ -1,4 +1,4 @@
-import { semanticKey } from "./identity.js";
+import { semanticKey, SEMANTIC_KEY_PATTERN } from "./identity.js";
 import { questionProblem, type ProposedQuestion } from "./interview.js";
 import type {
   Materiality,
@@ -12,7 +12,16 @@ import type {
   ValidationIntentInput,
 } from "./ir.js";
 import type { JsonSchemaDocument } from "./providers/contract.js";
+import { PROJECT_RELATIVE_PATH_PATTERN, projectRelativePathSyntaxIsSafe } from "./path-contract.js";
 import { requestEvidenceIsVerified } from "./provenance.js";
+import {
+  TASK_ACCEPTANCE_MAX_ITEMS,
+  TASK_REQUIRED_COLLECTION_MIN_ITEMS,
+  TASK_REQUIRED_SEMANTIC_FIELDS,
+  TASK_REQUIRED_TEXT_MIN_LENGTH,
+  taskStructuralRule,
+  type TaskRequiredSemanticField,
+} from "./task-contract.js";
 import { projectRelativePathIsSafe, qualityCommandSafetyIssue, semanticSingleLineIsValid } from "./validate.js";
 
 export const INIT_INTENT_WIRE_VERSION = "rb-init-intent/v1" as const;
@@ -46,9 +55,17 @@ export interface WorkWire {
 
 // Keep provider-facing schemas within the structured-output subset already proven
 // by conformance. Core below owns key grammar and non-empty semantic validation.
-const semanticKeySchema = { type: "string" } as const;
-const nonEmptyString = { type: "string" } as const;
+const semanticKeySchema = { type: "string", pattern: SEMANTIC_KEY_PATTERN } as const;
+const nonEmptyString = { type: "string", minLength: TASK_REQUIRED_TEXT_MIN_LENGTH } as const;
 const stringArray = { type: "array", items: nonEmptyString } as const;
+const nonEmptyStringArray = { ...stringArray, minItems: TASK_REQUIRED_COLLECTION_MIN_ITEMS } as const;
+const taskAcceptanceArray = { ...nonEmptyStringArray, maxItems: TASK_ACCEPTANCE_MAX_ITEMS } as const;
+const projectRelativePath = { ...nonEmptyString, pattern: PROJECT_RELATIVE_PATH_PATTERN } as const;
+const nonEmptyProjectRelativePathArray = {
+  type: "array",
+  items: projectRelativePath,
+  minItems: TASK_REQUIRED_COLLECTION_MIN_ITEMS,
+} as const;
 
 export const INIT_INTENT_SCHEMA: JsonSchemaDocument = {
   type: "object",
@@ -110,11 +127,11 @@ export const INIT_INTENT_SCHEMA: JsonSchemaDocument = {
         additionalProperties: false,
         required: ["path", "reason", "sourceKind"],
         properties: {
-          path: nonEmptyString,
+          path: projectRelativePath,
           reason: nonEmptyString,
           sourceKind: { type: "string", enum: ["request", "question"] },
           evidence: { type: "string" },
-          questionKey: { type: "string" },
+          questionKey: semanticKeySchema,
         },
       },
     },
@@ -144,7 +161,11 @@ export const INIT_INTENT_SCHEMA: JsonSchemaDocument = {
 };
 
 function workSchema(requirementKeys: readonly string[], commandKeys: readonly string[]): JsonSchemaDocument {
-  const keyArray = (values: readonly string[]) => ({ type: "array", items: { type: "string", enum: values } });
+  const keyArray = (values: readonly string[], minItems?: number) => ({
+    type: "array",
+    ...(minItems === undefined ? {} : { minItems }),
+    items: { type: "string", enum: values },
+  });
   return {
     type: "object",
     additionalProperties: false,
@@ -169,18 +190,18 @@ function workSchema(requirementKeys: readonly string[], commandKeys: readonly st
               items: {
                 type: "object",
                 additionalProperties: false,
-                required: ["key", "title", "intent", "dependsOn", "ownedPaths", "covers", "acceptance", "validation", "expectedEvidence"],
+                required: ["key", "title", "dependsOn", ...TASK_REQUIRED_SEMANTIC_FIELDS],
                 properties: {
                   key: semanticKeySchema,
                   title: nonEmptyString,
                   intent: nonEmptyString,
                   dependsOn: { type: "array", items: semanticKeySchema },
-                  ownedPaths: stringArray,
-                  covers: keyArray(requirementKeys),
-                  acceptance: stringArray,
+                  ownedPaths: nonEmptyProjectRelativePathArray,
+                  covers: keyArray(requirementKeys, TASK_REQUIRED_COLLECTION_MIN_ITEMS),
+                  acceptance: taskAcceptanceArray,
                   validation: {
                     type: "array",
-                    minItems: 1,
+                    minItems: TASK_REQUIRED_COLLECTION_MIN_ITEMS,
                     items: {
                       oneOf: [
                         {
@@ -252,6 +273,39 @@ function texts(value: unknown, pointer: string, findings: WireFinding[]): readon
   return list(value, pointer, findings).map((entry, index) => text(entry, `${pointer}/${index}`, findings));
 }
 
+function requiredTaskTexts(
+  value: unknown,
+  pointer: string,
+  field: Exclude<TaskRequiredSemanticField, "intent" | "validation" | "expectedEvidence">,
+  findings: WireFinding[],
+  maxItems?: number,
+): readonly string[] {
+  if (!Array.isArray(value)) {
+    findings.push({ code: "wire-shape", pointer, message: "expected array" });
+    return [];
+  }
+  if (value.length < TASK_REQUIRED_COLLECTION_MIN_ITEMS) {
+    findings.push({ code: "semantic-invalid", pointer, message: taskStructuralRule(field).message });
+  }
+  if (maxItems !== undefined && value.length > maxItems) {
+    findings.push({ code: "semantic-invalid", pointer, message: `Task exceeds the acceptance ceiling of ${maxItems} statements.` });
+  }
+  return value.map((entry, index) => text(entry, `${pointer}/${index}`, findings));
+}
+
+function requiredTaskText(
+  value: unknown,
+  pointer: string,
+  field: Extract<TaskRequiredSemanticField, "intent" | "expectedEvidence">,
+  findings: WireFinding[],
+): string {
+  if (typeof value !== "string" || value.trim().length < TASK_REQUIRED_TEXT_MIN_LENGTH) {
+    findings.push({ code: "wire-shape", pointer, message: taskStructuralRule(field).message });
+    return "";
+  }
+  return value.trim();
+}
+
 function oneOf<T extends string>(value: unknown, allowed: readonly T[], pointer: string, findings: WireFinding[]): T {
   if (typeof value === "string" && allowed.includes(value as T)) return value as T;
   findings.push({ code: "wire-shape", pointer, message: `expected one of ${allowed.join(", ")}` });
@@ -267,7 +321,11 @@ function uniqueKeys(values: readonly { readonly key: string }[], pointer: string
   }
 }
 
-export function decodeIntentWire(payload: unknown, originalRequest: string): WireOutcome<IntentWire> {
+export function decodeIntentWire(
+  payload: unknown,
+  originalRequest: string,
+  observeRejectedCandidate?: (candidate: IntentWire, findings: readonly WireFinding[]) => void,
+): WireOutcome<IntentWire> {
   const findings: WireFinding[] = [];
   const root = object(payload, "", findings);
   if (!root) return { ok: false, findings };
@@ -392,24 +450,27 @@ export function decodeIntentWire(payload: unknown, originalRequest: string): Wir
   const authorityKeys = new Set(determinations.map((entry) => entry.key));
   for (const question of questions) if (authorityKeys.has(question.key)) findings.push({ code: "semantic-invalid", pointer: "/questions", message: `question key collides with determination key ${question.key}` });
 
-  return findings.length ? { ok: false, findings } : {
-    ok: true,
-    value: {
-      format: INIT_INTENT_WIRE_VERSION,
-      project,
-      determinations,
-      requirements,
-      qualityCommands,
-      proposedProtectedPaths,
-      questions,
-      contradictions,
-    },
+  const candidate: IntentWire = {
+    format: INIT_INTENT_WIRE_VERSION,
+    project,
+    determinations,
+    requirements,
+    qualityCommands,
+    proposedProtectedPaths,
+    questions,
+    contradictions,
   };
+  if (findings.length) {
+    observeRejectedCandidate?.(candidate, findings);
+    return { ok: false, findings };
+  }
+  return { ok: true, value: candidate };
 }
 
 export function decodeWorkWire(
   payload: unknown,
   authority: Pick<IntentWire, "requirements" | "qualityCommands">,
+  observeRejectedCandidate?: (candidate: WorkWire, findings: readonly WireFinding[]) => void,
 ): WireOutcome<WorkWire> {
   const findings: WireFinding[] = [];
   const root = object(payload, "", findings);
@@ -426,9 +487,15 @@ export function decodeWorkWire(
       const pointer = `/phases/${phaseIndex}/tasks/${taskIndex}`;
       const task = object(rawTask, pointer, findings) ?? {};
       exactKeys(task, ["key", "title", "intent", "dependsOn", "ownedPaths", "covers", "acceptance", "validation", "expectedEvidence"], pointer, findings);
-      const covers = texts(task.covers, `${pointer}/covers`, findings);
+      const covers = requiredTaskTexts(task.covers, `${pointer}/covers`, "covers", findings);
       for (const [index, key] of covers.entries()) if (!requirementKeys.has(key)) findings.push({ code: "semantic-invalid", pointer: `${pointer}/covers/${index}`, message: `unknown requirement key ${key}` });
-      const validation = list(task.validation, `${pointer}/validation`, findings).map((rawValidation, validationIndex): ValidationIntentInput => {
+      const validationValues = Array.isArray(task.validation)
+        ? task.validation
+        : (findings.push({ code: "wire-shape", pointer: `${pointer}/validation`, message: "expected array" }), []);
+      if (validationValues.length < TASK_REQUIRED_COLLECTION_MIN_ITEMS && Array.isArray(task.validation)) {
+        findings.push({ code: "semantic-invalid", pointer: `${pointer}/validation`, message: taskStructuralRule("validation").message });
+      }
+      const validation = validationValues.map((rawValidation, validationIndex): ValidationIntentInput => {
         const value = object(rawValidation, `${pointer}/validation/${validationIndex}`, findings) ?? {};
         exactKeys(value, ["kind", "value"], `${pointer}/validation/${validationIndex}`, findings);
         const kind = oneOf(value.kind, ["command", "manual", "human"] as const, `${pointer}/validation/${validationIndex}/kind`, findings);
@@ -439,16 +506,30 @@ export function decodeWorkWire(
         }
         return kind === "manual" ? { kind: "manual", inspection: content } : { kind: "human", evidence: content };
       });
+      const ownedPaths = requiredTaskTexts(task.ownedPaths, `${pointer}/ownedPaths`, "ownedPaths", findings);
+      ownedPaths.forEach((path, pathIndex) => {
+        if (!projectRelativePathSyntaxIsSafe(path)) findings.push({
+          code: "semantic-invalid",
+          pointer: `${pointer}/ownedPaths/${pathIndex}`,
+          message: "owned path must be one safe project-relative file, directory without a trailing slash, or bounded glob",
+        });
+      });
       return {
         key: text(task.key, `${pointer}/key`, findings),
         title: text(task.title, `${pointer}/title`, findings),
-        intent: text(task.intent, `${pointer}/intent`, findings),
+        intent: requiredTaskText(task.intent, `${pointer}/intent`, "intent", findings),
         dependsOn: texts(task.dependsOn, `${pointer}/dependsOn`, findings),
-        ownedPaths: texts(task.ownedPaths, `${pointer}/ownedPaths`, findings),
+        ownedPaths,
         covers,
-        acceptance: texts(task.acceptance, `${pointer}/acceptance`, findings),
+        acceptance: requiredTaskTexts(
+          task.acceptance,
+          `${pointer}/acceptance`,
+          "acceptance",
+          findings,
+          TASK_ACCEPTANCE_MAX_ITEMS,
+        ),
         validation,
-        expectedEvidence: text(task.expectedEvidence, `${pointer}/expectedEvidence`, findings),
+        expectedEvidence: requiredTaskText(task.expectedEvidence, `${pointer}/expectedEvidence`, "expectedEvidence", findings),
       };
     });
     if (!tasks.length) findings.push({ code: "semantic-invalid", pointer: `/phases/${phaseIndex}/tasks`, message: "phase must contain at least one task" });
@@ -474,5 +555,10 @@ export function decodeWorkWire(
       if (!taskKeys.has(key)) findings.push({ code: "semantic-invalid", pointer: `/phases/${phaseIndex}/tasks/${taskIndex}/dependsOn/${index}`, message: `unknown task key ${key}` });
     }));
   }
-  return findings.length ? { ok: false, findings } : { ok: true, value: { format: INIT_WORK_WIRE_VERSION, phases } };
+  const candidate: WorkWire = { format: INIT_WORK_WIRE_VERSION, phases };
+  if (findings.length) {
+    observeRejectedCandidate?.(candidate, findings);
+    return { ok: false, findings };
+  }
+  return { ok: true, value: candidate };
 }

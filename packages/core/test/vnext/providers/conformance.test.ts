@@ -192,8 +192,8 @@ describe("provider/model conformance runner", () => {
     const coreRoot = resolve(import.meta.dirname, "../../..");
     const expected = resolve(coreRoot, "src/vnext/providers/conformance/records");
     expect(defaultConformanceRecordsRoot()).toBe(expected);
-    expect(conformanceRecordsRootFromModulePath(resolve(coreRoot, "dist/cli.js"))).toBe(expected);
-    expect(expected).not.toContain(`${resolve(coreRoot, "dist")}/records`);
+    expect(conformanceRecordsRootFromModulePath(resolve(coreRoot, "dist/cli.js")))
+      .toBe(resolve(coreRoot, "dist/records"));
 
     const network = vi.fn(() => { throw new Error("network forbidden during authoritative replay"); });
     vi.stubGlobal("fetch", network);

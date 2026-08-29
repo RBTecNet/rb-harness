@@ -1,0 +1,26 @@
+{
+  "manifestVersion": "rb-manifest/v1",
+  "project": {
+    "id": "cron-explicado",
+    "name": "cron-explicado"
+  },
+  "artifactRoot": ".rb",
+  "generatedAt": "2026-08-29T05:49:40.312Z",
+  "artifacts": [
+    {
+      "id": "cron-explicado-brief",
+      "kind": "project-brief",
+      "path": ".rb/init/BRIEF.md",
+      "status": "ready",
+      "sha256": "4720b047f911b5a52be3f68c330b972b53b51796fb0d28351b8be78c22785349"
+    },
+    {
+      "id": "cron-explicado-execution",
+      "kind": "execution-plan",
+      "path": ".rb/init/PHASES.md",
+      "status": "ready",
+      "sha256": "5b0055a63f433b8a3053b097dd2a38110d5844b010488e2b8948c63b7b41a6d4",
+      "contract": "rb-execution/v1"
+    }
+  ]
+}

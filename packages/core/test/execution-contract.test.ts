@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   extractExecutionPhaseMarkdown,
   extractExecutionTaskMarkdown,
+  isVisualAcceptanceCriterion,
   parseValidationInstruction,
   validateExecutionMarkdown,
 } from "../src/execution-contract.js";
@@ -334,6 +335,69 @@ describe("visual acceptance evidence", () => {
         `  - **Expected evidence:** ${evidence}`,
       );
   }
+
+  it.each([
+    "Painel exibe contagem de solicitações aguardando minha aprovação igual à retornada pela API",
+    "Cenário de visibilidade prova que usuário fora do escopo recebe 403 ou lista vazia",
+    "Aprovador que é o próprio solicitante não obtém ação de aprovar habilitada na tela de decisão.",
+    "Com dados de teste conhecidos, o painel exibe contador de aguardando minha aprovação igual a 2 e de atrasadas igual a 1, e clicar no contador navega para a listagem já filtrada.",
+    "Aplicar filtro de status pending_approval na tela lista apenas solicitações com esse status.",
+    "Com duas solicitações pendentes da aprovação do usuário, o painel exibe o número 2 no resumo correspondente.",
+    "Enviar a decisão devolver para correção na tela do aprovador altera o status para devolvida e habilita a ação de editar para o solicitante.",
+  ])("does not classify real functional UI dogfood acceptance as visual-only: %s", (criterion) => {
+    expect(isVisualAcceptanceCriterion(criterion)).toBe(false);
+  });
+
+  it.each([
+    "Given state=READY, the DOM changes to expose the READY action and hides the pending action.",
+    "Clicking the request link navigates to /requests/42.",
+    "Submitting the valid form creates the request and returns its identifier.",
+    "Given two pending approvals, the dashboard displays exactly 2 pending approvals.",
+    "Selecting status REJECTED filters the list so every returned row has status REJECTED.",
+    "The approve action is disabled when the authenticated user created the request.",
+    "When the API returns status READY, the panel displays the value READY unchanged.",
+    "A tela lista apenas os registros que correspondem ao filtro selecionado.",
+    "O painel mostra o valor exato retornado pelo estado conhecido.",
+    "Clicar no item navega para a rota de detalhes correspondente.",
+    "Enviar o formulário altera o estado da solicitação para enviada.",
+    "A ação fica desabilitada quando o usuário não tem autorização.",
+    "O botão fica oculto quando o estado da aplicação não permite a ação.",
+    "A tela informa HTTP 403 quando a API nega a operação.",
+    "Confirmar a decisão altera o estado de pendente para aprovado.",
+  ])("accepts an advertised functional UI boundary: %s", (criterion) => {
+    expect(isVisualAcceptanceCriterion(criterion)).toBe(false);
+  });
+
+  it.each([
+    "The dashboard looks correct.",
+    "The button is visually prominent.",
+    "The layout is well organized.",
+    "The cards are positioned correctly.",
+    "The page matches the screenshot.",
+    "The design has good visual fidelity.",
+    "The spacing and colors are correct.",
+    "The element is clearly visible.",
+    "The dashboard displays pending approvals in a visually prominent card.",
+    "The approve button appears clearly disabled and visually distinct.",
+    "The layout is aesthetically balanced.",
+    "The visual fidelity matches the reference.",
+    "The approve action is disabled and is visually prominent in red.",
+  ])("continues to classify aesthetic or visual-only acceptance: %s", (criterion) => {
+    expect(isVisualAcceptanceCriterion(criterion)).toBe(true);
+  });
+
+  it.each([
+    "The screen reports the current state.",
+    "The dashboard contains the approval summary.",
+    "The panel displays the result.",
+    "The page renders the current value.",
+    "The form exposes its submission result.",
+    "The approve button is disabled.",
+    "The list contains the returned records.",
+    "The action is hidden when the user lacks permission.",
+  ])("does not treat neutral presentation vocabulary as positive I-13 evidence: %s", (criterion) => {
+    expect(isVisualAcceptanceCriterion(criterion)).toBe(false);
+  });
 
   it("rejects a manual instruction as proof of rendered visibility", async () => {
     const source = visualPlan(await fixture("valid", "minimal"), "manual: inspect the rendered board");

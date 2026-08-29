@@ -1,4 +1,4 @@
-import type { SemanticAttemptEvidence, InitRunCounters } from "./run-state.js";
+import type { CorrectiveSemanticInput, SemanticAttemptEvidence, InitRunCounters } from "./run-state.js";
 import type {
   CanonicalUsage,
   JsonSchemaDocument,
@@ -10,6 +10,7 @@ import type {
   SemanticRequest,
 } from "./providers/contract.js";
 import type { WireFinding, WireOutcome } from "./wire.js";
+import type { RejectedFindingEvidence } from "./rejected-evidence.js";
 
 export type SemanticSlice = "intent" | "work";
 
@@ -43,12 +44,18 @@ export interface GenerateSemanticSlice<T> {
   readonly schemaName: string;
   readonly instructions: string;
   readonly input: string;
-  readonly correctiveInput: (findings: readonly WireFinding[]) => string;
-  readonly decode: (payload: unknown) => WireOutcome<T>;
+  readonly correctiveInput: (findings: readonly WireFinding[]) => CorrectiveSemanticInput;
+  readonly decode: (payload: unknown) => SemanticDecodeOutcome<T>;
   readonly signal: AbortSignal;
   readonly deadlineMs: number;
   readonly maxOutputTokens: number;
 }
+
+export type SemanticDecodeOutcome<T> = WireOutcome<T> | {
+  readonly ok: false;
+  readonly findings: readonly WireFinding[];
+  readonly rejectedFindings: readonly RejectedFindingEvidence[];
+};
 
 type SnapshotListener = (snapshot: SemanticGatewaySnapshot) => void | Promise<void>;
 
@@ -91,7 +98,20 @@ export class SemanticGateway {
         correctiveBySlice: { ...this.correctiveBySlice },
         providerRequests: this.providerRequests,
       },
-      attempts: this.attempts.map((entry) => ({ ...entry, findings: [...entry.findings] })),
+      attempts: this.attempts.map((entry) => ({
+        ...entry,
+        findings: [...entry.findings],
+        ...(entry.rejectedFindings ? { rejectedFindings: structuredClone(entry.rejectedFindings) } : {}),
+        ...(entry.recovery ? {
+          recovery: {
+            ...entry.recovery,
+            recoveryScope: { ...entry.recovery.recoveryScope },
+            violatedRules: [...entry.recovery.violatedRules],
+            specificPreviousFindings: entry.recovery.specificPreviousFindings.map((finding) => ({ ...finding })),
+            hashes: { ...entry.recovery.hashes },
+          },
+        } : {}),
+      })),
     };
   }
 
@@ -156,12 +176,22 @@ export class SemanticGateway {
     while (true) {
       const ordinal = this.beginOperation(operation.slice, corrective);
       const attemptIndex = this.attempts.length;
-      this.attempts.push({ slice: operation.slice, ordinal, corrective, status: "requested", findings: [] });
+      const correctiveInput = corrective ? operation.correctiveInput(findings) : undefined;
+      this.attempts.push({
+        slice: operation.slice,
+        ordinal,
+        corrective,
+        status: "requested",
+        findings: [],
+        ...(correctiveInput ? {
+          recovery: { slice: operation.slice, ordinal, ...correctiveInput.audit },
+        } : {}),
+      });
       await this.changed();
       const request: SemanticRequest = {
         slice: operation.slice,
         instructions: operation.instructions,
-        input: corrective ? operation.correctiveInput(findings) : operation.input,
+        input: correctiveInput?.input ?? operation.input,
         schema: operation.schema,
         schemaName: operation.schemaName,
         limits: { maxOutputTokens: operation.maxOutputTokens, deadlineMs: operation.deadlineMs },
@@ -188,7 +218,13 @@ export class SemanticGateway {
         return decoded.value;
       }
       findings = decoded.findings;
-      this.attempts[attemptIndex] = { ...this.attempts[attemptIndex]!, status: "semantic-invalid", findings };
+      const rejectedFindings = "rejectedFindings" in decoded ? decoded.rejectedFindings : [];
+      this.attempts[attemptIndex] = {
+        ...this.attempts[attemptIndex]!,
+        status: "semantic-invalid",
+        findings,
+        ...(rejectedFindings.length ? { rejectedFindings } : {}),
+      };
       await this.changed();
       if (corrective) {
         throw new SemanticGatewayError("semantic-invalid-after-recovery", `${operation.slice} remained invalid after one corrective regeneration`, operation.slice, findings);

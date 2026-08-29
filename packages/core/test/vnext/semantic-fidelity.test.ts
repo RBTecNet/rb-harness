@@ -217,7 +217,7 @@ const MUTATIONS: readonly MutationCase[] = [
     invariant: "I-13",
     ralphCodes: ["task.evidence.visual-state-pair"],
     mutate: (model) => {
-      model.phases[0].tasks[0].acceptance[0].statement = "Clicking the button renders the updated panel visible in the viewport.";
+      model.phases[0].tasks[0].acceptance[0].statement = "Clicking the button renders the updated panel with visually correct layout in the viewport.";
     },
   },
 ];

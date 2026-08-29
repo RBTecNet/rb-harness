@@ -1,0 +1,137 @@
+{
+  "format": "rb-vnext-phase35-dogfood-failure-evidence/v1",
+  "recordedAt": "2026-08-29T06:33:48.269Z",
+  "sourceProject": "cron_facility",
+  "safetyApproach": "disposable project-content copy excluding existing RB state, dependencies, and build output",
+  "originalRequest": "Crie um projeto web em nodejs e typescript para facilitar o uso de contrab no linux, a interface deverá ser divida em 2 abras onde a primeira aba deverá conter um campo para o usuario digitar uma linha cron existente e o sistema devolver o que aquela linha faz, e a segunda aba deveremos ter uma caixa de texto para o usuario digitar um prompt solicitando a um modelo de ia que informe a linha do cron para o agendamento da forma que foi solicitado por ele, o prompt deve retornar a linha inteira e a explicação de cada campo da linha cron, o modelo de ia deverá ser configurado por arquivos de variaves .env onde as variaveis deverão ser: AI_BASE_URL,AI_API_KEY,AI_MODEL,AI_TIMEOUT_MS,AI_TEMPERATURE,AI_MAX_OUTPUT_TOKENS",
+  "installedPackage": {
+    "name": "@rb-harness/core",
+    "version": "0.6.2",
+    "tarballSha256": "2197c16affa2c18a35b467af020f836d8e0603ea8f0dabfa91f62358213077c8"
+  },
+  "runId": "vnext-4fab26c0-f36b-49f6-a444-5a6757c747a1",
+  "selectedProfileId": "anthropic:claude-code-cli:claude-opus-5",
+  "transport": "claude-code-cli",
+  "requestAccounting": "opaque",
+  "executionMode": "headless",
+  "questions": [
+    {
+      "key": "ai-provider-protocol",
+      "question": "Qual protocolo o cliente de IA deve usar com AI_BASE_URL?",
+      "materiality": "architecture",
+      "rigidity": "RIGID",
+      "recommendedValue": "API compatível com OpenAI (POST {AI_BASE_URL}/chat/completions).",
+      "recommendedRationale": "Padrão mais suportado por provedores e gateways locais, compatível com as variáveis pedidas.",
+      "acceptanceMode": "non-interactive-policy",
+      "selectedValue": "API compatível com OpenAI (POST {AI_BASE_URL}/chat/completions)."
+    },
+    {
+      "key": "frontend-approach",
+      "question": "Como o frontend das duas abas deve ser construído?",
+      "materiality": "architecture",
+      "rigidity": "RIGID",
+      "recommendedValue": "Backend Express servindo página estática com TypeScript compilado, sem framework SPA.",
+      "recommendedRationale": "Escopo MVP pequeno; menos dependências e um único processo Node.",
+      "acceptanceMode": "non-interactive-policy",
+      "selectedValue": "Backend Express servindo página estática com TypeScript compilado, sem framework SPA."
+    },
+    {
+      "key": "cron-syntax-scope",
+      "question": "Qual sintaxe cron deve ser suportada?",
+      "materiality": "product",
+      "rigidity": "RIGID",
+      "recommendedValue": "Cron padrão de 5 campos do Linux, com listas, ranges, passos e atalhos @daily.",
+      "recommendedRationale": "Cobre o uso típico de crontab no Linux citado no pedido sem complexidade extra.",
+      "acceptanceMode": "non-interactive-policy",
+      "selectedValue": "Cron padrão de 5 campos do Linux, com listas, ranges, passos e atalhos @daily."
+    }
+  ],
+  "attempts": [
+    {
+      "slice": "intent",
+      "ordinal": 1,
+      "corrective": false,
+      "status": "semantic-invalid",
+      "findings": [
+        {
+          "pointer": "/determinations/5/sourceKind",
+          "message": "RIGID product/architecture decisions require a question instead of a silent model default"
+        },
+        {
+          "pointer": "/qualityCommands/5/command",
+          "message": "quality command starts a long-running service or watcher and never exits; a validation must run to completion and return its real exit code, so prove the running service through OPERATIONS.json instead"
+        }
+      ]
+    },
+    {
+      "slice": "intent",
+      "ordinal": 2,
+      "corrective": true,
+      "status": "accepted",
+      "findings": []
+    },
+    {
+      "slice": "work",
+      "ordinal": 3,
+      "corrective": false,
+      "status": "semantic-invalid",
+      "findings": [
+        {
+          "pointer": "/phases/tasks/0",
+          "message": "T001 lacks required intent, scope, acceptance, validation, or evidence"
+        },
+        {
+          "pointer": "/phases/tasks/5/acceptance/0",
+          "message": "T006 contains visual acceptance semantics outside the Phase 1 model"
+        },
+        {
+          "pointer": "/phases/tasks/5/acceptance/1",
+          "message": "T006 contains visual acceptance semantics outside the Phase 1 model"
+        },
+        {
+          "pointer": "/phases/tasks/5/acceptance/2",
+          "message": "T006 contains visual acceptance semantics outside the Phase 1 model"
+        },
+        {
+          "pointer": "/phases/tasks/5/acceptance/3",
+          "message": "T006 contains visual acceptance semantics outside the Phase 1 model"
+        }
+      ]
+    },
+    {
+      "slice": "work",
+      "ordinal": 4,
+      "corrective": true,
+      "status": "semantic-invalid",
+      "findings": [
+        {
+          "pointer": "/phases/tasks/0",
+          "message": "T001 lacks required intent, scope, acceptance, validation, or evidence"
+        }
+      ]
+    }
+  ],
+  "counters": {
+    "semanticOperations": 4,
+    "transportInvocations": 4,
+    "transportRetries": 0,
+    "correctiveRegenerations": 2,
+    "correctiveBySlice": {
+      "intent": 1,
+      "work": 1
+    },
+    "providerRequests": {
+      "measured": false,
+      "reason": "unsupported-by-provider"
+    }
+  },
+  "terminalState": "failed",
+  "failureKind": "semantic-invalid-after-recovery",
+  "publicationOccurred": false,
+  "artifactTree": [],
+  "remediationObservation": {
+    "machineIdentityKeyFailureRecurred": false,
+    "correctiveResponseUsedSchemaAcceptedSemanticKeys": true,
+    "newFailureBoundary": "The corrected work slice still contained a task missing at least one required semantic component. The current aggregate I-09 finding does not identify which component was absent."
+  }
+}
