@@ -1,8 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import type { ProviderErrorKind } from "../contract.js";
-import { isProviderTransportId, type ProviderTransportId } from "../contract.js";
+import type { Measured, ProviderErrorKind } from "../contract.js";
+import {
+  isProviderTransportId,
+  isRequestAccounting,
+  type ProviderTransportId,
+  type RequestAccounting,
+} from "../contract.js";
 import type { ConformanceResult } from "./suite.js";
 
 export type RecordingOrigin = "live-recorded" | "derived-from-recording" | "local-transport-fixture";
@@ -20,11 +25,79 @@ export interface RecordedRawResponse {
 }
 
 export interface LiveSmokeRecord {
+  /** Legacy conclusion retained for direct-API records; v2 replay derives from observations below. */
   readonly passed: boolean;
   readonly errorKind: Extract<ProviderErrorKind, "cancelled" | "timeout">;
   readonly durationMs: number;
-  readonly providerRequests: number;
+  /** Legacy direct-API count retained for existing records. */
+  readonly providerRequests?: number;
+  readonly providerRequestMeasurement?: Measured<number>;
+  readonly transportInvocations?: number;
   readonly promptAbort: boolean;
+  readonly treeQuiescent?: boolean;
+  readonly treeVerified?: boolean;
+  readonly skipReason?: string;
+}
+
+export type LiveRuntimeAttestation =
+  | {
+      readonly check: "subscription-auth";
+      readonly checkedAt: string;
+      readonly transport: ProviderTransportId;
+      readonly transportVersion: string;
+      readonly authMode: "subscription";
+    }
+  | {
+      readonly check: "environment-api-key-isolation";
+      readonly checkedAt: string;
+      readonly transport: ProviderTransportId;
+      readonly transportVersion: string;
+      readonly providerCredentialVariablesPresent: boolean;
+      readonly alternateBackendVariablesPresent: boolean;
+      readonly observedApiKeySource: "none" | "configured" | "not-reported";
+    }
+  | {
+      readonly check: "transport-version";
+      readonly checkedAt: string;
+      readonly transport: ProviderTransportId;
+      readonly transportVersion: string;
+      readonly executable: string;
+    };
+
+export interface ModelInvocationConfigurationEvidence {
+  readonly modelId: string;
+  readonly effort: string;
+  readonly inputMode: "stdin";
+  readonly systemPromptMode: "replacement-file" | "other";
+  readonly settingSources: "none" | "configured";
+  readonly strictMcpConfig: boolean;
+  readonly configuredMcpServers: number;
+  readonly toolsMode: "disabled-except-structured-output" | "other";
+  readonly fallbackModelConfigured: boolean;
+  readonly sessionPersistence: "disabled" | "enabled-or-unspecified";
+  readonly restrictedMode: boolean;
+}
+
+/** Sanitized, provider-neutral evidence about an external transport runtime. */
+export interface TransportRuntimeEvidence {
+  readonly format: "rb-external-runtime-evidence/v2";
+  readonly cliInvocations: number;
+  readonly observedProviderRequests: Measured<number>;
+  readonly observedTopLevelModelSteps: readonly number[];
+  readonly observedModelIds: readonly string[];
+  readonly liveAttestations: readonly LiveRuntimeAttestation[];
+  readonly invocationConfiguration: ModelInvocationConfigurationEvidence;
+  readonly invocations?: readonly {
+    readonly id: string;
+    readonly recordingKey: string;
+    readonly transportInvocations?: number;
+    /** Sanitized result of checking the real cwd before its path was removed. */
+    readonly cwdIsolated: boolean;
+    readonly numTurns?: number;
+    readonly topLevelModelSteps: number;
+    readonly modelIds: readonly string[];
+    readonly resultSubtype?: string;
+  }[];
 }
 
 export interface ConformanceRecordBody {
@@ -32,6 +105,11 @@ export interface ConformanceRecordBody {
   readonly producer: "rb-harness-conformance-runner";
   readonly profileId: string;
   readonly transport: ProviderTransportId;
+  /** Integrity-bound when emitted by current external-transport recorders. */
+  readonly requestAccounting?: RequestAccounting;
+  readonly providerFamily?: string;
+  readonly modelId?: string;
+  readonly transportVersion?: string;
   readonly suiteVersion: string;
   readonly runId: string;
   readonly recordedAt: string;
@@ -40,6 +118,7 @@ export interface ConformanceRecordBody {
     readonly cancellation: LiveSmokeRecord;
     readonly timeout: LiveSmokeRecord;
   };
+  readonly runtimeEvidence?: TransportRuntimeEvidence;
   readonly result: ConformanceResult;
 }
 
@@ -75,7 +154,7 @@ export function conformanceRecordFileName(profileId: string): string {
   return `${profileId.replace(/[^a-z0-9._-]+/gi, "_")}.json`;
 }
 
-const FORBIDDEN_CREDENTIAL_KEY = /^(?:x-api-key|authorization|api[-_]?key|secret|ciphertext|vault(?:material)?)$/i;
+const FORBIDDEN_CREDENTIAL_KEY = /^(?:x-api-key|authorization|api[-_]?key(?:source)?|secret|ciphertext|vault(?:material)?|email|account_?id|org(?:anization)?_?id|org_?name|oauth_?token|session_?token|projects_?directory)$/i;
 const PROVIDER_SECRET_VALUE = /\bsk-[A-Za-z0-9_-]{12,}\b/i;
 
 export function assertConformanceRecordSanitized(record: ConformanceRecord): void {
@@ -113,6 +192,9 @@ export async function readConformanceRecord(root: string, profileId: string): Pr
     throw new Error(`invalid conformance record format: ${path}`);
   }
   if (!isProviderTransportId(parsed.transport)) throw new Error(`invalid conformance record transport: ${String(parsed.transport)}`);
+  if (parsed.requestAccounting !== undefined && !isRequestAccounting(parsed.requestAccounting)) {
+    throw new Error(`invalid conformance record request accounting: ${String(parsed.requestAccounting)}`);
+  }
   assertConformanceRecordSanitized(parsed);
   if (!verifyRecordIntegrity(parsed)) throw new Error(`conformance record integrity mismatch: ${path}`);
   return parsed;

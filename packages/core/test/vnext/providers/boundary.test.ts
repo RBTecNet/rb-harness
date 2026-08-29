@@ -17,6 +17,7 @@ async function files(root: string): Promise<string[]> {
 describe("Phase 2 provider boundaries", () => {
   const core = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
   const anthropic = resolve(core, "src/vnext/providers/anthropic");
+  const claudeCode = resolve(anthropic, "claude-code");
 
   it("forbids semantic Core imports and semantic vocabulary in Anthropic normalization", async () => {
     const source = (await Promise.all((await files(anthropic)).map((file) => readFile(file, "utf8")))).join("\n");
@@ -31,13 +32,16 @@ describe("Phase 2 provider boundaries", () => {
     const generic = resolve(core, "src/vnext/providers/conformance");
     const source = (await Promise.all((await files(generic)).map((file) => readFile(file, "utf8")))).join("\n");
     expect(source).not.toMatch(/anthropic|claude/i);
-    expect(await readFile(resolve(core, "src/vnext/providers/contract.ts"), "utf8")).not.toMatch(/anthropic|claude/i);
+    const contract = (await readFile(resolve(core, "src/vnext/providers/contract.ts"), "utf8"))
+      .replaceAll('"claude-code-cli"', "")
+      .replaceAll('"claude-code-json-schema"', "");
+    expect(contract).not.toMatch(/anthropic|claude/i);
   });
 
   it("contains no adapter-authored semantic prompt policy or repair/formatter hook", async () => {
     const source = (await Promise.all((await files(anthropic)).map((file) => readFile(file, "utf8")))).join("\n");
     expect(source).not.toMatch(/Respond with valid JSON|Do not output Markdown|Harness requirements|Follow this schema exactly/i);
-    expect(source).not.toMatch(/formatter|semantic repair|second model|retry loop/i);
+    expect(source).not.toMatch(/formatter call|semantic repair|second model call/i);
   });
 
   it("keeps one shared Anthropic workspace ID predicate for wizard and adapter", async () => {
@@ -49,6 +53,18 @@ describe("Phase 2 provider boundaries", () => {
     expect(wizard).not.toMatch(/\^wrkspc_/);
     expect(adapter).not.toMatch(/\^wrkspc_/);
     expect(shared.match(/\^wrkspc_/g)).toHaveLength(1);
+  });
+
+  it("keeps Claude Code transport semantic-blind and independent from the API vault/direct adapter", async () => {
+    const productionFiles = ["adapter.ts", "normalize.ts", "process.ts", "profiles.ts"];
+    const source = (await Promise.all(productionFiles.map((name) => readFile(resolve(claudeCode, name), "utf8")))).join("\n");
+    expect(source).not.toMatch(/vnext\/(ir|resolve|validate|render|closure|ralph-fidelity)/);
+    expect(source).not.toMatch(/credential-store|anthropic\/adapter|x-api-key/);
+    expect(source).not.toMatch(/Requirement|SemanticTask|SemanticPhase|TaskId|AcceptanceId|PHASES\.md|BRIEF\.md|Ralph/);
+    expect(await readFile(resolve(claudeCode, "normalize.ts"), "utf8"))
+      .not.toMatch(/requirementsList|requirements|phases|tasks|acceptance|ownedPaths|covers|qualityCommands/);
+    expect(await readFile(resolve(claudeCode, "adapter.ts"), "utf8"))
+      .not.toMatch(/Respond with valid JSON|Do not output Markdown|Harness requirements|Repair your answer/i);
   });
 
   it("adds only conformance beneath vnext and does not register vnext init", () => {

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { measured, unmeasured, type CanonicalSemanticResponse, type ProviderErrorKind } from "../../../src/vnext/providers/contract.js";
+import {
+  isRequestAccounting,
+  measured,
+  unmeasured,
+  type CanonicalSemanticResponse,
+  type ProviderErrorKind,
+  type RequestAccounting,
+} from "../../../src/vnext/providers/contract.js";
 
 describe("provider contract", () => {
   it("keeps semantic payload unknown and errors transport/protocol-only", () => {
@@ -28,5 +35,11 @@ describe("provider contract", () => {
     ];
     expect(kinds).not.toContain("schema-mismatch");
     expect(kinds).not.toContain("semantic-invalid");
+  });
+
+  it("keeps exact and opaque provider accounting distinct", () => {
+    const modes: RequestAccounting[] = ["exact", "opaque"];
+    expect(modes.every(isRequestAccounting)).toBe(true);
+    expect(isRequestAccounting("assistant-message-count")).toBe(false);
   });
 });

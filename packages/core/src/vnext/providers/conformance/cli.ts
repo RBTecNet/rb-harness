@@ -1,12 +1,12 @@
 import { resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CONFORMANCE_CASES } from "./fixtures.js";
 import { readConformanceRecord, writeConformanceRecord } from "./recording.js";
 import { validateConformanceRecord } from "./runner.js";
 import {
   recordProviderConformance,
   resolveProviderAdapter,
-  resolveProviderCredential,
+  resolveProviderAuth,
+  resolveProviderConformanceCases,
   resolveProviderProfile,
 } from "../registry.js";
 
@@ -28,9 +28,10 @@ export function defaultConformanceRecordsRoot(): string {
   return conformanceRecordsRootFromModulePath(fileURLToPath(import.meta.url));
 }
 
-function printResult(result: import("./suite.js").ConformanceResult, profile: import("../contract.js").ModelProfile): void {
+function printResult(result: import("./suite.js").ConformanceResult, profile: import("../contract.js").ModelProfile, transportVersion?: string): void {
   process.stdout.write(`Profile: ${result.profileId}\n`);
   process.stdout.write(`Transport: ${profile.transport}\n`);
+  if (transportVersion) process.stdout.write(`Transport version: ${transportVersion}\n`);
   process.stdout.write(`Suite: ${result.suiteVersion}\n`);
   process.stdout.write(`Tier: ${result.tier}\n`);
   process.stdout.write(`Assertions: ${result.cases.filter((test) => test.passed).length}/${result.cases.length} passed\n`);
@@ -45,18 +46,23 @@ export async function runVnextConformanceCommand(options: {
 }): Promise<void> {
   const profile = resolveProviderProfile(options.profileId);
   const adapter = resolveProviderAdapter(options.profileId);
+  const cases = resolveProviderConformanceCases(options.profileId);
   const root = options.recordsRoot ?? defaultConformanceRecordsRoot();
+  if (profile.transport !== "direct-api" && options.credential) {
+    throw new Error(`--credential is not accepted for ambient-session profile ${profile.id}`);
+  }
   if (options.record) {
-    const resolved = await resolveProviderCredential(profile, options.credential);
-    const live = await recordProviderConformance(profile, resolved);
+    const auth = await resolveProviderAuth(profile, options.credential);
+    const live = await recordProviderConformance(profile, auth);
     const path = await writeConformanceRecord(root, live.record);
-    printResult(live.record.result, profile);
-    process.stdout.write(`Provider requests: ${live.providerRequests}\nRecord: ${path}\n`);
+    printResult(live.record.result, profile, live.record.transportVersion);
+    process.stdout.write(`Transport invocations: ${live.transportInvocations}\n`);
+    process.stdout.write(`Provider requests: ${live.providerRequests.measured ? live.providerRequests.value : `unmeasured (${live.providerRequests.reason})`}\nRecord: ${path}\n`);
     if (live.record.result.tier === "UNSUPPORTED") process.exitCode = 1;
     return;
   }
   const record = await readConformanceRecord(root, profile.id);
-  const result = validateConformanceRecord({ adapter, profile, cases: CONFORMANCE_CASES, record });
-  printResult(result, profile);
+  const result = validateConformanceRecord({ adapter, profile, cases, record });
+  printResult(result, profile, record.transportVersion);
   if (result.tier === "UNSUPPORTED") process.exitCode = 1;
 }

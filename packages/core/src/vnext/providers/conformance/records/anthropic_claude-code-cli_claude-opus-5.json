@@ -1,0 +1,1197 @@
+{
+  "format": "rb-adapter-conformance-record/v1",
+  "producer": "rb-harness-conformance-runner",
+  "providerFamily": "anthropic",
+  "profileId": "anthropic:claude-code-cli:claude-opus-5",
+  "modelId": "claude-opus-5",
+  "transport": "claude-code-cli",
+  "requestAccounting": "opaque",
+  "transportVersion": "2.1.251 (Claude Code)",
+  "suiteVersion": "rb-adapter-conformance/v1",
+  "runId": "b0d5bf6b-e804-4f02-9ee0-99eb83937172",
+  "recordedAt": "2026-08-29T02:53:09.285Z",
+  "rawResponses": {
+    "representation-comprehensive": {
+      "origin": "live-recorded",
+      "canonicalPayload": {
+        "title": "transport-probe",
+        "mode": "alpha",
+        "nested": {
+          "level1": {
+            "level2": {
+              "value": "kept"
+            }
+          }
+        },
+        "arrays": [
+          [],
+          [
+            "one"
+          ],
+          [
+            "one",
+            "two"
+          ]
+        ],
+        "optional": null
+      },
+      "response": {
+        "events": [
+          {
+            "type": "system",
+            "subtype": "init",
+            "tools": [
+              "StructuredOutput"
+            ],
+            "mcp_servers": [],
+            "model": "claude-opus-5",
+            "slash_commands": [],
+            "claude_code_version": "2.1.251",
+            "output_style": "default",
+            "agents": [
+              "claude",
+              "Explore",
+              "general-purpose",
+              "Plan"
+            ],
+            "skills": [],
+            "plugins": [],
+            "capabilities": [
+              "interrupt_receipt_v1",
+              "interrupt_cancel_queued_v1",
+              "msg_lifecycle_v1"
+            ],
+            "analytics_disabled": true,
+            "product_feedback_disabled": true,
+            "fast_mode_state": "off",
+            "fast_mode_disabled_reason": "sdk_opt_in_required"
+          },
+          {
+            "type": "assistant",
+            "message": {
+              "model": "claude-opus-5",
+              "id": "msg_011CeWHMtfD7E7aRxkMg9JQP",
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_01KqrGFrKmNEoJ3C352YaUqw",
+                  "name": "StructuredOutput",
+                  "input": {
+                    "title": "transport-probe",
+                    "mode": "alpha",
+                    "nested": {
+                      "level1": {
+                        "level2": {
+                          "value": "kept"
+                        }
+                      }
+                    },
+                    "arrays": [
+                      [],
+                      [
+                        "one"
+                      ],
+                      [
+                        "one",
+                        "two"
+                      ]
+                    ],
+                    "optional": null
+                  },
+                  "caller": {
+                    "type": "direct"
+                  }
+                }
+              ],
+              "stop_reason": null,
+              "stop_sequence": null,
+              "stop_details": null,
+              "usage": {
+                "input_tokens": 2,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 952,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 0
+                },
+                "output_tokens": 24,
+                "service_tier": "standard",
+                "inference_geo": "not_available"
+              },
+              "diagnostics": null,
+              "context_management": null
+            },
+            "parent_tool_use_id": null,
+            "timestamp": "2026-08-29T02:52:51.337Z",
+            "request_id": "req_011CeWHMstLA2FwsVVJjASqx"
+          },
+          {
+            "type": "user",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "tool_use_id": "toolu_01KqrGFrKmNEoJ3C352YaUqw",
+                  "type": "tool_result",
+                  "content": "Structured output provided successfully"
+                }
+              ]
+            },
+            "parent_tool_use_id": null,
+            "timestamp": "2026-08-29T02:52:51.344Z",
+            "tool_use_result": "Structured output provided successfully"
+          },
+          {
+            "type": "rate_limit_event",
+            "rate_limit_info": {
+              "status": "allowed",
+              "resetsAt": 1787977800,
+              "rateLimitType": "five_hour",
+              "overageStatus": "rejected",
+              "overageDisabledReason": "out_of_credits",
+              "isUsingOverage": false,
+              "unifiedWindows": {
+                "five_hour": {
+                  "utilization": 0.1,
+                  "resetsAt": 1787977800
+                },
+                "seven_day": {
+                  "utilization": 0.04,
+                  "resetsAt": 1788368400
+                }
+              }
+            }
+          },
+          {
+            "is_error": false,
+            "duration_api_ms": 7580,
+            "num_turns": 2,
+            "stop_reason": "tool_use",
+            "usage": {
+              "input_tokens": 2,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 952,
+              "output_tokens": 179,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "server_tool_use": {
+                "web_search_requests": 0,
+                "web_fetch_requests": 0
+              },
+              "service_tier": "standard",
+              "cache_creation": {
+                "ephemeral_1h_input_tokens": 0,
+                "ephemeral_5m_input_tokens": 0
+              },
+              "inference_geo": "not_available",
+              "iterations": [],
+              "speed": "standard"
+            },
+            "modelUsage": {
+              "claude-opus-5": {
+                "inputTokens": 2,
+                "outputTokens": 179,
+                "cacheReadInputTokens": 952,
+                "cacheCreationInputTokens": 0,
+                "webSearchRequests": 0,
+                "contextWindow": 1000000,
+                "maxOutputTokens": 64000,
+                "canonicalModel": "claude-opus-5",
+                "provider": "firstParty",
+                "costBasis": "list"
+              }
+            },
+            "permission_denials": [],
+            "terminal_reason": "completed",
+            "fast_mode_state": "off",
+            "fast_mode_disabled_reason": "sdk_opt_in_required",
+            "subagent_stats": {
+              "spawned": 0,
+              "requested": {
+                "background": 0,
+                "foreground": 0,
+                "unset": 0
+              },
+              "started_in_background": 0,
+              "max_depth": 0,
+              "spawned_by_subagents": 0,
+              "completed": 0,
+              "failed": 0,
+              "killed": {
+                "parent": 0,
+                "user": 0,
+                "system": 0
+              },
+              "refused": {
+                "depth_limit": 0,
+                "concurrency_limit": 0,
+                "budget": 0
+              },
+              "by_type": {}
+            },
+            "subtype": "success",
+            "api_error_status": null,
+            "result": "{\"title\":\"transport-probe\",\"mode\":\"alpha\",\"nested\":{\"level1\":{\"level2\":{\"value\":\"kept\"}}},\"arrays\":[[],[\"one\"],[\"one\",\"two\"]],\"optional\":null}",
+            "structured_output": {
+              "title": "transport-probe",
+              "mode": "alpha",
+              "nested": {
+                "level1": {
+                  "level2": {
+                    "value": "kept"
+                  }
+                }
+              },
+              "arrays": [
+                [],
+                [
+                  "one"
+                ],
+                [
+                  "one",
+                  "two"
+                ]
+              ],
+              "optional": null
+            },
+            "ttft_ms": 7591,
+            "ttft_stream_ms": 6375,
+            "time_to_request_ms": 31,
+            "type": "result",
+            "duration_ms": 7606,
+            "queued_turn_count": 0
+          }
+        ],
+        "exitCode": 0,
+        "exitSignal": null,
+        "startedAt": "2026-08-29T02:52:43.143Z",
+        "completedAt": "2026-08-29T02:52:51.378Z",
+        "firstOutputMs": 615,
+        "streamComplete": true,
+        "treeQuiescent": true,
+        "treeVerified": true
+      }
+    },
+    "semantic-incomplete": {
+      "origin": "live-recorded",
+      "canonicalPayload": {
+        "items": []
+      },
+      "response": {
+        "events": [
+          {
+            "type": "system",
+            "subtype": "init",
+            "tools": [
+              "StructuredOutput"
+            ],
+            "mcp_servers": [],
+            "model": "claude-opus-5",
+            "slash_commands": [],
+            "claude_code_version": "2.1.251",
+            "output_style": "default",
+            "agents": [
+              "claude",
+              "Explore",
+              "general-purpose",
+              "Plan"
+            ],
+            "skills": [],
+            "plugins": [],
+            "capabilities": [
+              "interrupt_receipt_v1",
+              "interrupt_cancel_queued_v1",
+              "msg_lifecycle_v1"
+            ],
+            "analytics_disabled": true,
+            "product_feedback_disabled": true,
+            "fast_mode_state": "off",
+            "fast_mode_disabled_reason": "sdk_opt_in_required"
+          },
+          {
+            "type": "assistant",
+            "message": {
+              "model": "claude-opus-5",
+              "id": "msg_011CeWHNVq47E832E8pB13ZD",
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_01NDH9PdFUgBzSktmmKnCzeg",
+                  "name": "StructuredOutput",
+                  "input": {
+                    "items": []
+                  },
+                  "caller": {
+                    "type": "direct"
+                  }
+                }
+              ],
+              "stop_reason": null,
+              "stop_sequence": null,
+              "stop_details": null,
+              "usage": {
+                "input_tokens": 2,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 687,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 0
+                },
+                "output_tokens": 24,
+                "service_tier": "standard",
+                "inference_geo": "not_available"
+              },
+              "diagnostics": null,
+              "context_management": null
+            },
+            "parent_tool_use_id": null,
+            "timestamp": "2026-08-29T02:53:06.626Z",
+            "request_id": "req_011CeWHNV3BHmf7nBjWWQi11"
+          },
+          {
+            "type": "user",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "tool_use_id": "toolu_01NDH9PdFUgBzSktmmKnCzeg",
+                  "type": "tool_result",
+                  "content": "Structured output provided successfully"
+                }
+              ]
+            },
+            "parent_tool_use_id": null,
+            "timestamp": "2026-08-29T02:53:06.634Z",
+            "tool_use_result": "Structured output provided successfully"
+          },
+          {
+            "type": "rate_limit_event",
+            "rate_limit_info": {
+              "status": "allowed",
+              "resetsAt": 1787977800,
+              "rateLimitType": "five_hour",
+              "overageStatus": "rejected",
+              "overageDisabledReason": "out_of_credits",
+              "isUsingOverage": false,
+              "unifiedWindows": {
+                "five_hour": {
+                  "utilization": 0.1,
+                  "resetsAt": 1787977800
+                },
+                "seven_day": {
+                  "utilization": 0.04,
+                  "resetsAt": 1788368400
+                }
+              }
+            }
+          },
+          {
+            "is_error": false,
+            "duration_api_ms": 14638,
+            "num_turns": 2,
+            "stop_reason": "tool_use",
+            "usage": {
+              "input_tokens": 2,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 687,
+              "output_tokens": 52,
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "server_tool_use": {
+                "web_search_requests": 0,
+                "web_fetch_requests": 0
+              },
+              "service_tier": "standard",
+              "cache_creation": {
+                "ephemeral_1h_input_tokens": 0,
+                "ephemeral_5m_input_tokens": 0
+              },
+              "inference_geo": "not_available",
+              "iterations": [],
+              "speed": "standard"
+            },
+            "modelUsage": {
+              "claude-opus-5": {
+                "inputTokens": 2,
+                "outputTokens": 52,
+                "cacheReadInputTokens": 687,
+                "cacheCreationInputTokens": 0,
+                "webSearchRequests": 0,
+                "contextWindow": 1000000,
+                "maxOutputTokens": 64000,
+                "canonicalModel": "claude-opus-5",
+                "provider": "firstParty",
+                "costBasis": "list"
+              }
+            },
+            "permission_denials": [],
+            "terminal_reason": "completed",
+            "fast_mode_state": "off",
+            "fast_mode_disabled_reason": "sdk_opt_in_required",
+            "subagent_stats": {
+              "spawned": 0,
+              "requested": {
+                "background": 0,
+                "foreground": 0,
+                "unset": 0
+              },
+              "started_in_background": 0,
+              "max_depth": 0,
+              "spawned_by_subagents": 0,
+              "completed": 0,
+              "failed": 0,
+              "killed": {
+                "parent": 0,
+                "user": 0,
+                "system": 0
+              },
+              "refused": {
+                "depth_limit": 0,
+                "concurrency_limit": 0,
+                "budget": 0
+              },
+              "by_type": {}
+            },
+            "subtype": "success",
+            "api_error_status": null,
+            "result": "{\"items\":[]}",
+            "structured_output": {
+              "items": []
+            },
+            "ttft_ms": 14649,
+            "ttft_stream_ms": 14648,
+            "time_to_request_ms": 31,
+            "type": "result",
+            "duration_ms": 14664,
+            "queued_turn_count": 0
+          }
+        ],
+        "exitCode": 0,
+        "exitSignal": null,
+        "startedAt": "2026-08-29T02:52:51.381Z",
+        "completedAt": "2026-08-29T02:53:06.667Z",
+        "firstOutputMs": 609,
+        "streamComplete": true,
+        "treeQuiescent": true,
+        "treeVerified": true
+      }
+    },
+    "derived-truncated": {
+      "origin": "derived-from-recording",
+      "response": {
+        "events": [
+          {
+            "type": "system",
+            "subtype": "init",
+            "tools": [
+              "StructuredOutput"
+            ],
+            "mcp_servers": [],
+            "model": "claude-opus-5",
+            "slash_commands": [],
+            "claude_code_version": "2.1.251",
+            "output_style": "default",
+            "agents": [
+              "claude",
+              "Explore",
+              "general-purpose",
+              "Plan"
+            ],
+            "skills": [],
+            "plugins": [],
+            "capabilities": [
+              "interrupt_receipt_v1",
+              "interrupt_cancel_queued_v1",
+              "msg_lifecycle_v1"
+            ],
+            "analytics_disabled": true,
+            "product_feedback_disabled": true,
+            "fast_mode_state": "off",
+            "fast_mode_disabled_reason": "sdk_opt_in_required"
+          },
+          {
+            "type": "assistant",
+            "message": {
+              "model": "claude-opus-5",
+              "id": "msg_011CeWHMtfD7E7aRxkMg9JQP",
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_01KqrGFrKmNEoJ3C352YaUqw",
+                  "name": "StructuredOutput",
+                  "input": {
+                    "title": "transport-probe",
+                    "mode": "alpha",
+                    "nested": {
+                      "level1": {
+                        "level2": {
+                          "value": "kept"
+                        }
+                      }
+                    },
+                    "arrays": [
+                      [],
+                      [
+                        "one"
+                      ],
+                      [
+                        "one",
+                        "two"
+                      ]
+                    ],
+                    "optional": null
+                  },
+                  "caller": {
+                    "type": "direct"
+                  }
+                }
+              ],
+              "stop_reason": null,
+              "stop_sequence": null,
+              "stop_details": null,
+              "usage": {
+                "input_tokens": 2,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 952,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 0
+                },
+                "output_tokens": 24,
+                "service_tier": "standard",
+                "inference_geo": "not_available"
+              },
+              "diagnostics": null,
+              "context_management": null
+            },
+            "parent_tool_use_id": null,
+            "timestamp": "2026-08-29T02:52:51.337Z",
+            "request_id": "req_011CeWHMstLA2FwsVVJjASqx"
+          },
+          {
+            "type": "user",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "tool_use_id": "toolu_01KqrGFrKmNEoJ3C352YaUqw",
+                  "type": "tool_result",
+                  "content": "Structured output provided successfully"
+                }
+              ]
+            },
+            "parent_tool_use_id": null,
+            "timestamp": "2026-08-29T02:52:51.344Z",
+            "tool_use_result": "Structured output provided successfully"
+          },
+          {
+            "type": "rate_limit_event",
+            "rate_limit_info": {
+              "status": "allowed",
+              "resetsAt": 1787977800,
+              "rateLimitType": "five_hour",
+              "overageStatus": "rejected",
+              "overageDisabledReason": "out_of_credits",
+              "isUsingOverage": false,
+              "unifiedWindows": {
+                "five_hour": {
+                  "utilization": 0.1,
+                  "resetsAt": 1787977800
+                },
+                "seven_day": {
+                  "utilization": 0.04,
+                  "resetsAt": 1788368400
+                }
+              }
+            }
+          }
+        ],
+        "exitCode": 0,
+        "exitSignal": null,
+        "startedAt": "2026-08-29T02:52:43.143Z",
+        "completedAt": "2026-08-29T02:52:51.378Z",
+        "firstOutputMs": 615,
+        "streamComplete": false,
+        "treeQuiescent": true,
+        "treeVerified": true
+      },
+      "derivedFrom": "representation-comprehensive",
+      "derivation": "final CLI result event removed and stream marked incomplete"
+    },
+    "derived-malformed": {
+      "origin": "derived-from-recording",
+      "response": {
+        "events": [
+          {
+            "type": "not-a-documented-cli-envelope"
+          }
+        ],
+        "exitCode": 0,
+        "exitSignal": null,
+        "startedAt": "2026-08-29T02:52:43.143Z",
+        "completedAt": "2026-08-29T02:52:51.378Z",
+        "firstOutputMs": 615,
+        "streamComplete": true,
+        "treeQuiescent": true,
+        "treeVerified": true
+      },
+      "derivedFrom": "representation-comprehensive",
+      "derivation": "sanitized event list replaced by one undocumented envelope marker"
+    },
+    "structured-output-retry-probe": {
+      "origin": "live-recorded",
+      "response": {
+        "events": [
+          {
+            "type": "system",
+            "subtype": "init",
+            "tools": [
+              "StructuredOutput"
+            ],
+            "mcp_servers": [],
+            "model": "claude-opus-5",
+            "slash_commands": [],
+            "claude_code_version": "2.1.251",
+            "output_style": "default",
+            "agents": [
+              "claude",
+              "Explore",
+              "general-purpose",
+              "Plan"
+            ],
+            "skills": [],
+            "plugins": [],
+            "capabilities": [
+              "interrupt_receipt_v1",
+              "interrupt_cancel_queued_v1",
+              "msg_lifecycle_v1"
+            ],
+            "analytics_disabled": true,
+            "product_feedback_disabled": true,
+            "fast_mode_state": "off",
+            "fast_mode_disabled_reason": "sdk_opt_in_required"
+          },
+          {
+            "type": "system",
+            "subtype": "thinking_tokens",
+            "estimated_tokens": 50,
+            "estimated_tokens_delta": 50
+          },
+          {
+            "type": "system",
+            "subtype": "thinking_tokens",
+            "estimated_tokens": 103,
+            "estimated_tokens_delta": 53
+          },
+          {
+            "type": "assistant",
+            "message": {
+              "model": "claude-opus-5",
+              "id": "msg_011CeWHPd69QqWubm2TvLLnh",
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "thinking",
+                  "thinking": "",
+                  "signature": "CAISkwMKpgEIERgCKkAylFpEvrv7i55KCrawo0EvgSJouQ7qCch6Uo/h7rII/czFKlxV8Etek6gddPVPbdgRuDOvQMqck3zUDX3YmOzWMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiQyYTM0MzUwMS1jYmY4LTQ1NDgtYWI4MS02NGFmMWFjMDQ0OTVyEMxdYGUd5cUvJeoxF7AUPAaIAQGoAZSTydQGsAECEgzfG18KFBg8HaTTVEkaDEs+2G6D6/HbA0cwWyIw1FLOBfuvdXRAAcHLlTOaDG+lf1ggDn7uD+a3X17s1v6bAW96EErRZ2x9zrjHR12eKpkBElCAStVfSyJAQzUMXU0QX06Kz/Dj4e685S7OWda11fdJX6hZvJK/b2orrLxv3EAJubdHa1HgLstiP8eSNZjXx8j4EbF5PLCjm1u4/0Fo+bpP5zMGMWwH3Y+WrLRNc0B5czER8oVIEpdgu12QUk6LBMTLn+bNF/CiJd0L6Em+1bhtHDGDu/ruKZfV4Jfb/oMUOv+C+XzuwOCeGAE="
+                }
+              ],
+              "stop_reason": null,
+              "stop_sequence": null,
+              "stop_details": null,
+              "usage": {
+                "input_tokens": 2,
+                "cache_creation_input_tokens": 689,
+                "cache_read_input_tokens": 0,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 689
+                },
+                "output_tokens": 2,
+                "service_tier": "standard",
+                "inference_geo": "not_available"
+              },
+              "diagnostics": null,
+              "context_management": null
+            },
+            "parent_tool_use_id": null,
+            "timestamp": "2026-08-29T02:53:08.813Z",
+            "request_id": "req_011CeWHPcHGxLH8NbAyfHbiM"
+          },
+          {
+            "type": "assistant",
+            "message": {
+              "model": "claude-opus-5",
+              "id": "msg_011CeWHPd69QqWubm2TvLLnh",
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_012YqANZUxybEN2SZwnwcLe6",
+                  "name": "StructuredOutput",
+                  "input": {
+                    "value": "-"
+                  },
+                  "caller": {
+                    "type": "direct"
+                  }
+                }
+              ],
+              "stop_reason": null,
+              "stop_sequence": null,
+              "stop_details": null,
+              "usage": {
+                "input_tokens": 2,
+                "cache_creation_input_tokens": 689,
+                "cache_read_input_tokens": 0,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 689
+                },
+                "output_tokens": 2,
+                "service_tier": "standard",
+                "inference_geo": "not_available"
+              },
+              "diagnostics": null,
+              "context_management": null
+            },
+            "parent_tool_use_id": null,
+            "timestamp": "2026-08-29T02:53:09.054Z",
+            "request_id": "req_011CeWHPcHGxLH8NbAyfHbiM"
+          },
+          {
+            "type": "user",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "content": "Output does not match required schema: /value: must NOT have fewer than 2 characters",
+                  "is_error": true,
+                  "tool_use_id": "toolu_012YqANZUxybEN2SZwnwcLe6"
+                }
+              ]
+            },
+            "parent_tool_use_id": null,
+            "timestamp": "2026-08-29T02:53:09.064Z",
+            "tool_use_result": "Error: Output does not match required schema: /value: must NOT have fewer than 2 characters"
+          },
+          {
+            "is_error": true,
+            "duration_api_ms": 0,
+            "num_turns": 2,
+            "stop_reason": null,
+            "usage": {
+              "output_tokens_details": {
+                "thinking_tokens": 0
+              },
+              "input_tokens": 0,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 0,
+              "server_tool_use": {
+                "web_search_requests": 0,
+                "web_fetch_requests": 0
+              },
+              "service_tier": "standard",
+              "cache_creation": {
+                "ephemeral_1h_input_tokens": 0,
+                "ephemeral_5m_input_tokens": 0
+              },
+              "inference_geo": "",
+              "iterations": [],
+              "speed": "standard"
+            },
+            "modelUsage": {},
+            "permission_denials": [],
+            "terminal_reason": "structured_output_retry_exhausted",
+            "fast_mode_state": "off",
+            "fast_mode_disabled_reason": "sdk_opt_in_required",
+            "subagent_stats": {
+              "spawned": 0,
+              "requested": {
+                "background": 0,
+                "foreground": 0,
+                "unset": 0
+              },
+              "started_in_background": 0,
+              "max_depth": 0,
+              "spawned_by_subagents": 0,
+              "completed": 0,
+              "failed": 0,
+              "killed": {
+                "parent": 0,
+                "user": 0,
+                "system": 0
+              },
+              "refused": {
+                "depth_limit": 0,
+                "concurrency_limit": 0,
+                "budget": 0
+              },
+              "by_type": {}
+            },
+            "subtype": "error_max_structured_output_retries",
+            "errors": [
+              "Failed to provide valid structured output after 0 attempts"
+            ],
+            "type": "result",
+            "duration_ms": 1822,
+            "queued_turn_count": 0
+          }
+        ],
+        "exitCode": 1,
+        "exitSignal": null,
+        "startedAt": "2026-08-29T02:53:06.669Z",
+        "completedAt": "2026-08-29T02:53:09.089Z",
+        "firstOutputMs": 587,
+        "streamComplete": true,
+        "treeQuiescent": true,
+        "treeVerified": true
+      }
+    }
+  },
+  "liveSmoke": {
+    "cancellation": {
+      "passed": true,
+      "errorKind": "cancelled",
+      "durationMs": 149,
+      "transportInvocations": 1,
+      "providerRequestMeasurement": {
+        "measured": false,
+        "reason": "stream-incomplete"
+      },
+      "promptAbort": true,
+      "treeQuiescent": true,
+      "treeVerified": true
+    },
+    "timeout": {
+      "passed": true,
+      "errorKind": "timeout",
+      "durationMs": 45,
+      "transportInvocations": 1,
+      "providerRequestMeasurement": {
+        "measured": false,
+        "reason": "stream-incomplete"
+      },
+      "promptAbort": true,
+      "treeQuiescent": true,
+      "treeVerified": true
+    }
+  },
+  "runtimeEvidence": {
+    "format": "rb-external-runtime-evidence/v2",
+    "cliInvocations": 5,
+    "observedProviderRequests": {
+      "measured": false,
+      "reason": "unsupported-by-provider"
+    },
+    "observedTopLevelModelSteps": [
+      1,
+      1,
+      1
+    ],
+    "observedModelIds": [
+      "claude-opus-5"
+    ],
+    "liveAttestations": [
+      {
+        "check": "subscription-auth",
+        "checkedAt": "2026-08-29T02:53:09.285Z",
+        "transport": "claude-code-cli",
+        "transportVersion": "2.1.251 (Claude Code)",
+        "authMode": "subscription"
+      },
+      {
+        "check": "environment-api-key-isolation",
+        "checkedAt": "2026-08-29T02:53:09.285Z",
+        "transport": "claude-code-cli",
+        "transportVersion": "2.1.251 (Claude Code)",
+        "providerCredentialVariablesPresent": false,
+        "alternateBackendVariablesPresent": false,
+        "observedApiKeySource": "none"
+      },
+      {
+        "check": "transport-version",
+        "checkedAt": "2026-08-29T02:53:09.285Z",
+        "transport": "claude-code-cli",
+        "transportVersion": "2.1.251 (Claude Code)",
+        "executable": "claude"
+      }
+    ],
+    "invocationConfiguration": {
+      "modelId": "claude-opus-5",
+      "effort": "low",
+      "inputMode": "stdin",
+      "systemPromptMode": "replacement-file",
+      "settingSources": "none",
+      "strictMcpConfig": true,
+      "configuredMcpServers": 0,
+      "toolsMode": "disabled-except-structured-output",
+      "fallbackModelConfigured": false,
+      "sessionPersistence": "disabled",
+      "restrictedMode": true
+    },
+    "invocations": [
+      {
+        "id": "valid-structured-response",
+        "recordingKey": "representation-comprehensive",
+        "transportInvocations": 1,
+        "cwdIsolated": true,
+        "numTurns": 2,
+        "topLevelModelSteps": 1,
+        "modelIds": [
+          "claude-opus-5"
+        ],
+        "resultSubtype": "success"
+      },
+      {
+        "id": "semantically-incomplete",
+        "recordingKey": "semantic-incomplete",
+        "transportInvocations": 1,
+        "cwdIsolated": true,
+        "numTurns": 2,
+        "topLevelModelSteps": 1,
+        "modelIds": [
+          "claude-opus-5"
+        ],
+        "resultSubtype": "success"
+      },
+      {
+        "id": "structured-output-retry-probe",
+        "recordingKey": "structured-output-retry-probe",
+        "transportInvocations": 1,
+        "cwdIsolated": true,
+        "numTurns": 2,
+        "topLevelModelSteps": 1,
+        "modelIds": [
+          "claude-opus-5"
+        ],
+        "resultSubtype": "error_max_structured_output_retries"
+      }
+    ]
+  },
+  "result": {
+    "profileId": "anthropic:claude-code-cli:claude-opus-5",
+    "suiteVersion": "rb-adapter-conformance/v1",
+    "runId": "b0d5bf6b-e804-4f02-9ee0-99eb83937172",
+    "recordedAt": "2026-08-29T02:53:09.285Z",
+    "tier": "SUPPORTED",
+    "cases": [
+      {
+        "id": "valid-structured-response",
+        "category": "valid-structured-response",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "nested-objects",
+        "category": "nested-objects",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "arrays",
+        "category": "arrays",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "enums",
+        "category": "enums",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "optional-null-fields",
+        "category": "optional-null-fields",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "unknown-provider-metadata",
+        "category": "unknown-provider-metadata",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "wrapper-envelope",
+        "category": "wrapper-envelope",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "truncated-response",
+        "category": "truncated-response",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "malformed-syntax",
+        "category": "malformed-syntax",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "semantically-incomplete",
+        "category": "semantically-incomplete",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "unsupported-structured-output",
+        "category": "unsupported-structured-output",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "reasoning-enabled",
+        "category": "reasoning-enabled",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "usage-reporting",
+        "category": "usage-reporting",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "cancellation",
+        "category": "cancellation",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "timeout",
+        "category": "timeout",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "subscription-auth",
+        "category": "transport-auth",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "environment-api-key-isolation",
+        "category": "transport-environment",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "transport-version",
+        "category": "transport-version",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "single-harness-invocation",
+        "category": "invocation-bounds",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "opaque-provider-accounting",
+        "category": "invocation-bounds",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "structured-output-retry-bound",
+        "category": "retry-bounds",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "exact-model",
+        "category": "model-selection",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "no-fallback",
+        "category": "model-selection",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "no-agent-tools-or-mcp",
+        "category": "tool-isolation",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "isolated-context",
+        "category": "session-isolation",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "no-session-persistence",
+        "category": "session-isolation",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      }
+    ],
+    "normalizationsOnHappyPath": [],
+    "capabilitiesActuallyTested": [
+      "cancellation",
+      "preflight:unsupported-structured-output",
+      "reasoning:enabled:low",
+      "runtime:environment-api-key-isolation",
+      "runtime:exact-model",
+      "runtime:isolated-context",
+      "runtime:no-agent-tools-or-mcp",
+      "runtime:no-fallback",
+      "runtime:no-session-persistence",
+      "runtime:opaque-provider-accounting",
+      "runtime:single-harness-invocation",
+      "runtime:structured-output-retry-bound",
+      "runtime:subscription-auth",
+      "runtime:transport-version",
+      "streaming",
+      "structured-output:claude-code-json-schema",
+      "timeout",
+      "usage-reporting"
+    ]
+  },
+  "integritySha256": "ef6c79e6640eff775575ca3d9a707e9be40d0f50df1dd6e2a1991b8a02b36526"
+}

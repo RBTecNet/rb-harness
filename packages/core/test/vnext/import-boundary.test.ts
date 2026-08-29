@@ -8,6 +8,7 @@ const LEGACY_ALLOWLIST = new Set([
   "execution-contract", "go-plan-convergence", "manifest", "version",
   "credential-store",
   "anthropic-credential",
+  "process-tree",
 ]);
 
 async function typescriptFiles(root: string): Promise<string[]> {

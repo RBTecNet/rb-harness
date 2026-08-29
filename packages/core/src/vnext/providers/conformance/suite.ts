@@ -25,14 +25,37 @@ export type ConformanceCategory =
   | "reasoning-disabled"
   | "usage-reporting"
   | "cancellation"
-  | "timeout";
+  | "timeout"
+  | "transport-auth"
+  | "transport-environment"
+  | "transport-version"
+  | "invocation-bounds"
+  | "model-selection"
+  | "tool-isolation"
+  | "session-isolation"
+  | "retry-bounds";
 
 export type ConformanceExpectation =
   | { readonly kind: "payload-equals"; readonly value: unknown }
   | { readonly kind: "error"; readonly errorKind: ProviderErrorKind }
   | { readonly kind: "usage"; readonly required: readonly (keyof CanonicalUsage)[] }
   | { readonly kind: "capability-refusal" }
+  | { readonly kind: "runtime-assertion"; readonly key: RuntimeAssertionKey }
   | { readonly kind: "live-smoke"; readonly errorKind: "cancelled" | "timeout" };
+
+/** Every key must have an explicit evidence predicate in replayConformance(). */
+export type RuntimeAssertionKey =
+  | "subscription-auth"
+  | "environment-api-key-isolation"
+  | "transport-version"
+  | "single-harness-invocation"
+  | "opaque-provider-accounting"
+  | "structured-output-retry-bound"
+  | "exact-model"
+  | "no-fallback"
+  | "no-agent-tools-or-mcp"
+  | "isolated-context"
+  | "no-session-persistence";
 
 export interface ConformanceCase {
   readonly id: string;

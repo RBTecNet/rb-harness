@@ -23,6 +23,7 @@ function request(overrides: Partial<SemanticRequest> = {}): SemanticRequest {
 }
 
 const credential = { id: "anthropic:test", secret: "secret-never-snapshot", attributes: {} };
+const credentialAuth = { kind: "credential" as const, credential };
 
 describe("Anthropic adapter", () => {
   it("places instructions/input/schema bytes into protocol without prompt augmentation", () => {
@@ -38,9 +39,9 @@ describe("Anthropic adapter", () => {
   it("rejects unsupported capability before invoking transport", async () => {
     const send = vi.fn();
     const adapter = new AnthropicAdapter({ send } as AnthropicTransport);
-    const badEffort = await adapter.request(CLAUDE_OPUS_5_PROFILE, credential, request({ reasoning: { mode: "on", effort: "ultra" } }));
+    const badEffort = await adapter.request(CLAUDE_OPUS_5_PROFILE, credentialAuth, request({ reasoning: { mode: "on", effort: "ultra" } }));
     expect(badEffort).toMatchObject({ ok: false, error: { kind: "unsupported-capability" } });
-    const tooLarge = await adapter.request(CLAUDE_OPUS_5_PROFILE, credential, request({ limits: { maxOutputTokens: 128_001, deadlineMs: 5_000 } }));
+    const tooLarge = await adapter.request(CLAUDE_OPUS_5_PROFILE, credentialAuth, request({ limits: { maxOutputTokens: 128_001, deadlineMs: 5_000 } }));
     expect(tooLarge).toMatchObject({ ok: false, error: { kind: "unsupported-capability" } });
     expect(send).not.toHaveBeenCalled();
   });
@@ -56,7 +57,7 @@ describe("Anthropic adapter", () => {
       },
     };
     const adapter = new AnthropicAdapter(transport);
-    const outcome = await adapter.request(CLAUDE_OPUS_5_PROFILE, credential, request());
+    const outcome = await adapter.request(CLAUDE_OPUS_5_PROFILE, credentialAuth, request());
     expect(outcome).toMatchObject({ ok: true, value: { payload: { items: [] }, usage: { providerRequests: { measured: true, value: 1 } } } });
     expect(calls).toBe(1);
 
@@ -67,7 +68,7 @@ describe("Anthropic adapter", () => {
         return { ...anthropicSse({}, { toolName: "opaque_schema" }), body: "data: {!}\n\n" };
       },
     });
-    expect(await malformedAdapter.request(CLAUDE_OPUS_5_PROFILE, credential, request()))
+    expect(await malformedAdapter.request(CLAUDE_OPUS_5_PROFILE, credentialAuth, request()))
       .toMatchObject({ ok: false, error: { kind: "malformed-syntax" } });
     expect(calls).toBe(1);
   });
@@ -82,13 +83,13 @@ describe("Anthropic adapter", () => {
     };
     const adapter = new AnthropicAdapter(blocking);
     const controller = new AbortController();
-    const cancelled = adapter.request(CLAUDE_OPUS_5_PROFILE, credential, request({ signal: controller.signal }));
+    const cancelled = adapter.request(CLAUDE_OPUS_5_PROFILE, credentialAuth, request({ signal: controller.signal }));
     controller.abort();
     expect(await cancelled).toMatchObject({ ok: false, error: { kind: "cancelled" } });
     expect(calls).toBe(1);
 
     calls = 0;
-    const timedOut = await adapter.request(CLAUDE_OPUS_5_PROFILE, credential, request({ limits: { maxOutputTokens: 100, deadlineMs: 5 } }));
+    const timedOut = await adapter.request(CLAUDE_OPUS_5_PROFILE, credentialAuth, request({ limits: { maxOutputTokens: 100, deadlineMs: 5 } }));
     expect(timedOut).toMatchObject({ ok: false, error: { kind: "timeout" } });
     expect(calls).toBe(1);
   });
@@ -110,10 +111,10 @@ describe("Anthropic adapter", () => {
     });
     const withWorkspace = await adapter.request(
       CLAUDE_OPUS_5_PROFILE,
-      { ...credential, attributes: { workspaceId: "wrkspc_TEST123" } },
+      { kind: "credential", credential: { ...credential, attributes: { workspaceId: "wrkspc_TEST123" } } },
       request(),
     );
-    const withoutWorkspace = await adapter.request(CLAUDE_OPUS_5_PROFILE, credential, request());
+    const withoutWorkspace = await adapter.request(CLAUDE_OPUS_5_PROFILE, credentialAuth, request());
     expect(withWorkspace.ok).toBe(true);
     expect(withoutWorkspace.ok).toBe(true);
     expect(captured[0]?.["anthropic-workspace-id"]).toBe("wrkspc_TEST123");
@@ -126,7 +127,7 @@ describe("Anthropic adapter", () => {
     const adapter = new AnthropicAdapter({ send } as AnthropicTransport);
     const outcome = await adapter.request(
       CLAUDE_OPUS_5_PROFILE,
-      { ...credential, attributes: { workspaceId: "workspace-not-valid" } },
+      { kind: "credential", credential: { ...credential, attributes: { workspaceId: "workspace-not-valid" } } },
       request(),
     );
     expect(outcome).toMatchObject({ ok: false, error: { kind: "auth", transportRetryable: false } });

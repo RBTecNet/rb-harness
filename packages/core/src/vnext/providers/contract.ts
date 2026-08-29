@@ -63,6 +63,22 @@ export interface CanonicalSemanticResponse {
   readonly transport: TransportTelemetry;
 }
 
+/** Provider-neutral protocol observations used only to re-derive conformance. */
+export interface ProviderRuntimeObservation {
+  readonly numTurns?: number;
+  readonly assistantMessageIds: readonly string[];
+  readonly modelIds: readonly string[];
+  readonly declaredTools: readonly string[];
+  readonly usedTools: readonly string[];
+  readonly mcpServers: readonly string[];
+  readonly resultSubtype?: string;
+  readonly structuredOutputPresent: boolean;
+  readonly subagentsSpawned?: number;
+  readonly streamComplete: boolean;
+  readonly treeQuiescent: boolean;
+  readonly treeVerified: boolean;
+}
+
 export type ProviderErrorKind =
   | "auth"
   | "rate-limit"
@@ -90,15 +106,26 @@ export type StructuredOutputMechanism =
   | "strict-json-schema"
   | "json-schema"
   | "forced-tool-argument"
+  | "claude-code-json-schema"
   | "json-mode"
   | "none";
 
 export type ConformanceTier = "SUPPORTED" | "SUPPORTED_WITH_NORMALIZATION" | "UNSUPPORTED";
 
-export type ProviderTransportId = "direct-api";
+export type ProviderTransportId = "direct-api" | "claude-code-cli";
+
+/**
+ * Whether underlying provider/model requests are authoritatively observable.
+ * Harness-owned transport invocations remain bounded independently of this capability.
+ */
+export type RequestAccounting = "exact" | "opaque";
+
+export function isRequestAccounting(value: unknown): value is RequestAccounting {
+  return value === "exact" || value === "opaque";
+}
 
 export function isProviderTransportId(value: unknown): value is ProviderTransportId {
-  return value === "direct-api";
+  return value === "direct-api" || value === "claude-code-cli";
 }
 
 export interface ConformanceState {
@@ -115,8 +142,12 @@ export interface ModelProfile {
   readonly id: string;
   readonly family: string;
   readonly transport: ProviderTransportId;
+  readonly requestAccounting: RequestAccounting;
   readonly modelId: string;
   readonly label: string;
+  readonly runtime:
+    | { readonly kind: "built-in" }
+    | { readonly kind: "external-executable"; readonly versionPolicy: "exact-recorded" };
   readonly structuredOutput: StructuredOutputMechanism;
   readonly strictSchema: boolean;
   readonly toolCalling: boolean;
@@ -149,13 +180,24 @@ export interface ResolvedProviderCredential {
   readonly attributes: Readonly<Record<string, string>>;
 }
 
+export type ResolvedProviderAuth =
+  | {
+      readonly kind: "credential";
+      readonly credential: ResolvedProviderCredential;
+    }
+  | {
+      readonly kind: "ambient-session";
+      readonly id: string;
+    };
+
 export interface ProviderAdapter {
   readonly family: string;
+  readonly transport: ProviderTransportId;
   readonly profiles: readonly ModelProfile[];
   checkCapabilities(profile: ModelProfile, request: SemanticRequest): ProviderOutcome<true>;
   request(
     profile: ModelProfile,
-    credential: ResolvedProviderCredential,
+    auth: ResolvedProviderAuth,
     request: SemanticRequest,
   ): Promise<ProviderOutcome<CanonicalSemanticResponse>>;
   /** Offline protocol replay. Implementations must not perform transport here. */
@@ -164,4 +206,6 @@ export interface ProviderAdapter {
     request: SemanticRequest,
     raw: unknown,
   ): ProviderOutcome<CanonicalSemanticResponse>;
+  /** Offline-only protocol observation. It must not perform transport. */
+  observeRuntime?(raw: unknown): ProviderRuntimeObservation | undefined;
 }

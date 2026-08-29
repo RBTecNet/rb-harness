@@ -4,6 +4,7 @@ import {
   type ModelProfile,
   type ProviderAdapter,
   type ProviderOutcome,
+  type ResolvedProviderAuth,
   type ResolvedProviderCredential,
   type SemanticRequest,
 } from "../contract.js";
@@ -141,9 +142,10 @@ export function anthropicRequestBody(profile: ModelProfile, request: SemanticReq
 
 export class AnthropicAdapter implements ProviderAdapter {
   readonly family = "anthropic";
+  readonly transport = "direct-api" as const;
   readonly profiles = ANTHROPIC_PROFILES;
 
-  constructor(private readonly transport: AnthropicTransport = new FetchAnthropicTransport()) {}
+  constructor(private readonly transportClient: AnthropicTransport = new FetchAnthropicTransport()) {}
 
   checkCapabilities(profile: ModelProfile, request: SemanticRequest): ProviderOutcome<true> {
     return preflightAnthropic(profile, request);
@@ -197,11 +199,15 @@ export class AnthropicAdapter implements ProviderAdapter {
 
   async request(
     profile: ModelProfile,
-    credential: ResolvedProviderCredential,
+    auth: ResolvedProviderAuth,
     request: SemanticRequest,
   ): Promise<ProviderOutcome<import("../contract.js").CanonicalSemanticResponse>> {
     const preflight = preflightAnthropic(profile, request);
     if (!preflight.ok) return preflight;
+    if (auth.kind !== "credential") {
+      return { ok: false, error: { kind: "auth", message: "Anthropic direct API requires a resolved credential", transportRetryable: false } };
+    }
+    const credential = auth.credential;
     const workspace = workspaceHeaders(credential);
     if (!workspace.ok) return workspace;
     if (request.signal.aborted) {
@@ -218,7 +224,7 @@ export class AnthropicAdapter implements ProviderAdapter {
     }, request.limits.deadlineMs);
 
     try {
-      const raw = await this.transport.send({
+      const raw = await this.transportClient.send({
         endpoint: ANTHROPIC_MESSAGES_ENDPOINT,
         headers: {
           "content-type": "application/json",

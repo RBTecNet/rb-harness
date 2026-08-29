@@ -60,7 +60,7 @@ async function smoke(
   const started = Date.now();
   let cancelTimer: ReturnType<typeof setTimeout> | undefined;
   if (kind === "cancelled") cancelTimer = setTimeout(() => controller.abort(new DOMException("conformance cancellation", "AbortError")), 50);
-  const outcome = await adapter.request(profile, credential, request);
+  const outcome = await adapter.request(profile, { kind: "credential", credential }, request);
   if (cancelTimer) clearTimeout(cancelTimer);
   const durationMs = Date.now() - started;
   const passed = !outcome.ok && outcome.error.kind === kind && durationMs < 5_000 && transport.calls === 1;
@@ -86,7 +86,7 @@ export async function recordAnthropicConformance(
   for (const [key, createRequest] of Object.entries(LIVE_RECORDING_REQUESTS)) {
     const transport = new CapturingTransport();
     const adapter = new AnthropicAdapter(transport);
-    const outcome = await adapter.request(profile, credential, createRequest());
+    const outcome = await adapter.request(profile, { kind: "credential", credential }, createRequest());
     providerRequests += transport.calls;
     if (!outcome.ok) throw new Error(`live conformance '${key}' failed: ${outcome.error.kind}: ${outcome.error.message}`);
     if (!transport.lastRaw) throw new Error(`live conformance '${key}' captured no raw response`);
@@ -133,6 +133,7 @@ export async function recordAnthropicConformance(
     producer: "rb-harness-conformance-runner",
     profileId: profile.id,
     transport: profile.transport,
+    requestAccounting: profile.requestAccounting,
     suiteVersion: CONFORMANCE_SUITE_VERSION,
     ...identity,
     rawResponses,
