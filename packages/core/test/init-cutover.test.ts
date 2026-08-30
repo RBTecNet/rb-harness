@@ -37,6 +37,12 @@ describe("canonical Init CLI routing", () => {
     expect(classifyRootCliArgs(["--init", "--project", "."], true)).toEqual({
       kind: "init-direct", argv: ["--project", "."],
     });
+    expect(classifyRootCliArgs(["--init", "--stage", "project-description", "request"], true)).toEqual({
+      kind: "init-direct", argv: ["--stage", "project-description", "request"],
+    });
+    expect(classifyRootCliArgs(["--stage", "project-description", "--init", "request"], true)).toEqual({
+      kind: "init-direct", argv: ["--stage", "project-description", "request"],
+    });
     expect(classifyRootCliArgs(["--init", "--help"], true)).toEqual({ kind: "init-direct", argv: ["--help"] });
     expect(classifyRootCliArgs(["init", "request"], true)).toEqual({ kind: "command" });
   });

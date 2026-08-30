@@ -180,7 +180,7 @@ function sourceIsVerified(source: DeterminationSource, model: InitProjectModel):
 }
 
 function protectedSourceIsVerified(path: ProtectedPath, model: InitProjectModel): boolean {
-  if (path.source.kind === "built-in") return [".rb", ".rb-harness", ".git"].includes(path.path);
+  if (path.source.kind === "built-in") return [".rb", ".rb-harness", ".git", ".spec/init"].includes(path.path);
   if (path.source.kind === "request") return requestEvidenceIsVerified(model.core.provenance.originalRequest, path.source.evidence);
   return path.source.kind === "user-answer"
     ? userAnswerIsVerified(model.core.provenance.answers, path.source.questionKey)
@@ -291,7 +291,7 @@ export function validate(model: InitProjectModel): ValidationOutcome {
       if (!projectRelativePathIsSafe(path)) add(findings, "I-06", `Unsafe owned path: ${path}`, `${taskPointer}/ownedPaths/${pathIndex}`, "fatal", [path]);
       const intersections = model.core.protectedPaths.filter((protectedPath) => pathsIntersect(path, protectedPath.path));
       if (intersections.length) add(findings, "I-07", `Owned path intersects protected authority: ${path}`, `${taskPointer}/ownedPaths/${pathIndex}`, "fatal", intersections.map((entry) => entry.path));
-      if ([".rb", ".rb-harness", ".git"].some((control) => pathsIntersect(path, control))) {
+      if ([".rb", ".rb-harness", ".git", ".spec/init"].some((control) => pathsIntersect(path, control))) {
         add(findings, "I-08", `Owned path mutates the control plane: ${path}`, `${taskPointer}/ownedPaths/${pathIndex}`, "fatal", [path]);
       }
     }
@@ -369,7 +369,7 @@ export function validate(model: InitProjectModel): ValidationOutcome {
     }
   }
   const protectedRoots = new Set(model.core.protectedPaths.map((entry) => entry.path));
-  for (const required of [".rb", ".rb-harness", ".git"]) {
+  for (const required of [".rb", ".rb-harness", ".git", ".spec/init"]) {
     if (!protectedRoots.has(required as RelPath)) add(findings, "I-17", `Missing built-in protected path ${required}`, "/core/protectedPaths", "fatal", [required]);
   }
   const provenance = model.core.provenance;

@@ -89,6 +89,10 @@ describe("vNext semantic validation closure", () => {
     [".rb-harness/state.json", false],
     [".git/hooks/pre-commit", false],
     [".rb/private/subtree", false],
+    [".spec/init", false],
+    [".spec/init/project-description.md", false],
+    [".spec/init/**/*.md", false],
+    [".spec/product-notes.md", true],
     ["src/hello.js", true],
   ])("validates owned path %s", (path, expected) => {
     expect(validate(canonicalize(withFirstPath(path))).valid).toBe(expected);
@@ -268,6 +272,18 @@ describe("vNext semantic validation closure", () => {
     expect(userAnswerIsVerified({ "runtime-choice": "Node.js" }, "other-choice")).toBe(false);
     expect(acceptedRecommendationIsVerified({ "runtime-choice": { value: "Node.js", acceptanceMode: "blank-interactive" } }, "runtime-choice")).toBe(true);
     expect(acceptedRecommendationIsVerified({}, "runtime-choice")).toBe(false);
+  });
+
+  it("keeps canonical request provenance at the frozen contiguous-evidence contract", () => {
+    const semantic = structuredClone(HELLO_SEMANTIC_FIXTURE) as any;
+    semantic.determinations[1].statement = "The project ships an automated test suite.";
+    const result = resolveInitProject(semantic, {
+      originalRequest: HELLO_REQUEST,
+      runId: "frozen-request-evidence",
+      generatedAt: "2026-08-28T12:00:00.000Z",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(validate(result.value).valid).toBe(true);
   });
 
   it("accepts only Core-verified recommendation authority whose selected value matches the determination", () => {

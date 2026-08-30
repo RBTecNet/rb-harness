@@ -15,12 +15,20 @@ export interface TraceabilityConstraint {
   source: string;
 }
 
-export const BUILT_IN_PROTECTED_PATH_CONSTRAINTS: readonly ProtectedPathConstraint[] = [{
-  kind: "protected-path",
-  id: "RB-CONTROL-PLANE",
-  path: ".rb",
-  source: "harness-contract",
-}];
+export const BUILT_IN_PROTECTED_PATH_CONSTRAINTS: readonly ProtectedPathConstraint[] = [
+  {
+    kind: "protected-path",
+    id: "RB-CONTROL-PLANE",
+    path: ".rb",
+    source: "harness-contract",
+  },
+  {
+    kind: "protected-path",
+    id: "RB-PROGRESSIVE-INIT-SPEC",
+    path: ".spec/init",
+    source: "harness-contract",
+  },
+];
 
 const MUTATION = "(?:modify|modifying|change|changing|edit|editing|write(?:\\s+to)?|writing(?:\\s+to)?|create|delete|remove|replace|overwrite|patch|regenerate|sync|publish|mutate|"
   + "modificar|modifique|alterar|altere|editar|edite|mexer(?:\\s+em)?|mexa(?:\\s+em)?|tocar(?:\\s+em)?|toque(?:\\s+em)?|"

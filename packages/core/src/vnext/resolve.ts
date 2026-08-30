@@ -236,6 +236,7 @@ export function resolveInitProject(
     { path: ".rb" as RelPath, reason: "RB artifact control plane", source: { kind: "built-in" } as const },
     { path: ".rb-harness" as RelPath, reason: "RB Harness orchestration state", source: { kind: "built-in" } as const },
     { path: ".git" as RelPath, reason: "Version-control internals", source: { kind: "built-in" } as const },
+    { path: ".spec/init" as RelPath, reason: "Progressive Init developer-owned specification", source: { kind: "built-in" } as const },
   ];
   for (const [index, entry] of input.protectedPaths.entries()) {
     const source = verifiedSource(entry.source, context, `/protectedPaths/${index}/source`, findings);

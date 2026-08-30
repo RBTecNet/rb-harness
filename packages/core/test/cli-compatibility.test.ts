@@ -54,7 +54,7 @@ describe("public CLI compatibility", () => {
   it("keeps the workflow, wizard, login, provider, and dashboard entry points", () => {
     const current = harnessCommandSurface();
     expect(current["rb-harness init"]).toEqual(expect.arrayContaining([
-      "--project", "--profile", "--file", "--credential", "--headless", "--timeout", "--dashboard",
+      "--project", "--profile", "--file", "--credential", "--headless", "--timeout", "--dashboard", "--stage",
     ]));
     for (const command of ["ai-context", "plan", "evolve", "review"]) {
       expect(current[`rb-harness ${command}`]).toEqual(expect.arrayContaining([

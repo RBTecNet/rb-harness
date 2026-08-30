@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  BUILT_IN_PROTECTED_PATH_CONSTRAINTS,
   authorityConstraintsFromState,
   changeExplicitlyModifiesProtectedPath,
   protectedPathConstraintsFromArtifact,
@@ -38,6 +39,28 @@ function state(request: string, rawAnswer = "", normalizedDecision?: string): Ha
 }
 
 describe("protected path authority", () => {
+  it.each([
+    ".spec/init",
+    ".spec/init/project-description.md",
+    ".spec/init/**",
+    ".spec/*/project-description.md",
+  ])("rejects execution ownership intersecting the Progressive Init specification: %s", async (scope) => {
+    const issues = validateAuthorityConstraints(
+      await executionWithScope(`\`${scope}\``),
+      BUILT_IN_PROTECTED_PATH_CONSTRAINTS,
+      ".rb/init/PHASES.md",
+    );
+    expect(issues.map((issue) => issue.code)).toContain("authority.protected-path.scope");
+  });
+
+  it("keeps unrelated .spec paths outside the narrow Progressive Init protection", async () => {
+    expect(validateAuthorityConstraints(
+      await executionWithScope("`.spec/product-notes.md`"),
+      BUILT_IN_PROTECTED_PATH_CONSTRAINTS,
+      ".rb/init/PHASES.md",
+    )).toEqual([]);
+  });
+
   it("fails closed when a bounded Scope glob can own a descendant of a protected path", () => {
     expect(scopeTokenIntersectsProtectedPath("**/*.md", ".rb")).toBe(true);
     expect(scopeTokenIntersectsProtectedPath(".r*/**", ".rb")).toBe(true);

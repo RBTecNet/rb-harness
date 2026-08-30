@@ -60,6 +60,8 @@ import type { ArtifactRecord, ArtifactStatus, ValidationIssue } from "./types.js
 import type { HarnessWorkflow, ProviderConfiguration } from "./standalone-types.js";
 import { runVnextConformanceCommand } from "./vnext/providers/conformance/cli.js";
 import { runInitCommand, type InitCliOptions, type InitCliPresentation } from "./vnext/init-cli.js";
+import { runProgressiveInitCommand, type ProgressiveInitCliOptions } from "./vnext/progressive-init/cli.js";
+import { parseProgressiveInitStage } from "./vnext/progressive-init/stages.js";
 import { listProviderProfiles } from "./vnext/providers/registry.js";
 
 const program = new Command();
@@ -628,7 +630,7 @@ function configureWorkflowCommand(command: Command, workflow: HarnessWorkflow): 
 }
 
 program.command("init")
-  .description("Generate a Ralph-ready project plan through the canonical semantic Init engine")
+  .description("Run canonical Init, or one explicitly selected Progressive Init stage")
   .argument("[request...]", "project request text")
   .option("--profile <profile-id>", "exact supported provider/transport/model profile")
   .option("--file <path>", "read request text from a file")
@@ -636,10 +638,27 @@ program.command("init")
   .option("--project <path>", "project root", ".")
   .option("--headless", "accept generated recommendations through non-interactive policy")
   .option("--timeout <seconds>", "deadline for each provider transport invocation", "120")
+  .option("--stage <stage>", `run exactly one Progressive Init stage: project-description, user-stories, database-schema, or project-phases`, parseProgressiveInitStage)
   .option("--dashboard", "show the canonical Init dashboard")
   .action(async (request: string[], options: {
-    profile?: string; file?: string; credential?: string; project: string; headless?: boolean; timeout: string; dashboard?: boolean;
+    profile?: string; file?: string; credential?: string; project: string; headless?: boolean; timeout: string; dashboard?: boolean; stage?: ReturnType<typeof parseProgressiveInitStage>;
   }) => {
+    const dashboard = Boolean(options.dashboard || program.opts<{ dashboard?: boolean }>().dashboard);
+    if (options.stage) {
+      if (dashboard) throw new Error("PROGRESSIVE_INIT_DASHBOARD_NOT_IMPLEMENTED_PHASE_1: --dashboard cannot be combined with --stage");
+      const progressiveOptions: ProgressiveInitCliOptions = {
+        requestParts: request,
+        requestFile: options.file,
+        profileId: options.profile,
+        credential: options.credential,
+        projectRoot: options.project,
+        headless: Boolean(options.headless),
+        deadlineSeconds: Number(options.timeout),
+        stage: options.stage,
+      };
+      await runProgressiveInitCommand(progressiveOptions);
+      return;
+    }
     const missing = missingInitDirectInputs({ profile: options.profile, requestParts: request, requestFile: options.file });
     if (missing.length) throw new Error(formatIncompleteInitDirectMode(missing));
     await runCanonicalInit({
@@ -650,7 +669,7 @@ program.command("init")
       projectRoot: options.project,
       headless: Boolean(options.headless),
       deadlineSeconds: Number(options.timeout),
-      dashboard: Boolean(options.dashboard),
+      dashboard,
     });
   });
 configureWorkflowCommand(program.command("ai-context").description("Reverse-engineer an implemented project into AS IS context"), "ai-context")

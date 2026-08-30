@@ -7,7 +7,7 @@ export type RootCliRoute =
 
 const PRESENTATION_ARGUMENTS = new Set(["--dashboard", "--no-splash"]);
 const INIT_OPERATION_ARGUMENTS = new Set([
-  "--project", "--profile", "--credential", "--file", "--headless", "--timeout",
+  "--project", "--profile", "--credential", "--file", "--headless", "--timeout", "--stage",
 ]);
 
 /**

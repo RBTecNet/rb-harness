@@ -36,9 +36,9 @@ used local fixtures and offline conformance-record replay only.
 - Therefore HEAD contains the frozen, committed Phase 3.5 implementation and no
   later commit.
 
-### 1.2 Canonical Init cutover and current recovery continuation
+### 1.2 Canonical Init cutover, recovery freeze, and current continuation
 
-Current continuation state as of the 2026-08-30 recovery-budget refresh:
+Current continuation state as of the 2026-08-30 Progressive Init Phase 1 work:
 
 - Frozen Phase 3.5 commit:
   `0bbe610f623c6417d30ed2d57f019bb95dba2404`.
@@ -48,13 +48,15 @@ Current continuation state as of the 2026-08-30 recovery-budget refresh:
   3.5 commit.
 - The canonical Init cutover was committed and pushed before the dedicated
   recovery-budget branch was created.
-- Actual current branch: `feat/recovery-budget-2-3-5-7`.
-- Recovery branch base and current HEAD:
-  `744305e52012462770b2a9815fc8821a64102954`.
-- The bounded recovery-budget implementation is present as uncommitted
-  worktree changes on that dedicated branch. No recovery-budget commit hash
-  exists, and no recovery-budget commit or push may occur until explicitly
-  authorized.
+- Recovery-budget branch: `feat/recovery-budget-2-3-5-7`.
+- Frozen and pushed recovery-budget commit:
+  `5a3481ee74f00c8a7e1805f49330c1220803505a`, whose parent is the canonical
+  Init cutover commit.
+- Current Progressive Init foundation branch: `feat/progressive-init-foundation`.
+- Progressive Init foundation base/current HEAD before its uncommitted work:
+  `5a3481ee74f00c8a7e1805f49330c1220803505a`.
+- Progressive Init Phase 1 is implemented as uncommitted worktree changes on
+  that dedicated branch. No Phase 1 implementation commit hash exists.
 - The source/package/plugin/runtime version remains `0.6.2`; the recovery
   change does not include a release/version bump.
 
@@ -152,7 +154,10 @@ requires it.
 Current product boundary:
 
 - public `rb-harness vnext init` is removed;
-- public `rb-harness init` owns canonical semantic Init;
+- during Progressive construction, public bare `rb-harness init` continues to
+  own canonical semantic Init;
+- only explicit `rb-harness init --stage <stage>` (including the equivalent
+  root-selector form) enters Progressive focused execution;
 - the former legacy semantic Init planner is retired from public Init;
 - the independently published headless contracts remain supported;
 - `vnext conformance` remains an internal/laboratory name.
@@ -217,6 +222,13 @@ The canonical Init operational inputs are exactly:
 - `--timeout <seconds>` (default `120`, valid `1..900`);
 - `--dashboard` as its presentation option.
 
+Progressive Phase 1 adds `--stage <stage>` as an explicit focused-operation
+selector. Its presence is the only Phase-1 routing discriminator. Repository
+state, `.spec/init` existence, request content, argument order, profile, TTY,
+and freshness never switch engines. `--stage` cannot be combined with
+`--dashboard` until a truthful Progressive dashboard exists; that combination
+fails deterministically before semantic execution.
+
 For `--init` routing, `--project`, `--profile`, `--credential`, `--file`,
 `--headless`, `--timeout`, help, or positional request text imply direct
 configuration mode. `--profile` and either request text or `--file` are
@@ -266,7 +278,7 @@ packages/core/src/cli.ts
   runHarnessCli()
     -> classifyRootCliArgs() when root selectors are present
     -> Commander `init` action
-    -> runCanonicalInit()
+    -> no `--stage`: runCanonicalInit()
     -> runInitCommand()
     -> runSemanticInit()
     -> SemanticGateway.generate("intent")
@@ -274,6 +286,14 @@ packages/core/src/cli.ts
     -> SemanticGateway.generate("work")
     -> closeInitProject()
     -> publishStagedRb()
+```
+
+The temporary Phase-1 sibling branch is deliberately narrow:
+
+```text
+Commander `init` action
+  -> explicit `--stage`: runProgressiveInitCommand() -> runProgressiveInit()
+  -> otherwise: exact canonical chain above
 ```
 
 Wizard paths converge before semantic execution:
@@ -410,6 +430,22 @@ Authority semantics:
 - accepted-recommendation determinations/protected paths must equal the
   verified selected value.
 
+Progressive project-description adds a stricter live-to-persisted boundary.
+Provider/model output cannot author `developer` authority. Live request and
+interview authority is independently verified by Core before acceptance;
+Progressive request authority requires a meaningful contiguous request span
+whose presentation-normalized text exactly equals the request-backed
+determination statement. This exact binding is Progressive-specific: canonical
+Init request provenance remains at its frozen pre-Progressive behavior.
+
+Once a valid live project description crosses the persistence boundary,
+`.spec/init/project-description.md` renders every determination as `developer`
+authority because the document is developer-owned semantic state for future
+runs. Its strict parser honors only `developer` determination sources. Editable
+Markdown therefore cannot manufacture request, `user-answer`,
+`accepted-recommendation`, or `model-default` history. `.rb-harness` metadata is
+never used to restore or manufacture authority.
+
 `VnextInitRunState`, question history, attempts, counters, recovery audits, and
 rejected snippets are orchestration/debug evidence only. They are not fields of
 `InitProjectModel` and are never a substitute for request/user/accepted-
@@ -533,8 +569,10 @@ Rejected forms include:
 - project-wide unbounded `*`, `**`, or `**/*`.
 
 Independent Core rules also reject intersections with `.rb`, `.rb-harness`,
-`.git`, and any authoritative protected path. Provider schema, work decoder,
-and Core all use the same syntax authority and fail closed. Current regressions
+`.git`, the narrowly protected developer-owned `.spec/init` subtree, and any
+authoritative protected path. Unrelated `.spec` paths remain eligible for task
+ownership. Provider schema, work decoder, Core, and the existing execution-plan
+protected-path intersection machinery fail closed. Current regressions
 prove valid `migrations`, `src/domain/destinations`, `tests`, `src/**/*.ts`, and
 `package.json`, and reject their trailing-slash forms plus unsafe traversal and
 global globs.
@@ -1090,33 +1128,71 @@ Publication semantics:
 No `OPERATIONS.json`, free-form extra documentation, run state, or repair report
 is published by canonical Init.
 
-## 29. Progressive Init — next feature after budget change
+## 29. Progressive Init Phase 1 foundation
 
-**PLANNED / NOT IMPLEMENTED**
+**PHASE 1 IMPLEMENTED / CURRENTLY UNCOMMITTED**
 
-No current canonical Init source implements the following staged workflow. The
-future concept has four progressive specification stages:
+The code-owned closed vocabulary and canonical order are:
 
 1. `project-description`;
 2. `user-stories`;
 3. `database-schema`;
 4. `project-phases`.
 
-Future design intent:
+Implemented Phase 1 execution contract:
 
-- explicit stage invocation is supported;
-- Init without an explicit stage may select the next incomplete stage;
-- automatic execution never silently repeats a completed fresh stage;
-- explicit invocation may rerun/update a stage;
-- stable IDs/numbers survive reruns;
-- manual developer edits are authority;
-- deterministic upstream content hashes track freshness;
-- `database-schema` may be not-applicable for a project without persistence;
-- `project-phases` compiles to the **same** canonical Project Plan/`.rb`
-  closure described in section 28;
-- `.spec/init` is developer-owned while `.rb` remains Ralph execution output;
-- each stage gets workflow-specific IR over shared primitives;
-- do not create a universal mega semantic model.
+- the automatic coordinator selects the earliest incomplete or stale stage and
+  remains directly testable internally, but does not yet own bare public Init;
+- `rb-harness init`, `rb-harness init <request>`, profile-bearing bare Init,
+  `rb-harness --init`, and root-wizard Init continue through canonical
+  `intent -> interview -> work -> closeInitProject() -> .rb` publication;
+- `rb-harness init --stage <stage>` runs only the selected stage after strict
+  prerequisite classification and never advances automatically; the supported
+  root-selector equivalent is `rb-harness --init --stage <stage>`;
+- `--stage ... --dashboard` fails before semantic execution because the
+  canonical intent/work dashboard does not represent Progressive stage state;
+- stage presentation and interview context identify the active stage before
+  semantic questions;
+- `.spec/init/project-description.md` is the developer-owned semantic source,
+  parsed and rendered through the strict `rb-project-description/v1` contract;
+- bounded secret-safe repository discovery and accepted stage decisions feed a
+  deterministic authoritative-input freshness hash;
+- valid developer edits are reparsed as current typed authority; concurrent or
+  structurally ambiguous edits fail closed;
+- provider/model output cannot author `developer` authority under any
+  materiality or rigidity; the decoder rejects that source even if provider
+  schema enforcement is bypassed;
+- genuine live request, user-answer, and accepted-recommendation authority is
+  independently verified by Core before the semantic result is accepted;
+- live request authority uses exact presentation-normalized binding between a
+  meaningful verified request span and its determination statement, without
+  lexical-overlap or natural-language entailment heuristics;
+- persistence truthfully converts every accepted determination to `developer`
+  authority; the strict Markdown parser accepts no historical live source
+  labels, while valid developer edits remain typed semantic authority;
+- every relevant accepted determination contributes its semantic content—not
+  a historical authority label—to the canonical freshness projection;
+- `.spec/init` is protected developer-owned state: canonical and future
+  Progressive executable plans cannot own that path, a child, or an
+  intersecting bounded glob, while unrelated `.spec` paths remain allowed;
+- `.rb-harness/progressive-init` contains status/audit metadata only and is not
+  read back as semantic authority;
+- Phase 1 never publishes to or changes `.rb`;
+- project-description correction regenerates one complete stage candidate and
+  is isolated from canonical `intent|work` recovery accounting.
+
+Only `project-description` semantic generation is implemented in Phase 1.
+`user-stories`, `database-schema` (including not-applicable), `project-phases`,
+and Progressive-to-canonical Ralph projection remain **PLANNED / NOT
+IMPLEMENTED**. The coordinator recognizes their status and prerequisites but
+terminates at an explicit Phase 1 boundary without placeholders. The canonical
+Ralph closure described in section 28 remains untouched.
+
+This is a temporary integration boundary, not the final approved UX. After all
+four Progressive stages and final Ralph convergence are implemented, a later
+explicit cutover will make bare `rb-harness init` invoke automatic Progressive
+continuation at the earliest incomplete/stale stage. No hidden public automatic
+mode flag is introduced during Phase 1.
 
 Do not implement any Progressive Init element as part of recovery-budget work.
 
@@ -1325,9 +1401,8 @@ structural-correction machinery and must not be conflated with canonical Init.
    `0bbe610f623c6417d30ed2d57f019bb95dba2404`.
 4. Do **not** repeat completed dogfood remediation or redesign the dashboard or
    capybara.
-5. The bounded recovery-tolerance increase is implemented but intentionally
-   uncommitted on `feat/recovery-budget-2-3-5-7`, based on the exact cutover
-   commit. Its production envelope is:
+5. The bounded recovery-tolerance increase is frozen and pushed at
+   `5a3481ee74f00c8a7e1805f49330c1220803505a`. Its production envelope is:
 
    - corrections per slice: `2`;
    - corrections per run: `3`;
@@ -1343,13 +1418,16 @@ structural-correction machinery and must not be conflated with canonical Init.
 7. Keep the CJS conformance-replay gap
    and `_provider-run` fixture discrepancy separate unless the operator expands
    scope.
-8. Progressive Init remains **PLANNED / NOT IMPLEMENTED** and is the next larger
-   feature only after this recovery-budget branch is frozen/committed. It must
-   use its own dedicated branch.
+8. Progressive Init Phase 1 is implemented but uncommitted on
+   `feat/progressive-init-foundation`, based exactly on the recovery freeze.
+   Only project-description semantics exist. Preserve the internal automatic
+   coordinator, public explicit focused `--stage` route, canonical bare-Init
+   bridge, strict protected developer-owned `.spec/init` source, and explicit
+   not-implemented boundary for the remaining stages. The approved future
+   cutover remains automatic Progressive bare Init after all four stages and
+   Ralph convergence are ready.
 9. Keep provider expansion as separate work.
 
-The exact next action is: **freeze and commit the verified recovery-budget
-branch only when explicitly authorized, keeping unrelated `package.json` and
-`AGENTS.md` work outside that commit.** After that, Progressive Init is the next
-larger feature; no implementation commit hash exists yet for the intentionally
-uncommitted recovery-budget branch.
+The exact next action is: **review and freeze Progressive Init Phase 1 only when
+explicitly authorized, without absorbing unrelated `package.json` or
+`AGENTS.md` state.** No Progressive Init implementation commit hash exists yet.
