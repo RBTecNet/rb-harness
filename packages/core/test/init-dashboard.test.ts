@@ -219,8 +219,13 @@ describe("canonical Init dashboard presentation", () => {
   });
 
   it("shows real correction counts and opaque accounting without fabricating zero", () => {
-    const output = render(SCREENSHOT_COLUMNS, SCREENSHOT_ROWS, { correctiveRegenerations: 1, providerRequests: "não medido" });
-    expect(output).toMatch(/CORREÇÕES[\s\S]*1/);
+    const output = render(SCREENSHOT_COLUMNS, SCREENSHOT_ROWS, { correctiveRegenerations: 3, providerRequests: "não medido" });
+    const rendered = lines(output);
+    const labelLineIndex = rendered.findIndex((line) => line.includes("CORREÇÕES"));
+    expect(labelLineIndex).toBeGreaterThanOrEqual(0);
+    const correctionsColumn = rendered[labelLineIndex]!.split("┊").findIndex((cell) => cell.includes("CORREÇÕES"));
+    expect(correctionsColumn).toBeGreaterThanOrEqual(0);
+    expect(rendered[labelLineIndex + 1]!.split("┊")[correctionsColumn]).toMatch(/^\s*↺ 3\s*$/);
     expect(output).toContain("não medido");
     expect(output).not.toContain("PROVIDER REQUESTS 0");
     expect(render(SCREENSHOT_COLUMNS, SCREENSHOT_ROWS, { tokens: "não medido" })).toContain("não medido");

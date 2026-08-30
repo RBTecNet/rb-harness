@@ -3,6 +3,7 @@
 <!-- authoritative-continuation-checkpoint: post-phase-3.5-canonical-init-cutover -->
 
 Checkpoint date: 2026-08-29 (America/Sao_Paulo)
+Recovery-budget continuation refresh: 2026-08-30 (America/Sao_Paulo)
 
 This document is the authoritative continuation checkpoint for work after the
 Phase 3.5 freeze and the canonical Init cutover. If an older checkpoint or
@@ -35,31 +36,45 @@ used local fixtures and offline conformance-record replay only.
 - Therefore HEAD contains the frozen, committed Phase 3.5 implementation and no
   later commit.
 
-### 1.2 Current canonical-Init cutover work
+### 1.2 Canonical Init cutover and current recovery continuation
 
-- Actual current branch: `feat/init-cutover-wizard`.
-- Current cutover branch: `feat/init-cutover-wizard`.
-- The branch still points at the Phase 3.5 frozen commit. The canonical-Init
-  cutover, root/Init wizards, routing, dashboard/mascot, documentation,
-  generated plugin bundle, and their tests are **uncommitted worktree
-  changes**. The cutover source/package/plugin/runtime version remains `0.6.2`.
-- An incomplete, unauthorized `1.0.0` sweep was inspected and excluded from the
-  cutover. Files whose only diff was that sweep were restored to their `0.6.2`
-  HEAD state; legitimate canonical-Init changes in
-  `docs/funcionalidades.pt-BR.md` were preserved while its two product-version
-  mentions were restored to `0.6.2`.
-- No commit or push was performed for this checkpoint.
+Current continuation state as of the 2026-08-30 recovery-budget refresh:
 
-The project-local, untracked `AGENTS.md` says work from 2026-08-28 onward should
-be saved on `resgate`. At checkpoint time, `resgate` is already checked out in
-a separate clean worktree at
-`/tmp/rb-harness-field-ownership.k3Amwh/worktree`, points at
-`a6b1d68f2ecd670afa5934d6340b4f3b69909903`, and is divergent from the cutover
-branch. This checkpoint stayed on the explicitly identified cutover branch so
-it could describe and remain beside the uncommitted cutover state without
-discarding, moving, or rewriting either worktree. A later implementation
-session must obey the then-current `AGENTS.md` or obtain an explicit branch
-override; it must not force-move `resgate` or discard either worktree.
+- Frozen Phase 3.5 commit:
+  `0bbe610f623c6417d30ed2d57f019bb95dba2404`.
+- Canonical Init cutover branch: `feat/init-cutover-wizard`.
+- Canonical Init cutover commit:
+  `744305e52012462770b2a9815fc8821a64102954`, whose parent is the frozen Phase
+  3.5 commit.
+- The canonical Init cutover was committed and pushed before the dedicated
+  recovery-budget branch was created.
+- Actual current branch: `feat/recovery-budget-2-3-5-7`.
+- Recovery branch base and current HEAD:
+  `744305e52012462770b2a9815fc8821a64102954`.
+- The bounded recovery-budget implementation is present as uncommitted
+  worktree changes on that dedicated branch. No recovery-budget commit hash
+  exists, and no recovery-budget commit or push may occur until explicitly
+  authorized.
+- The source/package/plugin/runtime version remains `0.6.2`; the recovery
+  change does not include a release/version bump.
+
+**Historical cutover-preparation context:** the original 2026-08-29 checkpoint
+was produced while `feat/init-cutover-wizard` still pointed at the Phase 3.5
+freeze and the canonical Init cutover existed as uncommitted worktree changes.
+The historical statement that no commit or push had been performed applies
+only to that original checkpoint moment, not to the current continuation state.
+Before the cutover commit, an incomplete unauthorized `1.0.0` sweep was
+inspected and excluded: files whose only diff was that sweep were restored to
+their `0.6.2` state, while legitimate canonical-Init documentation changes were
+preserved.
+
+**Historical worktree context:** at the original checkpoint time, the
+project-local untracked `AGENTS.md` directed work to `resgate`, which was
+checked out in a separate clean worktree and divergent from the cutover branch.
+The original checkpoint remained beside the then-uncommitted cutover state
+without discarding or rewriting either worktree. This remains provenance for
+that historical snapshot; current unrelated `package.json` and `AGENTS.md`
+ownership is recorded separately in section 1.3.
 
 ### 1.3 Pre-existing unrelated user worktree state
 
@@ -602,19 +617,22 @@ layout/visibility and “visually prominent in red” still do.
 
 ## 15. Current recovery architecture and budgets
 
-The current source values in `packages/core/src/vnext/gateway.ts` are:
+The current production values are:
 
 | Budget | Current value |
 |---|---:|
-| corrective regenerations per slice | 1 |
-| corrective regenerations per run | 2 |
-| semantic operations per run | 4 |
-| transport invocations per run | 6 |
+| corrective regenerations per slice | 2 |
+| corrective regenerations per run | 3 |
+| semantic operations per run | 5 |
+| transport invocations per run | 7 |
 | transport retries per semantic operation | 1 |
 | transport retries per run | 2 |
 
-These are currently hard-coded guards in `beginOperation()`/`invoke()`, not one
-exported budget object. The proposed increase has **not** been implemented.
+`CANONICAL_INIT_RECOVERY_BUDGET` in
+`packages/core/src/vnext/recovery-budget.ts` is the single production authority
+for all six limits. `packages/core/src/vnext/gateway.ts` consumes that authority
+for semantic corrections, operations, transport invocations, and transport
+retries. There is no public recovery-budget option.
 
 Recovery semantics:
 
@@ -630,18 +648,27 @@ Recovery semantics:
 - never splice documents;
 - never fall back to another provider/profile/transport.
 
+Two complete corrective regenerations in the same slice are allowed. A third
+correction in that slice is forbidden. Across the Init run, a fourth correction
+is forbidden even when a slice still has unused local capacity. Transport
+retries remain independent from semantic corrections and retain their exact
+limits of one retry per semantic operation and two retries per run. No provider,
+profile, model, or transport fallback was added.
+
+Under this envelope, the transport-invocation ceiling is fail-closed defense in
+depth rather than the first binding guard: Harness-owned invocations cannot
+exceed semantic operations plus transport retries (`5 + 2 = 7`). The semantic-
+operation or retry guard therefore terminates an attempted expansion before an
+eighth invocation.
+
 The canonical semantic engine may canonicalize an already decoded Core model,
 but it never repairs missing/invalid model semantics. Recovery is another
 bounded semantic operation for the whole slice.
 
-## 16. Next planned change — recovery budget increase
+## 16. Implemented bounded recovery envelope
 
-**PLANNED / NOT IMPLEMENTED**
-
-This is the first production implementation task for the next session unless
-the operator changes priorities.
-
-Change:
+The recovery-budget branch implements this bounded increase over the canonical
+Init cutover base:
 
 | Budget | From | To |
 |---|---:|---:|
@@ -656,8 +683,7 @@ Transport retry budgets remain unchanged:
 - retries per run: 2.
 
 Rationale: after deterministic Harness defects were remediated, recovery is now
-bounded tolerance for model error. No public `--recovery-budget` knob is
-planned.
+bounded tolerance for model error. No public `--recovery-budget` knob exists.
 
 Maximum intended healthy envelope:
 
@@ -670,9 +696,12 @@ work correction 2
 = 5 semantic operations / 3 corrective regenerations
 ```
 
-Implementation must update guards, terminal diagnostics, run-state evidence,
-and budget regressions without weakening whole-slice recovery or transport
-retry bounds.
+Deterministic scripted-adapter regressions cover zero, one, two, and three total
+corrections; two corrections in the same slice; the maximum healthy envelope;
+per-slice, global, semantic-operation, and transport bounds; second-correction
+evidence; and dashboard rendering of three corrections. Whole-slice recovery,
+run-state authority isolation, rejected-candidate evidence, retry independence,
+fail-closed publication, and provider neutrality remain unchanged.
 
 ## 17. Recovery rule ledger
 
@@ -1291,14 +1320,14 @@ structural-correction machinery and must not be conflated with canonical Init.
 
 1. Read this checkpoint first.
 2. Treat it as authoritative for current post-Phase-3.5/cutover state.
-3. The canonical Init cutover remains uncommitted at HEAD
-   `0bbe610f623c6417d30ed2d57f019bb95dba2404`; with final gates green, commit
-   and push the cutover first when explicitly authorized. Keep `package.json`
-   and `AGENTS.md` outside that commit.
+3. The canonical Init cutover is committed at
+   `744305e52012462770b2a9815fc8821a64102954`, whose Phase 3.5 parent is
+   `0bbe610f623c6417d30ed2d57f019bb95dba2404`.
 4. Do **not** repeat completed dogfood remediation or redesign the dashboard or
    capybara.
-5. After the cutover commit/push, create a separate branch from that exact
-   committed state for the bounded recovery-tolerance change:
+5. The bounded recovery-tolerance increase is implemented but intentionally
+   uncommitted on `feat/recovery-budget-2-3-5-7`, based on the exact cutover
+   commit. Its production envelope is:
 
    - corrections per slice: `2`;
    - corrections per run: `3`;
@@ -1307,20 +1336,20 @@ structural-correction machinery and must not be conflated with canonical Init.
    - transport retry per operation remains `1`;
    - transport retries per run remains `2`.
 
+   Keep `package.json` and `AGENTS.md` outside this work.
 6. Preserve whole-slice regeneration, global rule application, authoritative
-   input hashes, provider neutrality, and fail-closed publication while changing
-   those budgets.
-7. Independently verify the budget change. Keep the CJS conformance-replay gap
+   input hashes, provider neutrality, retry independence, and fail-closed
+   publication in all continuation work.
+7. Keep the CJS conformance-replay gap
    and `_provider-run` fixture discrepancy separate unless the operator expands
    scope.
-8. Progressive Init follows the recovery-budget work on its own dedicated
-   branch.
+8. Progressive Init remains **PLANNED / NOT IMPLEMENTED** and is the next larger
+   feature only after this recovery-budget branch is frozen/committed. It must
+   use its own dedicated branch.
 9. Keep provider expansion as separate work.
 
-The exact next action is: **commit and push the verified canonical Init cutover
-when authorized.** The first implementation task after that is: **on a separate
-branch, raise the four canonical semantic recovery ceilings in
-`packages/core/src/vnext/gateway.ts` from 1/2/4/6 to 2/3/5/7 (per-slice
-corrections, per-run corrections, semantic operations, transport invocations),
-preserve retry ceilings 1/2, and update focused budget, failure, run-state, and
-whole-slice recovery regressions without adding a public CLI knob.**
+The exact next action is: **freeze and commit the verified recovery-budget
+branch only when explicitly authorized, keeping unrelated `package.json` and
+`AGENTS.md` work outside that commit.** After that, Progressive Init is the next
+larger feature; no implementation commit hash exists yet for the intentionally
+uncommitted recovery-budget branch.

@@ -11,6 +11,7 @@ import type {
 } from "./providers/contract.js";
 import type { WireFinding, WireOutcome } from "./wire.js";
 import type { RejectedFindingEvidence } from "./rejected-evidence.js";
+import { CANONICAL_INIT_RECOVERY_BUDGET } from "./recovery-budget.js";
 
 export type SemanticSlice = "intent" | "work";
 
@@ -132,13 +133,25 @@ export class SemanticGateway {
   }
 
   private beginOperation(slice: SemanticSlice, corrective: boolean): number {
-    if (this.semanticOperations >= 4) throw new SemanticGatewayError("budget-exhausted", "semantic operation ceiling of 4 reached", slice);
+    if (corrective) {
+      if (this.correctiveBySlice[slice] >= CANONICAL_INIT_RECOVERY_BUDGET.maxCorrectiveRegenerationsPerSlice) {
+        throw new SemanticGatewayError("budget-exhausted", `${slice} corrective regeneration ceiling reached`, slice);
+      }
+      if (this.correctiveRegenerations >= CANONICAL_INIT_RECOVERY_BUDGET.maxCorrectiveRegenerationsPerRun) {
+        throw new SemanticGatewayError("budget-exhausted", "run corrective regeneration ceiling reached", slice);
+      }
+    }
+    if (this.semanticOperations >= CANONICAL_INIT_RECOVERY_BUDGET.maxSemanticOperationsPerRun) {
+      throw new SemanticGatewayError(
+        "budget-exhausted",
+        `semantic operation ceiling of ${CANONICAL_INIT_RECOVERY_BUDGET.maxSemanticOperationsPerRun} reached`,
+        slice,
+      );
+    }
     if (!corrective && this.operationsBySlice[slice] >= 1) {
       throw new SemanticGatewayError("budget-exhausted", `${slice} already used its normal semantic operation`, slice);
     }
     if (corrective) {
-      if (this.correctiveBySlice[slice] >= 1) throw new SemanticGatewayError("budget-exhausted", `${slice} corrective regeneration ceiling reached`, slice);
-      if (this.correctiveRegenerations >= 2) throw new SemanticGatewayError("budget-exhausted", "run corrective regeneration ceiling reached", slice);
       this.correctiveBySlice[slice] += 1;
       this.correctiveRegenerations += 1;
     }
@@ -150,7 +163,13 @@ export class SemanticGateway {
   private async invoke(request: SemanticRequest, slice: SemanticSlice): Promise<Awaited<ReturnType<ProviderAdapter["request"]>>> {
     let retryForOperation = 0;
     while (true) {
-      if (this.transportInvocations >= 6) throw new SemanticGatewayError("budget-exhausted", "transport invocation ceiling of 6 reached", slice);
+      if (this.transportInvocations >= CANONICAL_INIT_RECOVERY_BUDGET.maxTransportInvocationsPerRun) {
+        throw new SemanticGatewayError(
+          "budget-exhausted",
+          `transport invocation ceiling of ${CANONICAL_INIT_RECOVERY_BUDGET.maxTransportInvocationsPerRun} reached`,
+          slice,
+        );
+      }
       this.transportInvocations += 1;
       await this.changed();
       const outcome = await this.adapter.request(this.profile, this.auth, request);
@@ -160,10 +179,15 @@ export class SemanticGateway {
       }
       if (outcome.error.usage) this.addUsage(outcome.error.usage);
       if (!outcome.error.transportRetryable) return outcome;
-      if (retryForOperation >= 1 || this.transportRetries >= 2) {
+      if (
+        retryForOperation >= CANONICAL_INIT_RECOVERY_BUDGET.maxTransportRetriesPerSemanticOperation
+        || this.transportRetries >= CANONICAL_INIT_RECOVERY_BUDGET.maxTransportRetriesPerRun
+      ) {
         throw new SemanticGatewayError("transport-exhausted", outcome.error.message, slice, [], outcome.error);
       }
-      if (this.transportInvocations >= 6) throw new SemanticGatewayError("budget-exhausted", "transport invocation ceiling reached before retry", slice);
+      if (this.transportInvocations >= CANONICAL_INIT_RECOVERY_BUDGET.maxTransportInvocationsPerRun) {
+        throw new SemanticGatewayError("budget-exhausted", "transport invocation ceiling reached before retry", slice);
+      }
       retryForOperation += 1;
       this.transportRetries += 1;
       await this.changed();
@@ -226,8 +250,13 @@ export class SemanticGateway {
         ...(rejectedFindings.length ? { rejectedFindings } : {}),
       };
       await this.changed();
-      if (corrective) {
-        throw new SemanticGatewayError("semantic-invalid-after-recovery", `${operation.slice} remained invalid after one corrective regeneration`, operation.slice, findings);
+      if (this.correctiveBySlice[operation.slice] >= CANONICAL_INIT_RECOVERY_BUDGET.maxCorrectiveRegenerationsPerSlice) {
+        throw new SemanticGatewayError(
+          "semantic-invalid-after-recovery",
+          `${operation.slice} remained invalid after ${CANONICAL_INIT_RECOVERY_BUDGET.maxCorrectiveRegenerationsPerSlice} corrective regenerations`,
+          operation.slice,
+          findings,
+        );
       }
       corrective = true;
     }

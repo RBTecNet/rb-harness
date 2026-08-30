@@ -23,6 +23,7 @@ import {
   modelFacingRecoveryContext,
   modelFacingRecoveryFindings,
 } from "../../src/vnext/recovery-findings.js";
+import { CANONICAL_INIT_RECOVERY_BUDGET } from "../../src/vnext/recovery-budget.js";
 import { createInitRunState, transitionInitRunState } from "../../src/vnext/run-state.js";
 import type { CorrectiveSemanticInput } from "../../src/vnext/run-state.js";
 import { deriveExecutionDocument, renderPhases } from "../../src/vnext/render/execution.js";
@@ -327,6 +328,17 @@ function fixedNow(): string {
 }
 
 describe("Phase 3 semantic vnext init", () => {
+  it("uses one canonical internal authority for the 2/3/5/7 envelope and unchanged 1/2 transport retries", () => {
+    expect(CANONICAL_INIT_RECOVERY_BUDGET).toEqual({
+      maxCorrectiveRegenerationsPerSlice: 2,
+      maxCorrectiveRegenerationsPerRun: 3,
+      maxSemanticOperationsPerRun: 5,
+      maxTransportInvocationsPerRun: 7,
+      maxTransportRetriesPerSemanticOperation: 1,
+      maxTransportRetriesPerRun: 2,
+    });
+  });
+
   it("derives work reference constraints from resolved intent keys", () => {
     const intent = inventoryIntent(false) as any;
     const schema = JSON.stringify(deriveWorkSchema(intent));
@@ -522,7 +534,7 @@ describe("Phase 3 semantic vnext init", () => {
     expect(result.runState.stage).toBe("published");
   });
 
-  it("rejects a corrected whole slice when a violated rule recurs at a different task", async () => {
+  it("derives second-correction evidence from correction 1 without overwriting either rejected attempt", async () => {
     const root = await mkdtemp(resolve(tmpdir(), "rb-vnext-phase3-rule-recurrence-"));
     const selectedProfile = profile("exact");
     const initial = twoTaskWork();
@@ -533,9 +545,10 @@ describe("Phase 3 semantic vnext init", () => {
       { payload: inventoryIntent(false) },
       { payload: initial },
       { payload: corrective },
+      { payload: twoTaskWork() },
     ]);
 
-    await expect(runSemanticInit({
+    const result = await runSemanticInit({
       originalRequest: INVENTORY_REQUEST,
       projectRoot: root,
       profile: selectedProfile,
@@ -544,19 +557,26 @@ describe("Phase 3 semantic vnext init", () => {
       interview: { kind: "headless" },
       runId: "rule-recurrence",
       now: fixedNow,
-    })).rejects.toMatchObject({ kind: "semantic-invalid-after-recovery", publicationOccurred: false });
+    });
 
-    const correction = JSON.parse(adapter.requests[2]!.input);
-    expect(correction.violatedRules).toEqual([expect.objectContaining({
+    const correction1 = JSON.parse(adapter.requests[2]!.input);
+    const correction2 = JSON.parse(adapter.requests[3]!.input);
+    expect(correction1.violatedRules).toEqual([expect.objectContaining({
       rule: "acceptance-no-visual-only",
       constraint: expect.stringContaining("Every acceptance statement in the complete regenerated slice"),
     })]);
-    expect(correction.specificPreviousFindings).toEqual([expect.objectContaining({
+    expect(correction1.specificPreviousFindings).toEqual([expect.objectContaining({
       pointer: "/phases/0/tasks/0/acceptance/0",
       rule: "acceptance-no-visual-only",
     })]);
-    expect(correction.recoveryScope.instruction).toContain("not only the prior locations");
-    expect(adapter.requests).toHaveLength(3);
+    expect(correction2.specificPreviousFindings).toEqual([expect.objectContaining({
+      pointer: "/phases/0/tasks/1/acceptance/0",
+      rule: "acceptance-no-visual-only",
+    })]);
+    expect(correction2.specificPreviousFindings).not.toEqual(correction1.specificPreviousFindings);
+    expect(correction2.recoveryScope.instruction).toContain("not only the prior locations");
+    expect(correction2.resolvedIntent).toEqual(correction1.resolvedIntent);
+    expect(adapter.requests).toHaveLength(4);
     const state = JSON.parse(await readFile(resolve(root, ".rb-harness/runs/rule-recurrence/vnext-init-state.json"), "utf8"));
     expect(state.attempts[1].rejectedFindings).toEqual([expect.objectContaining({
       pointer: "/phases/0/tasks/0/acceptance/0",
@@ -583,8 +603,29 @@ describe("Phase 3 semantic vnext init", () => {
       specificPreviousFindings: [expect.objectContaining({ pointer: "/phases/0/tasks/0/acceptance/0" })],
     });
     expect(state.attempts[2].recovery.hashes.correctiveInputSha256).toBe(sha256Text(adapter.requests[2]!.input));
-    expect(containsCodeOwnedMachineIdentity(JSON.stringify(state.attempts[2].recovery))).toBe(false);
-    expect(state.counters).toMatchObject({ semanticOperations: 3, correctiveRegenerations: 1, transportInvocations: 3 });
+    expect(state.attempts[3]).toMatchObject({ slice: "work", ordinal: 4, corrective: true, status: "accepted" });
+    expect(state.attempts[3].rejectedFindings).toBeUndefined();
+    expect(state.attempts[3].recovery).toMatchObject({
+      slice: "work",
+      ordinal: 4,
+      violatedRules: ["acceptance-no-visual-only"],
+      specificPreviousFindings: [expect.objectContaining({ pointer: "/phases/0/tasks/1/acceptance/0" })],
+    });
+    expect(state.attempts[3].recovery.hashes).toMatchObject({
+      originalRequestSha256: state.attempts[2].recovery.hashes.originalRequestSha256,
+      authoritativeInputSha256: state.attempts[2].recovery.hashes.authoritativeInputSha256,
+      resolvedInterviewAuthoritySha256: state.attempts[2].recovery.hashes.resolvedInterviewAuthoritySha256,
+      recoveryContextSha256: sha256Text(JSON.stringify(modelFacingRecoveryContext(state.attempts[2].findings))),
+      correctiveInputSha256: sha256Text(adapter.requests[3]!.input),
+    });
+    expect(containsCodeOwnedMachineIdentity(JSON.stringify([state.attempts[2].recovery, state.attempts[3].recovery]))).toBe(false);
+    expect(state.counters).toMatchObject({
+      semanticOperations: 4,
+      correctiveRegenerations: 2,
+      correctiveBySlice: { intent: 0, work: 2 },
+      transportInvocations: 4,
+    });
+    expect(result.runState.stage).toBe("published");
   });
 
   it("accepts complete regeneration after all violated rules are satisfied globally", async () => {
@@ -1163,10 +1204,15 @@ describe("Phase 3 semantic vnext init", () => {
     expect(JSON.stringify(persisted)).not.toMatch(/providerEnvelope|authorization|x-api-key/i);
   });
 
-  it("terminates after the one same-slice correction and does not render or publish invalid semantics", async () => {
+  it("fails closed after two same-slice corrections without starting correction 3", async () => {
     const root = await mkdtemp(resolve(tmpdir(), "rb-vnext-phase3-terminal-"));
     const selectedProfile = profile("exact");
-    const adapter = new ScriptedAdapter(selectedProfile, [{ payload: { items: [] } }, { payload: { still: "invalid" } }]);
+    const adapter = new ScriptedAdapter(selectedProfile, [
+      { payload: inventoryIntent(false) },
+      { payload: { items: [] } },
+      { payload: { still: "invalid" } },
+      { payload: { also: "invalid" } },
+    ]);
     await expect(runSemanticInit({
       originalRequest: INVENTORY_REQUEST,
       projectRoot: root,
@@ -1177,10 +1223,20 @@ describe("Phase 3 semantic vnext init", () => {
       runId: "terminal-recovery",
       now: fixedNow,
     })).rejects.toMatchObject({ kind: "semantic-invalid-after-recovery", publicationOccurred: false });
-    expect(adapter.requests).toHaveLength(2);
+    expect(adapter.requests).toHaveLength(4);
+    expect(adapter.requests.map((request) => request.slice)).toEqual(["intent", "work", "work", "work"]);
     await expect(access(resolve(root, ".rb"))).rejects.toThrow();
     const state = JSON.parse(await readFile(resolve(root, ".rb-harness/runs/terminal-recovery/vnext-init-state.json"), "utf8"));
-    expect(state).toMatchObject({ stage: "failed", publicationOccurred: false, counters: { semanticOperations: 2, correctiveRegenerations: 1 } });
+    expect(state).toMatchObject({
+      stage: "failed",
+      failureKind: "semantic-invalid-after-recovery",
+      publicationOccurred: false,
+      counters: {
+        semanticOperations: 4,
+        correctiveRegenerations: 2,
+        correctiveBySlice: { intent: 0, work: 2 },
+      },
+    });
   });
 
   it("allows one intent and one work correction while enforcing both per-slice and per-run ceilings", async () => {
@@ -1211,13 +1267,108 @@ describe("Phase 3 semantic vnext init", () => {
     expect(adapter.requests).toHaveLength(4);
   });
 
-  it("enforces one retry per operation, two retries per run, and six total Harness invocations", async () => {
+  it("accepts the maximum healthy run with one intent and two work corrections", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "rb-vnext-phase3-maximum-healthy-"));
+    const selectedProfile = profile("exact");
+    const invalidWork1 = work("inventory", ["unknown-requirement"]);
+    const invalidWork2 = structuredClone(work()) as any;
+    invalidWork2.phases[0].tasks[0].acceptance[0] = "The rendered inventory is visually prominent.";
+    const adapter = new ScriptedAdapter(selectedProfile, [
+      { payload: { invalid: "intent" } },
+      { payload: inventoryIntent(false) },
+      { payload: invalidWork1 },
+      { payload: invalidWork2 },
+      { payload: work() },
+    ]);
+    const result = await runSemanticInit({
+      originalRequest: INVENTORY_REQUEST,
+      projectRoot: root,
+      profile: selectedProfile,
+      adapter,
+      auth,
+      interview: { kind: "headless" },
+      runId: "maximum-healthy",
+      now: fixedNow,
+    });
+    expect(result.runState.counters).toMatchObject({
+      semanticOperations: 5,
+      correctiveRegenerations: 3,
+      correctiveBySlice: { intent: 1, work: 2 },
+      transportInvocations: 5,
+    });
+    expect(adapter.requests.map((request) => request.slice)).toEqual(["intent", "intent", "work", "work", "work"]);
+    expect(result.runState.stage).toBe("published");
+  });
+
+  it("fails closed at the global correction ceiling while the work slice still has local capacity", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "rb-vnext-phase3-global-exhaustion-"));
+    const selectedProfile = profile("exact");
+    const adapter = new ScriptedAdapter(selectedProfile, [
+      { payload: { invalid: "intent original" } },
+      { payload: { invalid: "intent correction 1" } },
+      { payload: inventoryIntent(false) },
+      { payload: { invalid: "work original" } },
+      { payload: { invalid: "work correction 1" } },
+    ]);
+    await expect(runSemanticInit({
+      originalRequest: INVENTORY_REQUEST,
+      projectRoot: root,
+      profile: selectedProfile,
+      adapter,
+      auth,
+      interview: { kind: "headless" },
+      runId: "global-exhaustion",
+      now: fixedNow,
+    })).rejects.toThrow("run corrective regeneration ceiling reached");
+    expect(adapter.requests).toHaveLength(5);
+    const state = JSON.parse(await readFile(resolve(root, ".rb-harness/runs/global-exhaustion/vnext-init-state.json"), "utf8"));
+    expect(state).toMatchObject({
+      stage: "failed",
+      failureKind: "budget-exhausted",
+      publicationOccurred: false,
+      counters: {
+        semanticOperations: 5,
+        correctiveRegenerations: 3,
+        correctiveBySlice: { intent: 2, work: 1 },
+      },
+    });
+    await expect(access(resolve(root, ".rb"))).rejects.toThrow();
+  });
+
+  it("does not initiate a sixth semantic operation", async () => {
+    const selectedProfile = profile("exact");
+    const adapter = new ScriptedAdapter(selectedProfile, [
+      { payload: { valid: false } },
+      { payload: { valid: true } },
+      { payload: { valid: false } },
+      { payload: { valid: false } },
+      { payload: { valid: true } },
+    ]);
+    const gateway = new SemanticGateway(adapter, selectedProfile, auth);
+    const decode = (payload: unknown): WireOutcome<true> => (payload as { valid?: boolean }).valid
+      ? { ok: true, value: true }
+      : { ok: false, findings: [{ code: "semantic-invalid", pointer: "", message: "fixture invalid" }] };
+    const operation = (slice: "intent" | "work") => ({
+      slice,
+      schema: {}, schemaName: `fixture_${slice}`, instructions: slice, input: "fixture",
+      correctiveInput: () => correctiveFixtureInput("complete slice again"), decode,
+      signal: new AbortController().signal, deadlineMs: 1_000, maxOutputTokens: 100,
+    });
+    await expect(gateway.generate(operation("intent"))).resolves.toBe(true);
+    await expect(gateway.generate(operation("work"))).resolves.toBe(true);
+    await expect(gateway.generate(operation("intent"))).rejects.toThrow("semantic operation ceiling of 5 reached");
+    expect(adapter.requests).toHaveLength(5);
+    expect(gateway.snapshot().counters.semanticOperations).toBe(5);
+  });
+
+  it("keeps two transport retries independent at seven invocations and blocks a sixth semantic operation", async () => {
     const selectedProfile = profile("exact");
     const adapter = new ScriptedAdapter(selectedProfile, [
       transientError,
       { payload: { valid: false } },
       { payload: { valid: true } },
       transientError,
+      { payload: { valid: false } },
       { payload: { valid: false } },
       { payload: { valid: true } },
     ]);
@@ -1240,13 +1391,18 @@ describe("Phase 3 semantic vnext init", () => {
     await expect(gateway.generate(operation("intent"))).resolves.toBe(true);
     await expect(gateway.generate(operation("work"))).resolves.toBe(true);
     expect(gateway.snapshot().counters).toMatchObject({
-      semanticOperations: 4,
-      transportInvocations: 6,
+      semanticOperations: 5,
+      transportInvocations: 7,
       transportRetries: 2,
-      correctiveRegenerations: 2,
+      correctiveRegenerations: 3,
+      correctiveBySlice: { intent: 1, work: 2 },
     });
-    await expect(gateway.generate(operation("work"))).rejects.toMatchObject({ kind: "budget-exhausted" });
-    expect(adapter.requests).toHaveLength(6);
+    await expect(gateway.generate(operation("work"))).rejects.toMatchObject({
+      kind: "budget-exhausted",
+      message: "budget-exhausted: semantic operation ceiling of 5 reached",
+      slice: "work",
+    });
+    expect(adapter.requests).toHaveLength(7);
   });
 
   it("stops a second retry for one operation and a third retry across the run", async () => {
