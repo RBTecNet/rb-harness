@@ -77,8 +77,15 @@ async function directory(path: string): Promise<string> {
   return absolute;
 }
 
-export async function runHarnessWizard(version: string): Promise<void> {
-  await playHarnessSplash(version);
+export interface LegacyWorkflowWizardOptions {
+  readonly selectedWorkflow?: Exclude<HarnessWorkflow, "init">;
+  readonly dashboard?: boolean;
+  readonly splash?: boolean;
+}
+
+/** Presentation retained for non-Init legacy workflows during the Init cutover. */
+export async function runHarnessWizard(version: string, options: LegacyWorkflowWizardOptions = {}): Promise<void> {
+  if (options.splash !== false) await playHarnessSplash(version);
   const terminal = createInterface({ input, output });
   try {
     process.stdout.write("RB Harness · geração assistida de artefatos\n\n");
@@ -96,7 +103,7 @@ export async function runHarnessWizard(version: string): Promise<void> {
       );
     }
 
-    const unfinished = await resumableRuns(projectRoot);
+    const unfinished = (await resumableRuns(projectRoot)).filter((state) => state.workflow === options.selectedWorkflow);
     if (unfinished.length) {
       const latest = unfinished.at(-1)!;
       const resume = (await terminal.question(`\nGeração interrompida encontrada (${latest.id}, ${latest.status}). Retomar? [S/n]: `)).trim();
@@ -107,17 +114,18 @@ export async function runHarnessWizard(version: string): Promise<void> {
       }
     }
 
-    process.stdout.write("\nO que deseja fazer?\n");
-    const workflows: Array<[HarnessWorkflow, string]> = [
-      ["init", "Inicializar documentação de um projeto novo"],
+    if (!options.selectedWorkflow) process.stdout.write("\nO que deseja fazer?\n");
+    const workflows: Array<[Exclude<HarnessWorkflow, "init">, string]> = [
       ["ai-context", "Mapear o AS IS de um projeto implementado"],
       ["plan", "Planejar uma funcionalidade ou correção isolada"],
       ["evolve", "Planejar uma mudança em comportamento existente"],
       ["review", "Executar um code review de produto completo"],
     ];
-    workflows.forEach(([, label], index) => process.stdout.write(`  ${index + 1}) ${label}\n`));
-    const workflowIndex = Number((await terminal.question("Escolha [2]: ")).trim() || "2") - 1;
-    const workflow = workflows[workflowIndex]?.[0];
+    if (!options.selectedWorkflow) workflows.forEach(([, label], index) => process.stdout.write(`  ${index + 1}) ${label}\n`));
+    const workflowIndex = options.selectedWorkflow === undefined
+      ? Number((await terminal.question("Escolha [2]: ")).trim() || "2") - 1
+      : -1;
+    const workflow = options.selectedWorkflow ?? workflows[workflowIndex]?.[0];
     if (!workflow) throw new Error("workflow inválido");
 
     let request = "";
@@ -190,8 +198,10 @@ export async function runHarnessWizard(version: string): Promise<void> {
     if (credential) args.push("--credential", credential);
     if (depth) args.push("--depth", depth);
     if (planAllConfirmed) args.push("--plan-all-confirmed");
-    const dashboardAnswer = (await terminal.question("Usar o dashboard ao vivo? [S/n]: ")).trim();
-    const dashboard = !/^(?:n|nao|não|no)$/i.test(dashboardAnswer);
+    const dashboardAnswer = options.dashboard === undefined
+      ? (await terminal.question("Usar o dashboard ao vivo? [S/n]: ")).trim()
+      : undefined;
+    const dashboard = options.dashboard ?? !/^(?:n|nao|não|no)$/i.test(dashboardAnswer ?? "");
     if (dashboard) args.push("--dashboard");
     process.stdout.write(`\nComando equivalente:\n  rb-harness ${args.map(shellQuote).join(" ")}\n`);
     const execute = (await terminal.question("\nExecutar agora? [S/n]: ")).trim();

@@ -49,30 +49,28 @@ rb-harness --version
 
 ## 1. Workflows de geração
 
-Os cinco workflows compartilham o mesmo fluxo: inventário → entrevista adaptativa
-→ checkpoint fechado de decisões → autoria incremental → validação determinística
-→ publicação atômica. Eles diferem no que produzem.
+Init usa o motor semântico canônico validado. Os demais workflows preservam o
+fluxo existente enquanto suas migrações não forem aprovadas.
 
 Todos aceitam a solicitação de três formas equivalentes: como argumento
 posicional, via `--prompt`, ou via `--file`.
 
-### 1.1 `init` — documentar e planejar um projeto novo
+### 1.1 `init` — motor semântico canônico para um projeto novo
 
-Produz `.rb/init/` com `PROJECT.md`, `REQUIREMENTS.md`, `DECISIONS.md`,
-`PLAN.md`, um `PHASES.md` válido em `rb-execution/v1` e, quando o produto tem
-um entrypoint automatizável, `OPERATIONS.json`.
+Produz somente `rb-manifest.json`, `init/BRIEF.md` e um `init/PHASES.md` válido
+em `rb-execution/v1`. Use `rb-harness --init` para o assistente de configuração.
 
 ```bash
 # a partir de um PRD em arquivo
 rb-harness init --file docs/prd.md \
-  --provider codex --model gpt-5.4-mini --effort high \
-  --project . --output .rb
+  --profile anthropic:claude-code-cli:claude-opus-5 \
+  --project .
 ```
 
 ```bash
 # a partir de texto direto, com o painel ao vivo
 rb-harness init "Uma CLI que converte CSV em Parquet, com validação de esquema" \
-  --provider deepseek --model deepseek-v4-flash --credential ds_oficial \
+  --profile anthropic:claude-code-cli:claude-opus-5 \
   --dashboard
 ```
 
@@ -500,12 +498,12 @@ rb-harness plan @pedido.md --provider codex --model gpt-5.4-mini
 ### Projeto novo, do PRD ao Ralph
 
 ```bash
-# 1. testar a conexão antes de gastar um workflow
-rb-harness provider test --provider codex --model gpt-5.4-mini
+# 1. conferir offline a conformidade do perfil instalado
+rb-harness vnext conformance anthropic:claude-code-cli:claude-opus-5
 
 # 2. gerar a documentação e o plano
 rb-harness init --file docs/prd.md \
-  --provider codex --model gpt-5.4-mini --effort high --dashboard
+  --profile anthropic:claude-code-cli:claude-opus-5 --dashboard
 
 # 3. provar que o pacote serve ao Ralph
 rb-harness artifacts verify --project . --against docs/prd.md

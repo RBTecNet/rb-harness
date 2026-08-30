@@ -1,3 +1,6 @@
+import { harnessMascotPlainRows, renderHarnessMascot } from "./harness-mascot.js";
+import { terminalVisibleWidth, truncateTerminalText } from "./harness-dashboard.js";
+
 const RESET = "\u001b[0m";
 
 const WORDMARK = [
@@ -14,25 +17,23 @@ const WORDMARK_COMPACT = [
   "█▀▄ █▄█   █▀█ █▀█ █▀▄ █░▀█ ██▄ ▄█ ▄█",
 ];
 
-const MASCOT = [
-  "        ╭──╮                            ╭──╮",
-  "    ╭───╯  ╰────────────────────────────╯  ╰───╮",
-  "    │          ◕                    ◕          │",
-  "    │                                          │",
-  "    ╰─────╮      ╭────────────────╮      ╭─────╯",
-  "          ╰──────┤    ▪      ▪    ├──────╯",
-  "                 │       ◡◡       │",
-  "                 ╰────────────────╯",
-];
+const MASCOT = [...harnessMascotPlainRows("wide")];
+const MASCOT_COMPACT = [...harnessMascotPlainRows("compact")];
 
-const MASCOT_COMPACT = [
-  "    ╭─╮          ╭─╮",
-  "  ╭─╯ ╰──────────╯ ╰─╮",
-  "  │     ◕      ◕     │",
-  "  ╰──╮  ╭──────╮  ╭──╯",
-  "     ╰──┤ ▪  ▪ ├──╯",
-  "        ╰──◡◡──╯",
-];
+/** The dashboard capybara, painted with its own palette rather than the splash gradient. */
+const MASCOT_PAINTED = [...renderHarnessMascot("wide")];
+const MASCOT_PAINTED_COMPACT = [...renderHarnessMascot("compact")];
+
+const ANSI_SEQUENCE = /\u001b\[[0-9;]*m/;
+
+/** A line that carries its own colour must survive the gradient untouched. */
+function painted(line: string): boolean {
+  return ANSI_SEQUENCE.test(line);
+}
+
+function stripped(line: string): string {
+  return line.replace(new RegExp(ANSI_SEQUENCE, "g"), "");
+}
 
 type RGB = readonly [number, number, number];
 
@@ -43,7 +44,7 @@ const STOPS: readonly RGB[] = [
 ];
 
 function width(value: string): number {
-  return [...value].length;
+  return terminalVisibleWidth(value);
 }
 
 function widest(lines: string[]): number {
@@ -65,10 +66,17 @@ export function harnessBrand(version: string): string {
   ].join("\n");
 }
 
-export function composeHarnessSplash(version: string, columns: number, rows = 24): string[] {
+export function composeHarnessSplash(
+  version: string,
+  columns: number,
+  rows = 24,
+  options: { readonly color?: boolean } = {},
+): string[] {
   const full = columns >= widest(WORDMARK) + 2 && rows >= 22;
   const wordmark = full ? WORDMARK : WORDMARK_COMPACT;
-  const mascot = full ? MASCOT : MASCOT_COMPACT;
+  const mascot = options.color
+    ? (full ? MASCOT_PAINTED : MASCOT_PAINTED_COMPACT)
+    : (full ? MASCOT : MASCOT_COMPACT);
   const rule = "─".repeat(Math.max(0, Math.min(columns - 2, widest(wordmark))));
   return [
     ...centered(wordmark, columns),
@@ -118,11 +126,15 @@ export function renderHarnessSplashFrame(
   const top = Math.max(0, Math.floor((rows - lines.length) / 2));
   const output = ["\u001b[H\u001b[2J", "\n".repeat(top)];
   lines.forEach((line, index) => {
-    if (!line.trim()) {
+    if (!stripped(line).trim()) {
       output.push("\n");
       return;
     }
-    output.push(`${ansi(colorAt(phase + index * 0.018), trueColor)}${[...line].slice(0, columns).join("")}${RESET}\n`);
+    const clipped = width(line) <= columns ? line : truncateTerminalText(line, columns);
+    // The capybara keeps the dashboard palette; only unpainted art takes the gradient.
+    output.push(painted(clipped)
+      ? `${clipped}${RESET}\n`
+      : `${ansi(colorAt(phase + index * 0.018), trueColor)}${clipped}${RESET}\n`);
   });
   return output.join("");
 }
@@ -145,7 +157,7 @@ export async function playHarnessSplash(version: string, explicit = false): Prom
   const interval = 55;
   const frames = Math.max(1, Math.round(duration / interval));
   const trueColor = /truecolor|24bit/i.test(process.env.COLORTERM || "");
-  const lines = composeHarnessSplash(version, columns, rows);
+  const lines = composeHarnessSplash(version, columns, rows, { color: true });
   const restore = () => {
     try { stream.write(`${RESET}\u001b[?25h\u001b[?1049l`); } catch { /* cosmetic only */ }
   };

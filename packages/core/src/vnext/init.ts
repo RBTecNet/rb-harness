@@ -89,6 +89,8 @@ export interface RunSemanticInitOptions {
   readonly now?: () => string;
   readonly deadlineMs?: number;
   readonly maxOutputTokens?: number;
+  /** Presentation-only observer; failures never influence semantic execution. */
+  readonly onRunState?: (state: VnextInitRunState) => void | Promise<void>;
 }
 
 export interface SemanticInitResult {
@@ -240,15 +242,29 @@ export async function runSemanticInit(options: RunSemanticInitOptions): Promise<
   });
   let statePath = await persistInitRunState(options.projectRoot, state);
 
+  const publishState = async (): Promise<void> => {
+    statePath = await persistInitRunState(options.projectRoot, state);
+    try {
+      await options.onRunState?.(structuredClone(state));
+    } catch {
+      // Presentation is deliberately isolated from semantic authority.
+    }
+  };
+  try {
+    await options.onRunState?.(structuredClone(state));
+  } catch {
+    // Presentation is deliberately isolated from semantic authority.
+  }
+
   const updateSnapshot = async (snapshot: SemanticGatewaySnapshot): Promise<void> => {
     state = { ...state, counters: snapshot.counters, attempts: snapshot.attempts, updatedAt: now() };
-    statePath = await persistInitRunState(options.projectRoot, state);
+    await publishState();
   };
   const gateway = new SemanticGateway(options.adapter, options.profile, options.auth, updateSnapshot);
 
   try {
     state = transitionInitRunState(state, "intent-requested", now());
-    statePath = await persistInitRunState(options.projectRoot, state);
+    await publishState();
     const intent = await gateway.generate({
       slice: "intent",
       schema: INIT_INTENT_SCHEMA,
@@ -268,14 +284,14 @@ export async function runSemanticInit(options: RunSemanticInitOptions): Promise<
       maxOutputTokens: options.maxOutputTokens ?? 16_000,
     });
     state = transitionInitRunState(state, "intent-decoded", now());
-    statePath = await persistInitRunState(options.projectRoot, state);
+    await publishState();
 
     const questionEvidence: InterviewQuestionEvidence[] = [];
     for (const question of intent.questions) {
       const pending = pendingQuestionEvidence(question);
       questionEvidence.push(pending);
       state = transitionInitRunState(state, "interview-pending", now(), { questions: [...questionEvidence] });
-      statePath = await persistInitRunState(options.projectRoot, state);
+      await publishState();
       const selected = options.interview.kind === "headless"
         ? selectInterviewAnswer(pending, { kind: "headless" })
         : selectInterviewAnswer(pending, { kind: "interactive", response: await options.interview.answer(pending) });
@@ -289,14 +305,14 @@ export async function runSemanticInit(options: RunSemanticInitOptions): Promise<
           acceptanceMode: verified.acceptanceMode,
         }],
       });
-      statePath = await persistInitRunState(options.projectRoot, state);
+      await publishState();
     }
 
     const resolvedIntent = buildResolvedIntent(intent, questionEvidence, { originalRequest, runId, generatedAt });
     state = transitionInitRunState(state, "intent-resolved", now());
-    statePath = await persistInitRunState(options.projectRoot, state);
+    await publishState();
     state = transitionInitRunState(state, "work-requested", now());
-    statePath = await persistInitRunState(options.projectRoot, state);
+    await publishState();
     const promptAuthority = resolvedIntentPromptAuthority(intent, questionEvidence, {
       originalRequest,
       protectedPaths: resolvedIntent.semanticBase.protectedPaths,
@@ -314,12 +330,12 @@ export async function runSemanticInit(options: RunSemanticInitOptions): Promise<
       maxOutputTokens: options.maxOutputTokens ?? 24_000,
     });
     state = transitionInitRunState(state, "work-resolved", now());
-    statePath = await persistInitRunState(options.projectRoot, state);
+    await publishState();
     state = transitionInitRunState(state, "deterministic-closure", now());
-    statePath = await persistInitRunState(options.projectRoot, state);
+    await publishState();
     const closure = await closeInitProject(work.model, options.projectRoot);
     state = transitionInitRunState(state, "published", now(), { terminalStatus: "published", publicationOccurred: true });
-    statePath = await persistInitRunState(options.projectRoot, state);
+    await publishState();
     return { closure, runState: state, runStatePath: statePath };
   } catch (error) {
     const failure = error instanceof SemanticGatewayError ? gatewayFailure(error) : error;
@@ -336,7 +352,7 @@ export async function runSemanticInit(options: RunSemanticInitOptions): Promise<
         counters: gateway.snapshot().counters,
         attempts: gateway.snapshot().attempts,
       });
-      await persistInitRunState(options.projectRoot, state);
+      await publishState();
     }
     if (failure instanceof VnextInitError) throw failure;
     if (failure instanceof SemanticClosureError) throw new VnextInitError("deterministic-core-failure", failure.message, false, failure);

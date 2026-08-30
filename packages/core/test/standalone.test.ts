@@ -7,6 +7,8 @@ import { parseInterviewAnalysis, recoverInterviewAnalysis } from "../src/harness
 import { providerInvocation, providerOutputLimit, runProvider } from "../src/harness-provider.js";
 import { inspectProjectInventory } from "../src/harness-inventory.js";
 import { composeHarnessSplash, harnessBrand, renderHarnessSplashFrame } from "../src/harness-splash.js";
+import { harnessMascotPlainRows, renderHarnessMascot } from "../src/harness-mascot.js";
+import { terminalVisibleWidth } from "../src/harness-dashboard.js";
 import { loadWorkflowResources, requestNeedsHeadlessContracts, resolveWorkflowResourceRoot } from "../src/standalone-resources.js";
 import {
   hasReadyInterviewCheckpoint,
@@ -139,9 +141,8 @@ describe("standalone RB Harness", () => {
 
   it("preserves the versioned RB wordmark and capybara mascot", () => {
     const brand = harnessBrand("0.2.3");
-    expect(brand).toContain("◕      ◕");
-    expect(brand).toContain("▪  ▪");
-    expect(brand).toContain("◡◡");
+    expect(brand).toContain("█▀█ █▄▄");
+    for (const row of harnessMascotPlainRows("compact")) expect(brand).toContain(row);
     expect(brand).toContain("capivara das especificações · v0.2.3");
   });
 
@@ -159,6 +160,36 @@ describe("standalone RB Harness", () => {
     const compact = composeHarnessSplash("0.2.3", 50, 16);
     expect(compact[0]).toContain("█▀█ █▄▄");
     expect(compact.every((line) => [...line].length <= 50)).toBe(true);
+  });
+
+  it("paints the splash with the dashboard capybara instead of the gradient", () => {
+    const columns = 120;
+    const rows = 30;
+    const painted = composeHarnessSplash("0.2.3", columns, rows, { color: true });
+    // The splash carries the same mascot art the dashboard renders.
+    for (const row of renderHarnessMascot("wide")) {
+      expect(painted.some((line) => line.includes(row))).toBe(true);
+    }
+    expect(painted.every((line) => terminalVisibleWidth(line) <= columns)).toBe(true);
+
+    const frame = renderHarnessSplashFrame(painted, 0.3, true, rows, columns);
+    const mascotRow = renderHarnessMascot("wide")[6]!;
+    const mascotLine = frame.split("\n").find((line) => line.includes(mascotRow))!;
+    // The capybara keeps its own palette: the frame adds centering and a reset,
+    // never a gradient colour, so the row survives byte for byte.
+    expect(mascotLine.replace(/^ +/, "")).toBe(`${mascotRow}\u001b[0m`);
+    expect(mascotLine).toContain("\u001b[38;2;0;194;222m");
+
+    // Unpainted art still animates through the gradient.
+    const wordmarkLine = frame.split("\n").find((line) => line.includes("██████╗"))!;
+    expect(wordmarkLine).toContain("\u001b[38;2;");
+    expect(composeHarnessSplash("0.2.3", columns, rows).some((line) => line.includes("\u001b["))).toBe(false);
+
+    const compact = composeHarnessSplash("0.2.3", 50, 16, { color: true });
+    for (const row of renderHarnessMascot("compact")) {
+      expect(compact.some((line) => line.includes(row))).toBe(true);
+    }
+    expect(compact.every((line) => terminalVisibleWidth(line) <= 50)).toBe(true);
   });
 
   it("keeps every documentation provider role read-only", () => {

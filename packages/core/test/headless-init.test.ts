@@ -308,5 +308,9 @@ describe("headless init", () => {
         await expect(readFile(run.capture, "utf8")).rejects.toThrow();
       }
     }
-  }, 20_000);
+  // This preserves the complete 8 × 16 distributed-boundary matrix. The
+  // larger canonical-cutover bundle starts 128 short-lived CLI processes, so
+  // concurrent full-suite load needs a wider outer budget; every assertion
+  // and each individual process invocation remain unchanged.
+  }, 60_000);
 });

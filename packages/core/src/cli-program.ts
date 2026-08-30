@@ -18,7 +18,11 @@ import { harnessBrand, playHarnessSplash } from "./harness-splash.js";
 import { logoutCredential, printCredentialList, runLoginWizard } from "./auth-cli.js";
 import { runDirectApiAgentCli } from "./api-agent.js";
 import { PROVIDER_HELP, isCliProvider, isDirectProvider } from "./provider-registry.js";
-import { finishHarnessDashboard, startHarnessDashboard } from "./harness-dashboard.js";
+import {
+  createInitDashboardController,
+  finishHarnessDashboard,
+  startHarnessDashboard,
+} from "./harness-dashboard.js";
 import { HARNESS_VERSION } from "./version.js";
 import { printProviderList, runProviderTestCommand } from "./provider-cli.js";
 import { listRunStates } from "./harness-state.js";
@@ -27,7 +31,9 @@ import {
   formatArtifactVerification,
   verifyArtifacts,
 } from "./artifact-verifier.js";
-import { runHarnessWizard } from "./harness-wizard.js";
+import { runRootWizard } from "./root-wizard.js";
+import { runInitWizard } from "./init-wizard.js";
+import { classifyRootCliArgs, formatIncompleteInitDirectMode, missingInitDirectInputs } from "./init-routing.js";
 import {
   defaultRequestForWorkflow,
   resolveStandaloneRequest,
@@ -53,9 +59,53 @@ import {
 import type { ArtifactRecord, ArtifactStatus, ValidationIssue } from "./types.js";
 import type { HarnessWorkflow, ProviderConfiguration } from "./standalone-types.js";
 import { runVnextConformanceCommand } from "./vnext/providers/conformance/cli.js";
-import { runVnextInitCommand } from "./vnext/init-cli.js";
+import { runInitCommand, type InitCliOptions, type InitCliPresentation } from "./vnext/init-cli.js";
+import { listProviderProfiles } from "./vnext/providers/registry.js";
 
 const program = new Command();
+
+function canonicalInitPresentation(projectRoot: string): InitCliPresentation {
+  const dashboard = createInitDashboardController(HARNESS_VERSION, resolve(projectRoot));
+  return {
+    start: () => dashboard.start(),
+    pause: () => dashboard.pause(),
+    resume: () => dashboard.resume(),
+    finish: () => dashboard.finish(),
+    state: (state) => dashboard.state({
+      stage: state.stage,
+      selectedProfileId: state.selectedProfileId,
+      transport: state.transport,
+      requestAccounting: state.requestAccounting,
+      questions: state.questions.length,
+      semanticOperations: state.counters.semanticOperations,
+      transportInvocations: state.counters.transportInvocations,
+      correctiveRegenerations: state.counters.correctiveRegenerations,
+      providerRequests: state.counters.providerRequests.measured ? String(state.counters.providerRequests.value) : "não medido",
+      ...(state.terminalStatus ? { terminalStatus: state.terminalStatus } : {}),
+      ...(state.failureKind ? { failureKind: state.failureKind } : {}),
+      publicationOccurred: state.publicationOccurred,
+      projectRoot: resolve(projectRoot),
+      updatedAt: state.updatedAt,
+    }),
+  };
+}
+
+async function runCanonicalInit(options: InitCliOptions & { readonly dashboard?: boolean }): Promise<void> {
+  const { dashboard, ...semanticOptions } = options;
+  await runInitCommand({ ...semanticOptions, ...(dashboard ? { presentation: canonicalInitPresentation(semanticOptions.projectRoot) } : {}) });
+}
+
+async function runCanonicalInitWizard(options: { readonly dashboard?: boolean; readonly splash?: boolean }): Promise<void> {
+  await runInitWizard(HARNESS_VERSION, {
+    ...options,
+    profiles: listProviderProfiles(),
+    execute: (configuration) => runCanonicalInit(configuration),
+  });
+}
+
+async function runCanonicalRootWizard(options: { readonly dashboard?: boolean; readonly splash?: boolean } = {}): Promise<void> {
+  await runRootWizard(HARNESS_VERSION, { ...options, runInit: runCanonicalInitWizard });
+}
 
 function printIssues(issues: ValidationIssue[], json: boolean): void {
   if (json) {
@@ -79,6 +129,8 @@ program
   .version(HARNESS_VERSION)
   .option("--ver", "output the version number (alias for --version)")
   .option("--login", "configure a direct API provider credential interactively")
+  .option("--init", "select Init; selector-only use opens the interactive Init wizard")
+  .option("--dashboard", "enable dashboard presentation for the selected operation")
   .option("--splash", "play the RB Harness capybara splash and exit")
   .option("--no-splash", "skip the launch splash")
   .addHelpText("beforeAll", `${harnessBrand(HARNESS_VERSION)}\n\n`)
@@ -86,6 +138,8 @@ program
     "",
     "Standalone examples:",
     "  rb-harness                         Start the interactive wizard",
+    "  rb-harness --init                  Configure canonical Init interactively",
+    "  rb-harness init --profile anthropic:claude-code-cli:claude-opus-5 --project . \"Build an inventory system\"",
     "  rb-harness plan --file change.md --provider codex --model gpt-5.6-sol --effort high",
     "  rb-harness review --project . --provider claude --model opus --output .rb",
     "  rb-harness provider test          Test a configured API through the guided wizard",
@@ -281,6 +335,19 @@ project
     }
   });
 
+/**
+ * Both headless contracts consume exactly one complete UTF-8 JSON document from
+ * stdin, terminated by EOF, and emit exactly one JSON result on stdout.
+ */
+function readHeadlessContractInput(): Promise<Buffer> {
+  return new Promise<Buffer>((resolveInput, reject) => {
+    const chunks: Buffer[] = [];
+    process.stdin.on("data", (chunk: Buffer | string) => chunks.push(Buffer.from(chunk)));
+    process.stdin.once("error", reject);
+    process.stdin.once("end", () => resolveInput(Buffer.concat(chunks)));
+  });
+}
+
 const headless = program.command("headless").description("Run versioned provider-neutral automation contracts");
 headless
   .command("version")
@@ -294,15 +361,10 @@ headless
   });
 headless
   .command("init")
+  .description("Execute one rb-headless-init/v1 request from stdin into an isolated output root")
   .requiredOption("--output <path>", "absolute isolated output root")
   .action(async (options: { output: string }) => {
-    const input = await new Promise<Buffer>((resolveInput, reject) => {
-      const chunks: Buffer[] = [];
-      process.stdin.on("data", (chunk: Buffer | string) => chunks.push(Buffer.from(chunk)));
-      process.stdin.once("error", reject);
-      process.stdin.once("end", () => resolveInput(Buffer.concat(chunks)));
-    });
-    const outcome = await runHeadlessInit({ input, outputRoot: options.output });
+    const outcome = await runHeadlessInit({ input: await readHeadlessContractInput(), outputRoot: options.output });
     process.stdout.write(`${JSON.stringify(outcome.result)}\n`);
     process.exitCode = outcome.exitCode;
   });
@@ -336,23 +398,22 @@ headlessInterview
   });
 headlessInterview
   .command("run")
+  .description("Process one interview_start or answer message from stdin")
   .requiredOption("--state <path>", "absolute durable interview state root")
   .option("--timeout <seconds>", "adapter wall timeout", "3600")
   .option("--first-output-timeout <seconds>", "adapter first output timeout", "300")
-  .description("Process one interview_start or answer message from stdin")
   .action(async (options: { state: string; timeout: string; firstOutputTimeout: string }) => {
-    const input = await new Promise<Buffer>((resolveInput, reject) => {
-      const chunks: Buffer[] = [];
-      process.stdin.on("data", (chunk: Buffer | string) => chunks.push(Buffer.from(chunk)));
-      process.stdin.once("error", reject);
-      process.stdin.once("end", () => resolveInput(Buffer.concat(chunks)));
-    });
     const timeoutSeconds = Number(options.timeout);
     const firstOutputTimeoutSeconds = Number(options.firstOutputTimeout);
     if (!Number.isFinite(timeoutSeconds) || timeoutSeconds < 0 || !Number.isFinite(firstOutputTimeoutSeconds) || firstOutputTimeoutSeconds < 0) {
       throw new Error("headless interview timeouts must be non-negative numbers");
     }
-    const outcome = await runHeadlessInterview({ input, stateRoot: options.state, timeoutSeconds, firstOutputTimeoutSeconds });
+    const outcome = await runHeadlessInterview({
+      input: await readHeadlessContractInput(),
+      stateRoot: options.state,
+      timeoutSeconds,
+      firstOutputTimeoutSeconds,
+    });
     process.stdout.write(`${JSON.stringify(outcome.result)}\n`);
     process.exitCode = outcome.exitCode;
   });
@@ -566,7 +627,32 @@ function configureWorkflowCommand(command: Command, workflow: HarnessWorkflow): 
     .action(async (request: string | undefined, options: WorkflowCliOptions) => workflowAction(workflow, request, options));
 }
 
-configureWorkflowCommand(program.command("init").description("Document and plan a new project"), "init");
+program.command("init")
+  .description("Generate a Ralph-ready project plan through the canonical semantic Init engine")
+  .argument("[request...]", "project request text")
+  .option("--profile <profile-id>", "exact supported provider/transport/model profile")
+  .option("--file <path>", "read request text from a file")
+  .option("--credential <id-or-label>", "saved direct API credential selector")
+  .option("--project <path>", "project root", ".")
+  .option("--headless", "accept generated recommendations through non-interactive policy")
+  .option("--timeout <seconds>", "deadline for each provider transport invocation", "120")
+  .option("--dashboard", "show the canonical Init dashboard")
+  .action(async (request: string[], options: {
+    profile?: string; file?: string; credential?: string; project: string; headless?: boolean; timeout: string; dashboard?: boolean;
+  }) => {
+    const missing = missingInitDirectInputs({ profile: options.profile, requestParts: request, requestFile: options.file });
+    if (missing.length) throw new Error(formatIncompleteInitDirectMode(missing));
+    await runCanonicalInit({
+      requestParts: request,
+      requestFile: options.file,
+      profileId: options.profile!,
+      credential: options.credential,
+      projectRoot: options.project,
+      headless: Boolean(options.headless),
+      deadlineSeconds: Number(options.timeout),
+      dashboard: Boolean(options.dashboard),
+    });
+  });
 configureWorkflowCommand(program.command("ai-context").description("Reverse-engineer an implemented project into AS IS context"), "ai-context")
   .option("--depth <mode>", "quick, balanced, or deep inspection", "balanced");
 configureWorkflowCommand(program.command("plan").description("Plan an isolated feature, fix, migration, or technical change"), "plan");
@@ -577,7 +663,7 @@ configureWorkflowCommand(review, "review")
   .option("--plan-all-confirmed", "plan every and only confirmed finding after the audit")
   .option("--findings <ids...>", "plan only the selected stable finding IDs");
 
-program.command("wizard").description("Start the interactive standalone Harness").action(async () => runHarnessWizard(HARNESS_VERSION));
+program.command("wizard").description("Start the interactive RB Harness product shell").action(async () => runCanonicalRootWizard());
 
 const auth = program.command("auth").description("Manage the shared RB provider credential vault");
 auth.command("login")
@@ -620,26 +706,6 @@ providerCommands.command("test")
   }));
 
 const vnext = program.command("vnext").description("Run experimental vNext laboratories");
-vnext.command("init")
-  .description("Generate a Ralph-ready init plan through the vNext semantic pipeline")
-  .argument("[request...]", "project request text")
-  .requiredOption("--profile <profile-id>", "exact supported provider/transport/model profile")
-  .option("--file <path>", "read request text from a file")
-  .option("--credential <id-or-label>", "saved direct API credential selector")
-  .option("--project <path>", "project root", ".")
-  .option("--headless", "accept generated recommendations through non-interactive policy")
-  .option("--timeout <seconds>", "deadline for each provider transport invocation", "120")
-  .action(async (request: string[], options: {
-    profile: string; file?: string; credential?: string; project: string; headless?: boolean; timeout: string;
-  }) => runVnextInitCommand({
-    requestParts: request,
-    requestFile: options.file,
-    profileId: options.profile,
-    credential: options.credential,
-    projectRoot: options.project,
-    headless: Boolean(options.headless),
-    deadlineSeconds: Number(options.timeout),
-  }));
 vnext.command("conformance")
   .description("Replay or explicitly record exact-profile adapter conformance")
   .argument("<profile-id>")
@@ -720,6 +786,10 @@ program
       runId = runs.at(-1)?.id;
     }
     if (!runId) throw new Error("no incomplete Harness run was found");
+    const selectedRun = (await listRunStates(projectRoot)).find((state) => state.id === runId);
+    if (selectedRun?.workflow === "init") {
+      throw new Error("legacy Init runs cannot be resumed after the canonical Init cutover; run rb-harness --init to start canonical Init");
+    }
     if (options.dashboard) startHarnessDashboard(HARNESS_VERSION);
     try {
       await resumeStandaloneWorkflow(projectRoot, runId, {
@@ -828,16 +898,9 @@ artifacts
   });
 
 export async function runHarnessCli(): Promise<void> {
-  if (process.argv.slice(2).includes("--ver")) {
+  const args = process.argv.slice(2);
+  if (args.includes("--ver")) {
     process.stdout.write(`${HARNESS_VERSION}\n`);
-    return;
-  }
-  if (process.argv.length === 2) {
-    if (!process.stdin.isTTY || !process.stdout.isTTY) {
-      program.outputHelp();
-      throw new Error("no command was provided and the terminal is not interactive");
-    }
-    await runHarnessWizard(HARNESS_VERSION);
     return;
   }
   if (process.argv.length === 3 && process.argv[2] === "--login") {
@@ -847,6 +910,25 @@ export async function runHarnessCli(): Promise<void> {
   if (process.argv.length === 3 && process.argv[2] === "--splash") {
     await playHarnessSplash(HARNESS_VERSION, true);
     return;
+  }
+  const route = classifyRootCliArgs(args, Boolean(process.stdin.isTTY && process.stdout.isTTY));
+  if (route.kind === "root-wizard") {
+    await runCanonicalRootWizard({ dashboard: route.dashboard, splash: !args.includes("--no-splash") });
+    return;
+  }
+  if (route.kind === "init-wizard") {
+    await runCanonicalInitWizard({ dashboard: route.dashboard, splash: !args.includes("--no-splash") });
+    return;
+  }
+  if (route.kind === "init-direct") {
+    await program.parseAsync([process.argv[0]!, process.argv[1]!, "init", ...route.argv]);
+    return;
+  }
+  if (route.kind === "non-interactive-error") {
+    program.outputHelp();
+    throw new Error(route.operation === "init"
+      ? "Init wizard requires an interactive terminal; use rb-harness init --profile <profile-id> --project <path> <request>"
+      : "no operation was provided and the terminal is not interactive; use a direct command such as rb-harness init --help");
   }
   await program.parseAsync(process.argv);
 }

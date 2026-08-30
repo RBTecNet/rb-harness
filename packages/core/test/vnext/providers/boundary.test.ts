@@ -67,10 +67,19 @@ describe("Phase 2 provider boundaries", () => {
       .not.toMatch(/Respond with valid JSON|Do not output Markdown|Harness requirements|Repair your answer/i);
   });
 
-  it("registers the experimental vnext init surface without changing legacy init", () => {
+  it("promotes semantic Init and removes the experimental/legacy Init routes", () => {
     const surface = harnessCommandSurface();
     expect(surface["rb-harness vnext conformance"]).toEqual(expect.arrayContaining(["--record", "--credential"]));
-    expect(surface["rb-harness vnext init"]).toEqual(expect.arrayContaining(["--profile", "--credential", "--headless"]));
-    expect(surface["rb-harness init"]).toBeDefined();
+    expect(surface["rb-harness vnext init"]).toBeUndefined();
+    expect(surface["rb-harness init"]).toEqual(expect.arrayContaining(["--profile", "--credential", "--headless"]));
+    expect(surface["rb-harness init"]).not.toEqual(expect.arrayContaining(["--provider", "--adapter", "--output"]));
+    // The rb-headless-init/v1 and rb-headless-interview/v1 executors are a
+    // separate published integration boundary, not a legacy Init route: they
+    // keep the entry points their shipped contracts declare.
+    expect(surface["rb-harness headless init"]).toEqual(expect.arrayContaining(["--output"]));
+    expect(surface["rb-harness headless init"]).not.toEqual(expect.arrayContaining(["--profile"]));
+    expect(surface["rb-harness headless interview run"]).toEqual(
+      expect.arrayContaining(["--state", "--timeout", "--first-output-timeout"]),
+    );
   });
 });

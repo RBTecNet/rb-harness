@@ -21,10 +21,11 @@ Start the guided interface from the project or any other directory:
 rb-harness
 ```
 
-The wizard inspects compatible existing artifacts, reports ready plans and
-Ralph runs, offers interrupted-run recovery, then asks for workflow, request,
-provider, model, effort, project, and output directory. Provider question
-batches are normalized and shown one at a time.
+The root wizard shows the existing RB Harness operations. Selecting Init opens
+the canonical Init configuration wizard; `rb-harness --init` skips the root
+menu and opens that wizard directly. The Init wizard detects the current
+project directory, offers the exact supported model profiles, and preserves
+the request exactly as entered before the semantic interview begins.
 
 The direct commands are:
 
@@ -51,6 +52,12 @@ envelopes; bounded part responses use raw document content by default, and the
 orchestrator owns their checkpoint identity and materialization. Orchestrator-private
 variables — resource root, dashboard, telemetry, and Ralph run variables — are
 removed from the adapter environment.
+
+Canonical Init uses conformed exact profiles rather than the legacy
+`--provider/--model` pair. The current choices are
+`anthropic:claude-opus-5` (direct API) and
+`anthropic:claude-code-cli:claude-opus-5` (Claude subscription CLI). The two
+transports never fall back to each other.
 
 ## Login and native APIs
 
@@ -277,35 +284,35 @@ Use a description directly:
 
 ```bash
 rb-harness init \
-  --prompt "Quero criar uma plataforma de agendamento para clínicas com múltiplas unidades." \
-  --provider codex --model gpt-5.6-sol --effort high
+  --profile anthropic:claude-code-cli:claude-opus-5 \
+  --project . \
+  "Quero criar uma plataforma de agendamento para clínicas com múltiplas unidades."
 ```
 
 Or keep a longer brief in a file:
 
 ```bash
-rb-harness init @docs/project-brief.md --provider codex
+rb-harness init --file docs/project-brief.md \
+  --profile anthropic:claude-code-cli:claude-opus-5 --project .
 ```
 
-`--file docs/project-brief.md` and an existing bare file path are also valid.
-RB Harness inspects any useful non-secret material already present, asks only
-material missing decisions, confirms a normalized summary, and writes the
-initial documentation under `.rb/init/`.
+Run `rb-harness --init` for guided configuration. Direct mode begins when Init
+operational arguments are supplied; it never falls back into the configuration
+wizard. Direct mode still performs the semantic interview unless `--headless`
+is selected (or no interactive answer channel exists). Blank semantic answers
+accept the displayed recommendation.
+
+Canonical Init resolves material missing decisions, validates workflow-specific
+semantics, and atomically publishes the exact Ralph artifact tree.
 
 Typical result:
 
 ```text
 .rb/
   rb-manifest.json
-  artifacts.tsv
   init/
-    PROJECT.md
-    REQUIREMENTS.md
-    DECISIONS.md
-    ARCHITECTURE.md
-    PLAN.md
+    BRIEF.md
     PHASES.md
-    source-manifest.json
 ```
 
 Glossary, workflows, non-functional requirements, and formal contracts are
@@ -596,7 +603,7 @@ resume, and future memory boundary.
 For a new project:
 
 ```text
-rb-harness init -> review PHASES.md + OPERATIONS.json -> validate -> execute
+rb-harness init -> review BRIEF.md + PHASES.md -> validate -> execute
 ```
 
 For an existing project:

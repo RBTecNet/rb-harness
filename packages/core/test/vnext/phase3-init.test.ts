@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { sha256Text } from "../../src/hash.js";
 import { SemanticGateway, SemanticGatewayError } from "../../src/vnext/gateway.js";
+import { createInitDashboardController } from "../../src/harness-dashboard.js";
 import { runSemanticInit } from "../../src/vnext/init.js";
 import { questionProblem, selectInterviewAnswer, pendingQuestionEvidence, verifyInterviewEvidence } from "../../src/vnext/interview.js";
 import {
@@ -1003,6 +1004,84 @@ describe("Phase 3 semantic vnext init", () => {
     expect(answer).not.toHaveBeenCalled();
     expect(result.runState.questions).toEqual([]);
     expect(result.runState.stage).toBe("published");
+  });
+
+  it("keeps presentation observers outside semantic authority", async () => {
+    const roots = await Promise.all([
+      mkdtemp(resolve(tmpdir(), "rb-vnext-presentation-normal-")),
+      mkdtemp(resolve(tmpdir(), "rb-vnext-presentation-dashboard-")),
+    ]);
+    const selectedProfile = profile("exact");
+    const normal = await runSemanticInit({
+      originalRequest: HELLO_REQUEST,
+      projectRoot: roots[0]!,
+      profile: selectedProfile,
+      adapter: new ScriptedAdapter(selectedProfile, [{ payload: helloIntent() }, { payload: work("hello") }]),
+      auth,
+      interview: { kind: "headless" },
+      runId: "presentation-equivalence",
+      now: fixedNow,
+    });
+    const observedStages: string[] = [];
+    const dashboard = await runSemanticInit({
+      originalRequest: HELLO_REQUEST,
+      projectRoot: roots[1]!,
+      profile: selectedProfile,
+      adapter: new ScriptedAdapter(selectedProfile, [{ payload: helloIntent() }, { payload: work("hello") }]),
+      auth,
+      interview: { kind: "headless" },
+      runId: "presentation-equivalence",
+      now: fixedNow,
+      onRunState: (snapshot) => {
+        observedStages.push(snapshot.stage);
+        (snapshot as any).originalRequest = "attempted presentation mutation";
+        throw new Error("presentation renderer failure");
+      },
+    });
+    expect(observedStages).toContain("published");
+    expect(dashboard.closure.phases).toBe(normal.closure.phases);
+    expect(dashboard.closure.brief).toBe(normal.closure.brief);
+    expect(dashboard.runState.originalRequest).toBe(HELLO_REQUEST);
+    expect(dashboard.runState.counters).toEqual(normal.runState.counters);
+
+    // The real terminal dashboard is projection-only: driving it from the same
+    // run produces byte-identical semantics and never leaks the request.
+    const painted: string[] = [];
+    const root = await mkdtemp(resolve(tmpdir(), "rb-vnext-presentation-real-"));
+    const controller = createInitDashboardController("0.6.2", root, {
+      isTTY: true, columns: 158, rows: 34, write: (value: string) => void painted.push(value),
+    });
+    controller.start();
+    const rendered = await runSemanticInit({
+      originalRequest: HELLO_REQUEST,
+      projectRoot: root,
+      profile: selectedProfile,
+      adapter: new ScriptedAdapter(selectedProfile, [{ payload: helloIntent() }, { payload: work("hello") }]),
+      auth,
+      interview: { kind: "headless" },
+      runId: "presentation-equivalence",
+      now: fixedNow,
+      onRunState: (snapshot) => controller.state({
+        stage: snapshot.stage,
+        selectedProfileId: snapshot.selectedProfileId,
+        transport: snapshot.transport,
+        requestAccounting: snapshot.requestAccounting,
+        questions: snapshot.questions.length,
+        semanticOperations: snapshot.counters.semanticOperations,
+        transportInvocations: snapshot.counters.transportInvocations,
+        correctiveRegenerations: snapshot.counters.correctiveRegenerations,
+        providerRequests: snapshot.counters.providerRequests.measured ? String(snapshot.counters.providerRequests.value) : "não medido",
+        publicationOccurred: snapshot.publicationOccurred,
+      }),
+    });
+    controller.finish();
+    expect(rendered.closure.phases).toBe(normal.closure.phases);
+    expect(rendered.closure.brief).toBe(normal.closure.brief);
+    expect(rendered.runState.counters).toEqual(normal.runState.counters);
+    expect(rendered.runState.questions).toEqual(normal.runState.questions);
+    expect(painted.join("")).not.toContain(HELLO_REQUEST);
+    expect(painted.join("")).toContain("PIPELINE · FLUXO DE EXECUÇÃO");
+    expect(painted.at(-1)).toContain("[?25h");
   });
 
   it("keeps provider-independent semantics identical across exact and opaque transports", async () => {

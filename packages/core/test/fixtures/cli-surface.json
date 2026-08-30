@@ -1,5 +1,7 @@
 {
   "rb-harness": [
+    "--dashboard",
+    "--init",
     "--login",
     "--no-splash",
     "--splash",
@@ -8,7 +10,8 @@
   ],
   "rb-harness contract": [],
   "rb-harness contract validate": [
-    "--json"
+    "--json",
+    "--project"
   ],
   "rb-harness contract inspect": [
     "--format"
@@ -91,20 +94,12 @@
     "--output"
   ],
   "rb-harness init": [
-    "--adapter",
-    "--answers",
     "--credential",
     "--dashboard",
-    "--effort",
     "--file",
-    "--first-output-timeout",
-    "--model",
-    "--non-interactive",
-    "--output",
+    "--headless",
+    "--profile",
     "--project",
-    "--prompt",
-    "--provider",
-    "--questions",
     "--timeout"
   ],
   "rb-harness ai-context": [

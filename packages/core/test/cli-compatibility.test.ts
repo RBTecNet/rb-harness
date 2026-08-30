@@ -15,10 +15,12 @@ const run = promisify(execFile);
 const fakeProvider = resolve(process.cwd(), "test/fixtures/standalone/fake-provider.mjs");
 
 /**
- * The published surface as of the release before the documentation-core
- * refactor. An internal architecture change may never force a user to relearn
- * a command, and an option may only disappear when it existed solely to drive
- * the removed semantic manager — and then only with an explicit error.
+ * The published command surface. It is rebaselined only by a deliberate
+ * product decision — the canonical Init cutover rebaselined `rb-harness init`
+ * onto the semantic Init engine — never to absorb accidental drift. An
+ * internal architecture change may never force a user to relearn a command,
+ * and an option may only disappear when it existed solely to drive a retired
+ * engine, and then only with an explicit error.
  */
 async function baseline(): Promise<Record<string, string[]>> {
   return JSON.parse(await readFile(resolve(process.cwd(), "test/fixtures/cli-surface.json"), "utf8")) as Record<string, string[]>;
@@ -36,9 +38,25 @@ describe("public CLI compatibility", () => {
     }
   });
 
+  it("keeps the baseline free of options belonging to the retired planner", async () => {
+    const previous = await baseline();
+    // A future edit must not quietly reintroduce the retired planner surface
+    // into the published promise for canonical Init.
+    for (const option of ["--adapter", "--answers", "--effort", "--model", "--non-interactive", "--output", "--prompt", "--provider", "--questions", "--first-output-timeout"]) {
+      expect(previous["rb-harness init"], `baseline resurrected ${option}`).not.toContain(option);
+    }
+    expect(previous["rb-harness vnext init"]).toBeUndefined();
+    // The independently published headless contracts stay under the guard.
+    expect(previous["rb-harness headless init"]).toEqual(["--output"]);
+    expect(previous["rb-harness headless interview run"]).toEqual(["--first-output-timeout", "--state", "--timeout"]);
+  });
+
   it("keeps the workflow, wizard, login, provider, and dashboard entry points", () => {
     const current = harnessCommandSurface();
-    for (const command of ["init", "ai-context", "plan", "evolve", "review"]) {
+    expect(current["rb-harness init"]).toEqual(expect.arrayContaining([
+      "--project", "--profile", "--file", "--credential", "--headless", "--timeout", "--dashboard",
+    ]));
+    for (const command of ["ai-context", "plan", "evolve", "review"]) {
       expect(current[`rb-harness ${command}`]).toEqual(expect.arrayContaining([
         "--project", "--output", "--provider", "--model", "--effort", "--prompt", "--file",
         "--answers", "--questions", "--non-interactive", "--timeout", "--first-output-timeout", "--dashboard",
@@ -48,7 +66,7 @@ describe("public CLI compatibility", () => {
     expect(current["rb-harness provider list"]).toBeDefined();
     expect(current["rb-harness provider test"]).toBeDefined();
     expect(current["rb-harness contract validate"]).toEqual(expect.arrayContaining(["--project", "--json"]));
-    expect(current["rb-harness"]).toEqual(expect.arrayContaining(["--login", "--splash", "--no-splash", "--ver", "--version"]));
+    expect(current["rb-harness"]).toEqual(expect.arrayContaining(["--init", "--dashboard", "--login", "--splash", "--no-splash", "--ver", "--version"]));
     expect(current["rb-harness resume"]).toEqual(expect.arrayContaining(["--dashboard", "--answers", "--questions"]));
   });
 
