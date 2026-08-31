@@ -80,7 +80,8 @@ export class SemanticGateway {
     private readonly auth: ResolvedProviderAuth,
     private readonly onSnapshot?: SnapshotListener,
   ) {
-    if (adapter.family !== profile.family || adapter.transport !== profile.transport || !adapter.profiles.some((entry) => entry.id === profile.id)) {
+    const profileAccepted = adapter.acceptsProfile?.(profile) ?? adapter.profiles.some((entry) => entry.id === profile.id);
+    if (adapter.family !== profile.family || adapter.transport !== profile.transport || !profileAccepted) {
       throw new Error(`PROFILE_ADAPTER_MISMATCH: ${profile.id}`);
     }
     if (!profile.conformance.verifiedRecord || profile.conformance.tier === "UNSUPPORTED") {

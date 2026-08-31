@@ -21,6 +21,14 @@ import {
   type RuntimeAssertionKey,
 } from "./suite.js";
 
+function requestedModelForProfile(profile: ModelProfile): string {
+  return profile.runtimeModel?.requestedModel ?? profile.modelId;
+}
+
+function resolvedModelForProfile(profile: ModelProfile): string | undefined {
+  return profile.runtimeModel ? profile.runtimeModel.resolvedModel : profile.modelId;
+}
+
 function fail(test: ConformanceCase, diagnostic: string): ConformanceCaseResult {
   return { id: test.id, category: test.category, mandatory: test.mandatory, passed: false, normalizations: [], diagnostic };
 }
@@ -75,8 +83,10 @@ function replayRuntimeInvocations(
 }
 
 function hasExactModel(invocations: readonly ReplayedRuntimeInvocation[], profile: ModelProfile): boolean {
+  const resolvedModel = resolvedModelForProfile(profile);
   return invocations.length > 0
-    && invocations.every((item) => item.observation.modelIds.length === 1 && item.observation.modelIds[0] === profile.modelId);
+    && resolvedModel !== undefined
+    && invocations.every((item) => item.observation.modelIds.length === 1 && item.observation.modelIds[0] === resolvedModel);
 }
 
 function hasOnlyStructuredOutput(invocations: readonly ReplayedRuntimeInvocation[]): boolean {
@@ -195,7 +205,7 @@ function deriveRuntimeAssertion(input: {
     case "no-fallback":
       return invocations
         && hasExactModel(invocations, profile)
-        && configuration?.modelId === profile.modelId
+        && configuration?.modelId === requestedModelForProfile(profile)
         && configuration.fallbackModelConfigured === false
         ? runtimePass()
         : runtimeFail("raw model observations or invocation configuration permit fallback");

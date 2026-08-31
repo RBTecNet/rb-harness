@@ -38,7 +38,7 @@ used local fixtures and offline conformance-record replay only.
 
 ### 1.2 Canonical Init cutover, recovery freeze, and current continuation
 
-Current continuation state as of the 2026-08-30 Progressive Init Phase 1 work:
+Current continuation state as of the 2026-08-30 Progressive Init Phase 2 work:
 
 - Frozen Phase 3.5 commit:
   `0bbe610f623c6417d30ed2d57f019bb95dba2404`.
@@ -53,10 +53,14 @@ Current continuation state as of the 2026-08-30 Progressive Init Phase 1 work:
   `5a3481ee74f00c8a7e1805f49330c1220803505a`, whose parent is the canonical
   Init cutover commit.
 - Current Progressive Init foundation branch: `feat/progressive-init-foundation`.
-- Progressive Init foundation base/current HEAD before its uncommitted work:
-  `5a3481ee74f00c8a7e1805f49330c1220803505a`.
-- Progressive Init Phase 1 is implemented as uncommitted worktree changes on
-  that dedicated branch. No Phase 1 implementation commit hash exists.
+- Frozen Progressive Init foundation commit:
+  `bb90ab81d9d3580c571035e3e36399ad458b0c4a`, whose parent is the frozen
+  recovery-budget commit.
+- Progressive Init Phase 2 branch: `feat/progressive-init-user-stories`, based
+  exactly on the frozen foundation commit.
+- Progressive Init Phase 2 user-stories is implemented as uncommitted worktree
+  changes on that dedicated branch. No Phase 2 implementation commit hash
+  exists.
 - The source/package/plugin/runtime version remains `0.6.2`; the recovery
   change does not include a release/version bump.
 
@@ -434,9 +438,15 @@ Progressive project-description adds a stricter live-to-persisted boundary.
 Provider/model output cannot author `developer` authority. Live request and
 interview authority is independently verified by Core before acceptance;
 Progressive request authority requires a meaningful contiguous request span
-whose presentation-normalized text exactly equals the request-backed
-determination statement. This exact binding is Progressive-specific: canonical
-Init request provenance remains at its frozen pre-Progressive behavior.
+selected by the model, while Core derives the authority-bearing request fact
+from that verified evidence. Core does not infer entailment between a free-form
+model statement and request evidence; interpretations beyond the request text
+require another legitimate authority source. This structural binding is
+Progressive-specific: canonical Init request provenance remains at its frozen
+pre-Progressive behavior. Live dogfood replaced the earlier exact
+statement/evidence wire contract because natural supported-model output does
+not reliably repeat the same request fact as two character-equivalent authored
+fields.
 
 Once a valid live project description crosses the persistence boundary,
 `.spec/init/project-description.md` renders every determination as `developer`
@@ -1128,9 +1138,14 @@ Publication semantics:
 No `OPERATIONS.json`, free-form extra documentation, run state, or repair report
 is published by canonical Init.
 
-## 29. Progressive Init Phase 1 foundation
+## 29. Progressive Init Phase 1 foundation and Phase 2 user stories
 
-**PHASE 1 IMPLEMENTED / CURRENTLY UNCOMMITTED**
+**PHASE 1 FROZEN / PHASE 2 FINAL-FREEZE READY AND CURRENTLY UNCOMMITTED**
+
+Progressive Init Phase 1 is frozen at
+`bb90ab81d9d3580c571035e3e36399ad458b0c4a` on
+`feat/progressive-init-foundation`. Phase 2 is isolated on
+`feat/progressive-init-user-stories` from exactly that commit.
 
 The code-owned closed vocabulary and canonical order are:
 
@@ -1164,9 +1179,20 @@ Implemented Phase 1 execution contract:
   schema enforcement is bypassed;
 - genuine live request, user-answer, and accepted-recommendation authority is
   independently verified by Core before the semantic result is accepted;
-- live request authority uses exact presentation-normalized binding between a
-  meaningful verified request span and its determination statement, without
-  lexical-overlap or natural-language entailment heuristics;
+- manual dogfood exposed that resolved project-description questions could be
+  silently omitted when the provider did not reference them as determinations;
+  every verified material project-description interview decision is now
+  materialized by Core, with its key, selected statement, materiality,
+  rigidity, rationale, and source owned by the verified question/answer
+  evidence rather than re-authored or optionally selected by the provider;
+- provider-authored project-description determinations are limited to verified
+  request facts and permitted model defaults; provider/question and
+  developer/question key collisions fail closed rather than overwriting either
+  authority;
+- for live request authority, the model selects a meaningful contiguous request
+  span and Core derives the authority-bearing request fact from that verified
+  evidence; the wire contains no second model-authored request statement and
+  Core uses no lexical-overlap or natural-language entailment heuristic;
 - persistence truthfully converts every accepted determination to `developer`
   authority; the strict Markdown parser accepts no historical live source
   labels, while valid developer edits remain typed semantic authority;
@@ -1181,18 +1207,193 @@ Implemented Phase 1 execution contract:
 - project-description correction regenerates one complete stage candidate and
   is isolated from canonical `intent|work` recovery accounting.
 
-Only `project-description` semantic generation is implemented in Phase 1.
-`user-stories`, `database-schema` (including not-applicable), `project-phases`,
-and Progressive-to-canonical Ralph projection remain **PLANNED / NOT
-IMPLEMENTED**. The coordinator recognizes their status and prerequisites but
-terminates at an explicit Phase 1 boundary without placeholders. The canonical
+Focused Progressive profile choice is explicit at the semantic-execution
+boundary. When `--profile` is supplied, that exact supported profile controls
+model, provider/agent, transport, and request-accounting behavior and no
+selector or fallback is used. When an interactive TTY omits `--profile`, the
+operator selects from the exact currently usable `SUPPORTED` registry profiles
+before stage presentation or provider execution; the selected profile ID,
+transport, and request-accounting mode are displayed. Headless or non-TTY
+execution that needs semantic work fails before provider execution unless an
+exact `--profile` is supplied. A sole usable supported profile may be selected
+directly but is still displayed. Profile selection and credential resolution
+remain separate. This does not modify canonical bare Init profile/wizard
+behavior, and it does not resolve the separately known direct-API Progressive
+response-envelope defect.
+
+Phase 2 implements the separate strict `rb-user-stories/v1` semantic stage:
+
+- `.spec/init/user-stories.md` is the developer-owned semantic source;
+- every story has a stable SemanticKey plus a persisted Core-allocated
+  developer-facing `US-x.y` identity;
+- every story explicitly names one workflow and one or more capabilities it
+  realizes; workflow membership never implies capability coverage, every
+  workflow needs at least one story, and every approved capability must appear
+  in at least one story whose workflow owns that capability;
+- `Actor` is the business/story actor and `Operator` is the actor that directly
+  operates or interacts with the system; both are required, explicit, and
+  bounded by the upstream workflow actor set;
+- Actor and Operator must be equal by default. A mediated pair is valid only
+  when an accepted Core-owned `capability-participation` structural decision
+  binds the exact workflow, capability, Actor, and Operator;
+- Core deterministically enumerates one Capability Participation subject for
+  every upstream `(workflowKey, capabilityKey)` pair before question selection.
+  The same capability in two workflows creates two independent authority
+  subjects, and a persisted decision settles only its exact pair;
+- a workflow with one actor needs no participation question or structural
+  decision: `Actor = Operator = workflow.actorKeys[0]` is a deterministic
+  invariant, not synthetic developer authority. Every unresolved subject whose
+  workflow has multiple actors requires explicit Core-owned structural
+  resolution;
+- Core owns participation-question detection, subject identity, question key,
+  option keys, and Actor/Operator pairs. The provider returns exactly one
+  recommendation/presentation record for every required Core subject and may
+  supply wording and rationale, but it cannot classify prose as structural,
+  omit or invent a subject, merge workflow-scoped subjects, or construct typed
+  options;
+- participation Step 1 contains the workflow actors' equality pairs plus one
+  deterministic escape option. Ordinals and exact Core option keys are the only
+  accepted structural answers; blank accepts only a valid Step-1 provider
+  recommendation, and arbitrary prose cannot manufacture keys;
+- the escape opens a local, provider-free Step 2 containing the complete
+  deterministic Cartesian product of globally declared actors on both the
+  Actor and Operator axes. This option universe is not capped at eight. Step 2
+  accepts only an ordinal or exact Core pair key and has no inferred
+  recommendation;
+- globally known participants remain selectable in Step 2 even when absent
+  from the current workflow. Such a selection intentionally reaches
+  `USER_STORIES_UPSTREAM_REFINEMENT_REQUIRED` before candidate generation,
+  without upstream mutation or fallback;
+- Core materializes both the human-readable interview determination and the
+  typed structural decision under the same SemanticKey. Every structural
+  decision requires exactly one matching determination, while ordinary prose
+  determinations need no structural decision;
+- every story claiming a structurally bound capability must use that exact
+  Actor/Operator pair. Multi-capability stories must satisfy every claimed
+  capability simultaneously and fail deterministically when those
+  participation requirements conflict;
+- after persistence, structural decisions and stories are developer-owned
+  semantics. The provider candidate authors stories only and cannot author,
+  delete, or mutate structural decisions, determinations, or stable IDs;
+- a newly accepted structural decision that selects a globally known Actor or
+  Operator outside the upstream workflow fails before candidate generation as
+  `USER_STORIES_UPSTREAM_REFINEMENT_REQUIRED`; Core neither expands the
+  Project Description nor substitutes another participant;
+- the capability-to-workflow readiness check remains a prerequisite before any
+  user-stories semantic operation;
+- the stage consumes a narrow canonical project-description projection, not
+  the raw request, repository discovery, quality commands, or provenance
+  labels;
+- Core-owned material structural questions are recommended by the single
+  question-selection operation and resolved locally before the complete story
+  candidate is authored. Healthy execution remains exactly two semantic
+  operations; the escape follow-up adds none;
+- live dogfood exposed that asking the candidate to restate verified interview
+  determinations created an unsatisfiable duplicate-authority boundary for
+  natural model paraphrases;
+- Core now verifies each selected interview decision and directly materializes
+  its authority-bearing determination: key and statement come from the verified
+  question decision, materiality and rigidity come from the question, and
+  source and rationale come from verified interview/recommendation evidence;
+- the story candidate receives those resolved decisions only as structural
+  constraints and authors stories, not determinations; candidate prose may
+  naturally express a decision without duplicating its selected value verbatim;
+- existing persisted developer determinations remain Core-owned input, and a
+  new question whose key collides with one fails before candidate authoring;
+- the complete candidate receives at most one whole-stage corrective
+  regeneration, without re-asking questions or changing canonical recovery;
+- provider output contains neither determinations nor `storyId`; consequently it
+  cannot author user-answer, accepted-recommendation, question, materiality,
+  rigidity, acceptance-mode, or developer authority;
+- accepted live determinations become developer authority at the strict
+  persistence boundary;
+- no user-stories allocation or semantic authority is stored under
+  `.rb-harness`; status and freshness are recomputed from the strict `.spec`
+  sources and deterministic inputs;
+- a structurally valid developer-owned user-stories source whose symbolic
+  references are invalidated by a fresh project-description is classified as
+  `reconciliation-required`, with deterministic reference findings;
+- reconciliation findings include removed or moved capability references,
+  Actor or Operator eligibility loss, and incompatible persisted structural
+  participation decisions; intrinsic Markdown/allocation corruption remains a
+  distinct document-invalid failure;
+- reconciliation-required never mutates or repairs developer semantics:
+  upstream stages remain reachable, while focused/automatic user-stories stop
+  before provider execution until the developer explicitly reconciles the
+  strict `.spec/init/user-stories.md` source;
+- additive upstream changes that leave existing story references compatible
+  remain ordinary stale state and may be extended under the existing provider
+  preservation rules; destructive reconciliation/supersession policy remains
+  deliberately unimplemented;
+- the project-description and user-stories stores share the same narrow
+  symlink, containment, expected-hash, concurrent-edit, exclusive-temporary,
+  and atomic-replacement mechanics;
+- focused `--stage user-stories` completes only user-stories, while internal
+  automatic progression identifies `database-schema` next and stops.
+
+Progressive stage execution is freshness-driven at the shared coordinator
+boundary. Live dogfood exposed that explicitly selecting an already fresh User
+Stories stage incorrectly reopened question selection and candidate authoring,
+creating conflicts with valid developer-owned stories. The corrected Phase-2
+contract is:
+
+- `incomplete` and `complete-stale` stages execute their normal semantic
+  operation;
+- `reconciliation-required` remains an actionable developer reconciliation
+  boundary with no provider call;
+- a `complete-fresh` developer-owned stage is an idempotent success with zero
+  semantic operations, corrections, provider calls, interview questions, or
+  writes, including when explicitly selected through `--stage`;
+- explicit stage selection chooses the stage boundary; it does not authorize
+  destructive revision of fresh developer-owned semantics;
+- `developerModified` is not a regeneration trigger when the strict stage
+  source remains complete-fresh;
+- any future typed authority category must be Core-owned from inception;
+  provider classification alone is insufficient;
+- any future force, revision, or supersession capability requires its own
+  explicit authority contract and is not part of Phase 2.
+
+The final terminal interview presentation renders prose alternatives one per
+numbered line and structural choices one pair per numbered block. Internal
+Core option keys remain valid exact-key inputs but are not primary visible
+labels. Interactive structural selections re-prompt locally after invalid
+input, with a maximum of three invalid attempts: Step 1 accepts blank only when
+there is a valid recommendation, while Step 2 never accepts blank. These local
+retries and the Step-2 escape consume no semantic operation, corrective
+regeneration, or provider call. Headless selection remains fail-closed. Screen
+clearing, TTY redraw, and dashboard interview redraw are intentionally deferred
+until the later Progressive presentation layer; the canonical dashboard and
+capybara remain untouched.
+
+Concise Phase-2 manual dogfood evidence:
+
+- runtime selection resolved `fable` to `claude-fable-5`, required explicit
+  compatibility verification before SUPPORT, and reused that evidence in a
+  later process;
+- Project Description interview answers persisted correctly, and its fresh
+  rerun consumed zero semantic operations;
+- initial User Stories dogfood exposed and drove bounded remediation of false
+  workflow-derived capability coverage, collapsed business Actor/system
+  Operator semantics, provider-controlled structural-question classification,
+  and cross-workflow participation ambiguity;
+- final User Stories dogfood proved Core-owned workflow/capability subjects,
+  explicit Actor/Operator selection including mediated `cliente / atendente`,
+  the pre-candidate `USER_STORIES_UPSTREAM_REFINEMENT_REQUIRED` boundary,
+  direct Project Description refinement followed by a successful rerun,
+  successful candidate generation with two semantic operations and zero
+  corrective regenerations, direct developer prose/acceptance cleanup, and a
+  final complete-fresh rerun with zero semantic operations.
+
+`database-schema` (including not-applicable), `project-phases`, and
+Progressive-to-canonical Ralph projection remain **PLANNED / NOT
+IMPLEMENTED**. No placeholder database or phase artifact exists. The canonical
 Ralph closure described in section 28 remains untouched.
 
 This is a temporary integration boundary, not the final approved UX. After all
 four Progressive stages and final Ralph convergence are implemented, a later
 explicit cutover will make bare `rb-harness init` invoke automatic Progressive
 continuation at the earliest incomplete/stale stage. No hidden public automatic
-mode flag is introduced during Phase 1.
+mode flag is introduced during Progressive construction.
 
 Do not implement any Progressive Init element as part of recovery-budget work.
 
@@ -1219,28 +1420,76 @@ Policies that must not be copied blindly:
 RB Harness must preserve typed workflow IR, deterministic validation,
 deterministic rendering, and exact closure.
 
-## 31. Future provider expansion
+## 31. Provider execution identity and future expansion
 
-**PLANNED / NOT IMPLEMENTED; separate from immediate budget work**
+**Claude Code runtime-model selection is implemented in the current uncommitted
+Phase 2 work. Other provider expansion remains PLANNED / NOT IMPLEMENTED.**
 
-Likely order:
+Claude Code now separates these operational identities:
 
-1. Codex CLI;
-2. OpenAI API;
-3. OpenCode CLI.
+```text
+transport profile = anthropic:claude-code-cli
+requested model   = exact selector or moving alias
+resolved model    = concrete identity observed in every model-bearing stream field
+compatibility     = packaged bootstrap evidence or user-level runtime evidence
+```
 
-Every new provider/transport requires:
+The exact legacy profile
+`anthropic:claude-code-cli:claude-opus-5` remains a resolver alias for
+`requestedModel=claude-opus-5`; it does not convert to the moving `opus` alias.
+The packaged 26/26 record bootstraps only that exact recorded tuple. Availability
+does not imply SUPPORT: aliases such as `opus`, `sonnet`, `fable`, and `haiku`,
+and custom future selectors, remain UNVERIFIED until an operator explicitly
+runs the complete existing Claude Code conformance contract.
 
-- a semantic-blind adapter;
-- exact provider/transport/model profile identity;
-- conformance suite execution;
-- packaged integrity-checked record;
-- fail-closed SUPPORT classification;
-- no automatic fallback.
+Runtime compatibility evidence is integrity-bound operational state under the
+XDG user-state root:
 
-CLI subscription transports may use `requestAccounting: opaque` when provider-
-internal requests cannot be authoritatively measured. Harness-owned transport
-invocations remain exactly counted.
+```text
+$XDG_STATE_HOME/rb-harness/provider-compatibility/
+```
+
+with the platform fallback when `XDG_STATE_HOME` is absent. It binds the exact
+Claude Code version, invocation-policy digest, requested selector, observed
+concrete model, conformance contract/capability envelope, opaque accounting,
+and complete sanitized conformance record. It is not project semantic authority
+and is never stored in `.spec`, `.rb`, or project `.rb-harness`.
+
+Interactive focused Progressive execution selects transport first and then a
+Claude Code model. The UI distinguishes SUPPORTED, UNVERIFIED, STALE,
+UNAVAILABLE, and UNSUPPORTED. Verification makes bounded real model calls and
+therefore requires explicit consent. Headless/non-TTY dynamic execution uses:
+
+```text
+--profile anthropic:claude-code-cli --model <selector>
+```
+
+and requires current evidence created explicitly through the internal lab:
+
+```text
+rb-harness vnext conformance anthropic:claude-code-cli \
+  --verify-runtime-model <selector>
+```
+
+No fallback is configured. If a cached alias later resolves to another concrete
+model, or Claude Code's exact version changes, semantic output is rejected
+before Core acceptance and explicit re-verification is required. A
+`complete-fresh` Progressive stage returns before any provider/model selection
+or compatibility lookup.
+
+The current Anthropic direct-API exact profile remains unchanged. Dynamic direct
+API discovery is **NOT IMPLEMENTED**, and the separate known Progressive direct-
+API `{input: ...}` live-envelope defect is not resolved by this work. Canonical
+Init retains its existing exact-profile CLI/wizard topology; the shared provider
+adapter can consume verified runtime targets, but canonical dynamic-selection UI
+is deliberately deferred.
+
+Likely later provider order remains Codex CLI, OpenAI API, and OpenCode CLI.
+Every new provider/transport still requires a semantic-blind adapter, attributable
+compatibility evidence, fail-closed SUPPORT classification, and no automatic
+fallback. CLI subscription transports may use `requestAccounting: opaque` when
+provider-internal requests cannot be authoritatively measured; Harness-owned
+transport invocations remain exactly counted.
 
 ## 32. Legacy cleanup status
 
@@ -1297,20 +1546,16 @@ no `--record` command was used.
 
 | Verification | Result |
 |---|---|
-| `npm run build` | PASS; bundle reproduced deterministically; one esbuild warning about `import.meta` in CJS |
+| `npm run build` twice | PASS; consecutive bundle SHA-256 values both `03a98f197f30a08f3e57cd3c7ef5731d2e5e427c384e4e1d5837eb8e3869b366`; one pre-existing esbuild warning about `import.meta` in CJS |
 | `npm run check` | PASS end to end: build, typecheck, standalone package, full safe suite, Bash compatibility, and plugin check |
-| full safe suite `npm test` | PASS: 53 test files passed, 3 skipped; 794 tests passed, 3 skipped (797 total) |
+| full safe suite `npm test` | PASS: 59 test files passed, 3 skipped; 947 tests passed, 3 skipped (950 total) |
 | `npm run typecheck` | PASS (`tsc --noEmit`) |
 | `npm run check:package` | PASS; packed `rb-harness-core-0.6.2.tgz` and ran every workflow through an installed bin symlink |
 | `node scripts/check-plugin.mjs` | PASS; 69 plugin files internally consistent |
 | `bash scripts/test-bash-compat.sh` | PASS; Bash resolved the READY plan from the manifest tree |
-| CLI compatibility test | PASS: 1 file, 8 tests |
-| command/import/provider boundary tests | PASS: 2 files, 9 tests |
-| canonical cutover test | PASS: 1 file, 7 tests |
+| final Phase-2 focused freeze suite | PASS: 11 files, 200 tests; Progressive Phases 1/2, profile/CLI boundaries, runtime compatibility, packaged conformance, canonical recovery/cutover, and CLI compatibility |
 | canonical dashboard test | PASS: 1 file, 22 tests |
 | headless bundle/init/interview tests | PASS: 3 files, 13 tests |
-| semantic Init/vNext-internal suite (`vitest run test/vnext`) | PASS: 19 files passed, 3 skipped; 216 tests passed, 3 skipped (219 total) |
-| exact incremental-generation regression | PASS: 1 selected test; 40 unselected tests skipped |
 | offline direct-API conformance replay | PASS: SUPPORTED, 16/16 |
 | offline Claude Code CLI conformance replay | PASS: SUPPORTED, 26/26 |
 | `git diff --check` | PASS after checkpoint write |
@@ -1418,16 +1663,19 @@ structural-correction machinery and must not be conflated with canonical Init.
 7. Keep the CJS conformance-replay gap
    and `_provider-run` fixture discrepancy separate unless the operator expands
    scope.
-8. Progressive Init Phase 1 is implemented but uncommitted on
-   `feat/progressive-init-foundation`, based exactly on the recovery freeze.
-   Only project-description semantics exist. Preserve the internal automatic
-   coordinator, public explicit focused `--stage` route, canonical bare-Init
-   bridge, strict protected developer-owned `.spec/init` source, and explicit
-   not-implemented boundary for the remaining stages. The approved future
-   cutover remains automatic Progressive bare Init after all four stages and
-   Ralph convergence are ready.
-9. Keep provider expansion as separate work.
+8. Progressive Init Phase 1 is frozen at
+   `bb90ab81d9d3580c571035e3e36399ad458b0c4a`. Phase 2 user-stories is
+   implemented but uncommitted on `feat/progressive-init-user-stories` from
+   exactly that foundation. Preserve the internal automatic coordinator,
+   public explicit focused `--stage` route, canonical bare-Init bridge, strict
+   protected developer-owned `.spec/init` sources, stable story identities,
+   and explicit not-implemented boundary for database-schema/project-phases.
+   The approved future cutover remains automatic Progressive bare Init after
+   all four stages and Ralph convergence are ready.
+9. Preserve the Claude Code transport/runtime-model split and user-level
+   compatibility evidence. Keep dynamic direct-API discovery and other provider
+   expansion as separate work.
 
-The exact next action is: **review and freeze Progressive Init Phase 1 only when
-explicitly authorized, without absorbing unrelated `package.json` or
-`AGENTS.md` state.** No Progressive Init implementation commit hash exists yet.
+The exact next action is: **commit the independently reviewed Progressive Init
+Phase 2 work as one bounded unit when authorized.** The final freeze is green,
+but no Phase 2 implementation commit hash exists yet.

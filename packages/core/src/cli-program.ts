@@ -59,6 +59,7 @@ import {
 import type { ArtifactRecord, ArtifactStatus, ValidationIssue } from "./types.js";
 import type { HarnessWorkflow, ProviderConfiguration } from "./standalone-types.js";
 import { runVnextConformanceCommand } from "./vnext/providers/conformance/cli.js";
+import { runClaudeCodeRuntimeConformanceCommand } from "./vnext/providers/anthropic/claude-code/runtime-conformance-cli.js";
 import { runInitCommand, type InitCliOptions, type InitCliPresentation } from "./vnext/init-cli.js";
 import { runProgressiveInitCommand, type ProgressiveInitCliOptions } from "./vnext/progressive-init/cli.js";
 import { parseProgressiveInitStage } from "./vnext/progressive-init/stages.js";
@@ -633,6 +634,7 @@ program.command("init")
   .description("Run canonical Init, or one explicitly selected Progressive Init stage")
   .argument("[request...]", "project request text")
   .option("--profile <profile-id>", "exact supported provider/transport/model profile")
+  .option("--model <selector>", "runtime model selector for anthropic:claude-code-cli")
   .option("--file <path>", "read request text from a file")
   .option("--credential <id-or-label>", "saved direct API credential selector")
   .option("--project <path>", "project root", ".")
@@ -641,7 +643,7 @@ program.command("init")
   .option("--stage <stage>", `run exactly one Progressive Init stage: project-description, user-stories, database-schema, or project-phases`, parseProgressiveInitStage)
   .option("--dashboard", "show the canonical Init dashboard")
   .action(async (request: string[], options: {
-    profile?: string; file?: string; credential?: string; project: string; headless?: boolean; timeout: string; dashboard?: boolean; stage?: ReturnType<typeof parseProgressiveInitStage>;
+    profile?: string; model?: string; file?: string; credential?: string; project: string; headless?: boolean; timeout: string; dashboard?: boolean; stage?: ReturnType<typeof parseProgressiveInitStage>;
   }) => {
     const dashboard = Boolean(options.dashboard || program.opts<{ dashboard?: boolean }>().dashboard);
     if (options.stage) {
@@ -650,6 +652,7 @@ program.command("init")
         requestParts: request,
         requestFile: options.file,
         profileId: options.profile,
+        modelSelector: options.model,
         credential: options.credential,
         projectRoot: options.project,
         headless: Boolean(options.headless),
@@ -659,6 +662,7 @@ program.command("init")
       await runProgressiveInitCommand(progressiveOptions);
       return;
     }
+    if (options.model) throw new Error("DYNAMIC_MODEL_SELECTION_PROGRESSIVE_ONLY: --model currently requires --stage");
     const missing = missingInitDirectInputs({ profile: options.profile, requestParts: request, requestFile: options.file });
     if (missing.length) throw new Error(formatIncompleteInitDirectMode(missing));
     await runCanonicalInit({
@@ -729,8 +733,14 @@ vnext.command("conformance")
   .description("Replay or explicitly record exact-profile adapter conformance")
   .argument("<profile-id>")
   .option("--record", "perform explicit live recording")
+  .option("--verify-runtime-model <selector>", "explicitly run full Claude Code compatibility verification into user state")
   .option("--credential <id-or-label>", "saved direct API credential selector")
-  .action(async (profileId: string, options: { record?: boolean; credential?: string }) => {
+  .action(async (profileId: string, options: { record?: boolean; verifyRuntimeModel?: string; credential?: string }) => {
+    if (options.verifyRuntimeModel !== undefined) {
+      if (options.record || options.credential) throw new Error("runtime model verification cannot be combined with --record or --credential");
+      await runClaudeCodeRuntimeConformanceCommand({ transportProfileId: profileId, requestedModel: options.verifyRuntimeModel });
+      return;
+    }
     await runVnextConformanceCommand({ profileId, record: Boolean(options.record), credential: options.credential });
   });
 

@@ -162,6 +162,24 @@ export interface ConformanceState {
   readonly reason?: string;
 }
 
+export type RuntimeModelSelectorKind = "alias" | "exact";
+
+/**
+ * Operational runtime-model selection attached only after compatibility has
+ * been verified. It is never project or interview authority.
+ */
+export interface RuntimeModelBinding {
+  readonly transportProfileId: string;
+  readonly transportVersion: string;
+  readonly requestedModel: string;
+  readonly selectorKind: RuntimeModelSelectorKind;
+  readonly resolvedModel?: string;
+  readonly compatibilityEvidenceId?: string;
+  readonly compatibilityEvidenceSha256?: string;
+  readonly compatibilityStoreRoot?: string;
+  readonly compatibilitySource: "packaged" | "runtime" | "verification-pending";
+}
+
 export interface ModelProfile {
   readonly id: string;
   readonly family: string;
@@ -196,6 +214,7 @@ export interface ModelProfile {
     readonly costUsd: boolean;
   };
   readonly conformance: ConformanceState;
+  readonly runtimeModel?: RuntimeModelBinding;
 }
 
 export interface ResolvedProviderCredential {
@@ -218,6 +237,8 @@ export interface ProviderAdapter {
   readonly family: string;
   readonly transport: ProviderTransportId;
   readonly profiles: readonly ModelProfile[];
+  /** Dynamic transport/model targets are admitted explicitly by their adapter. */
+  acceptsProfile?(profile: ModelProfile): boolean;
   checkCapabilities(profile: ModelProfile, request: SemanticRequest): ProviderOutcome<true>;
   request(
     profile: ModelProfile,

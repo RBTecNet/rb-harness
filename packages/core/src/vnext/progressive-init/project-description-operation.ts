@@ -18,7 +18,11 @@ export const PROJECT_DESCRIPTION_INSTRUCTIONS = [
   "Use stable lower-case kebab-case semantic keys. Do not emit phases, tasks, paths, machine IDs, document syntax, or future-stage semantics.",
   "Repository discovery is bounded evidence, not permission to copy secrets or invent requirements.",
   "Every material ambiguity must be a stage-specific question with one concrete recommendation, rationale, and alternatives.",
+  "Core materializes every resolved question as an authority-bearing determination. Do not restate interview-backed determinations in determinations.",
+  "Provider-authored determinations may use only request or model-default authority.",
   "A RIGID product or architecture determination cannot use silent model-default authority.",
+  "For source.kind=request, omit statement and select the smallest useful complete contiguous request clause or span that expresses the fact to preserve; Core derives the authority-bearing statement from verified evidence.",
+  "Do not present interpretations beyond the literal request span as request authority; use model-default where permitted or a material question where stronger authority is required.",
   "Provider output cannot claim developer authority; developer authority exists only in a validated persisted project-description document.",
   "Return a complete candidate. Never return a patch or Markdown.",
 ].join("\n");

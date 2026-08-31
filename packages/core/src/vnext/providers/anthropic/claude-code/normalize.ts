@@ -7,6 +7,7 @@ import {
   type ProviderOutcome,
   type SemanticRequest,
 } from "../../contract.js";
+import { resolvedModelForProfile } from "./runtime-model.js";
 import type { ClaudeCodeCommandResult } from "./process.js";
 
 export interface ClaudeCodeRawResponse {
@@ -206,8 +207,12 @@ export function extractClaudeCodePayload(
   const result = resultEvents[0]!;
   if (raw.exitCode !== 0 || result.subtype !== "success" || result.is_error === true) return errorFromEnvelope(raw, observation);
   if (!raw.treeQuiescent) return errorFromEnvelope(raw, observation);
-  if (observation.modelIds.length !== 1 || observation.modelIds[0] !== profile.modelId) {
-    return { ok: false, error: { kind: "provider-error", message: `Claude Code observed unexpected model set: ${observation.modelIds.join(", ") || "none"}`, transportRetryable: false } };
+  if (observation.modelIds.length !== 1) {
+    return { ok: false, error: { kind: "provider-error", message: `MODEL_IDENTITY_DISAGREEMENT: Claude Code observed model set ${observation.modelIds.join(", ") || "none"}`, transportRetryable: false } };
+  }
+  const expectedModel = resolvedModelForProfile(profile);
+  if (expectedModel !== undefined && observation.modelIds[0] !== expectedModel) {
+    return { ok: false, error: { kind: "provider-error", message: `MODEL_COMPATIBILITY_STALE: expected ${expectedModel}, observed ${observation.modelIds[0]}`, transportRetryable: false } };
   }
   if (
     observation.tools.some((tool) => tool !== "StructuredOutput")

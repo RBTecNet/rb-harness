@@ -8,7 +8,7 @@ import {
   verifyInterviewEvidence,
 } from "../interview.js";
 import type { Materiality, QualityCommandKind, Rigidity } from "../ir.js";
-import { canonicalEvidenceText, requestEvidenceIsVerified } from "../provenance.js";
+import { requestEvidenceIsVerified } from "../provenance.js";
 import type { JsonSchemaDocument } from "../providers/contract.js";
 import { qualityCommandSafetyIssue, semanticSingleLineIsValid } from "../validate.js";
 
@@ -82,17 +82,27 @@ export interface ProjectDescription {
   readonly qualityCommands: readonly ProjectDescriptionQualityCommand[];
 }
 
-type WireAuthority =
-  | { readonly kind: "request"; readonly evidence: string }
-  | { readonly kind: "user-answer"; readonly questionKey: string; readonly value: string }
-  | {
-      readonly kind: "accepted-recommendation";
-      readonly questionKey: string;
-      readonly value: string;
-      readonly acceptanceMode: "blank-interactive" | "non-interactive-policy";
-    }
-  | { readonly kind: "model-default" }
-  | { readonly kind: "question"; readonly questionKey: string };
+type WireRequestAuthority = { readonly kind: "request"; readonly evidence: string };
+
+type WireModelAuthority = { readonly kind: "model-default" };
+
+type WireAuthority = WireRequestAuthority | WireModelAuthority;
+
+interface ProjectDescriptionWireDeterminationBase {
+  readonly key: string;
+  readonly rationale: string;
+  readonly materiality: Materiality;
+  readonly rigidity: Rigidity;
+}
+
+type ProjectDescriptionWireDetermination =
+  | (ProjectDescriptionWireDeterminationBase & {
+      readonly source: WireRequestAuthority;
+    })
+  | (ProjectDescriptionWireDeterminationBase & {
+      readonly statement: string;
+      readonly source: WireModelAuthority;
+    });
 
 export interface ProjectDescriptionWire {
   readonly contract: typeof PROJECT_DESCRIPTION_CONTRACT;
@@ -108,14 +118,7 @@ export interface ProjectDescriptionWire {
     readonly capabilityKeys: readonly string[];
   }[];
   readonly constraints: readonly { readonly key: string; readonly statement: string }[];
-  readonly determinations: readonly {
-    readonly key: string;
-    readonly statement: string;
-    readonly rationale: string;
-    readonly materiality: Materiality;
-    readonly rigidity: Rigidity;
-    readonly source: WireAuthority;
-  }[];
+  readonly determinations: readonly ProjectDescriptionWireDetermination[];
   readonly qualityCommands: readonly { readonly key: string; readonly kind: QualityCommandKind; readonly command: string }[];
   readonly questions: readonly ProposedQuestion[];
 }
@@ -133,16 +136,21 @@ export type ProjectDescriptionOutcome<T> =
 const keySchema = { type: "string", pattern: SEMANTIC_KEY_PATTERN } as const;
 const textSchema = { type: "string", minLength: 1 } as const;
 const keyArraySchema = { type: "array", items: keySchema } as const;
-const authoritySchema = {
+const requestAuthoritySchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["kind", "evidence"],
+  properties: {
+    kind: { type: "string", enum: ["request"] },
+    evidence: textSchema,
+  },
+} as const;
+const modelAuthoritySchema = {
   type: "object",
   additionalProperties: false,
   required: ["kind"],
   properties: {
-    kind: { type: "string", enum: ["request", "user-answer", "accepted-recommendation", "model-default", "question"] },
-    evidence: { type: "string" },
-    questionKey: keySchema,
-    value: { type: "string" },
-    acceptanceMode: { type: "string", enum: ["blank-interactive", "non-interactive-policy"] },
+    kind: { type: "string", enum: ["model-default"] },
   },
 } as const;
 
@@ -186,14 +194,28 @@ export const PROJECT_DESCRIPTION_SCHEMA: JsonSchemaDocument = {
     determinations: {
       type: "array",
       items: {
-        type: "object", additionalProperties: false,
-        required: ["key", "statement", "rationale", "materiality", "rigidity", "source"],
-        properties: {
-          key: keySchema, statement: textSchema, rationale: textSchema,
-          materiality: { type: "string", enum: ["product", "architecture", "implementation", "preference"] },
-          rigidity: { type: "string", enum: ["RIGID", "FLEXIBLE"] },
-          source: authoritySchema,
-        },
+        oneOf: [
+          {
+            type: "object", additionalProperties: false,
+            required: ["key", "rationale", "materiality", "rigidity", "source"],
+            properties: {
+              key: keySchema, rationale: textSchema,
+              materiality: { type: "string", enum: ["product", "architecture", "implementation", "preference"] },
+              rigidity: { type: "string", enum: ["RIGID", "FLEXIBLE"] },
+              source: requestAuthoritySchema,
+            },
+          },
+          {
+            type: "object", additionalProperties: false,
+            required: ["key", "statement", "rationale", "materiality", "rigidity", "source"],
+            properties: {
+              key: keySchema, statement: textSchema, rationale: textSchema,
+              materiality: { type: "string", enum: ["product", "architecture", "implementation", "preference"] },
+              rigidity: { type: "string", enum: ["RIGID", "FLEXIBLE"] },
+              source: modelAuthoritySchema,
+            },
+          },
+        ],
       },
     },
     qualityCommands: {
@@ -278,14 +300,14 @@ export function projectDescriptionForPersistence(value: ProjectDescription): Pro
   });
 }
 
-/** Request authority is an exact, meaningful request span—not an inferred interpretation. */
-export function progressiveRequestDeterminationIsVerified(
-  originalRequest: string,
-  evidence: string,
-  statement: string,
-): boolean {
-  return requestEvidenceIsVerified(originalRequest, evidence)
-    && canonicalEvidenceText(evidence) === canonicalEvidenceText(statement);
+/** Request authority starts with a meaningful contiguous span selected from the authoritative request. */
+export function progressiveRequestEvidenceIsVerified(originalRequest: string, evidence: string): boolean {
+  return requestEvidenceIsVerified(originalRequest, evidence);
+}
+
+/** Core, not the provider, owns the authority-bearing request fact resolved from verified evidence. */
+export function progressiveRequestBackedStatement(evidence: string): string {
+  return clean(evidence);
 }
 
 function add(findings: ProjectDescriptionFinding[], code: ProjectDescriptionFinding["code"], pointer: string, message: string): void {
@@ -311,7 +333,10 @@ function authorityIsValid(
   if (source.kind === "model-default") {
     return determination.rigidity !== "RIGID" || !["product", "architecture"].includes(determination.materiality);
   }
-  if (source.kind === "request") return progressiveRequestDeterminationIsVerified(originalRequest, source.evidence, determination.statement);
+  if (source.kind === "request") {
+    return progressiveRequestEvidenceIsVerified(originalRequest, source.evidence)
+      && determination.statement === progressiveRequestBackedStatement(source.evidence);
+  }
   const verified = interviewDecisions.get(source.questionKey);
   if (!verified || verified.selectedValue.trim() !== determination.statement.trim() || source.value.trim() !== verified.selectedValue.trim()) return false;
   return source.kind === "user-answer"
@@ -441,17 +466,12 @@ function enumValue<T extends string>(value: unknown, allowed: readonly T[], poin
 
 function decodeSource(value: unknown, pointer: string, findings: ProjectDescriptionFinding[]): WireAuthority {
   const source = asRecord(value, pointer, findings);
-  exact(source, ["kind", "evidence", "questionKey", "value", "acceptanceMode"], pointer, findings);
-  const kind = enumValue(source.kind, ["request", "user-answer", "accepted-recommendation", "model-default", "question"] as const, `${pointer}/kind`, findings);
-  if (kind === "request") return { kind, evidence: text(source.evidence, `${pointer}/evidence`, findings) };
-  if (kind === "user-answer") return { kind, questionKey: text(source.questionKey, `${pointer}/questionKey`, findings), value: text(source.value, `${pointer}/value`, findings) };
-  if (kind === "accepted-recommendation") return {
-    kind,
-    questionKey: text(source.questionKey, `${pointer}/questionKey`, findings),
-    value: text(source.value, `${pointer}/value`, findings),
-    acceptanceMode: enumValue(source.acceptanceMode, ["blank-interactive", "non-interactive-policy"] as const, `${pointer}/acceptanceMode`, findings),
-  };
-  if (kind === "question") return { kind, questionKey: text(source.questionKey, `${pointer}/questionKey`, findings) };
+  const kind = enumValue(source.kind, ["request", "model-default"] as const, `${pointer}/kind`, findings);
+  if (kind === "request") {
+    exact(source, ["kind", "evidence"], pointer, findings);
+    return { kind, evidence: text(source.evidence, `${pointer}/evidence`, findings) };
+  }
+  exact(source, ["kind"], pointer, findings);
   return { kind };
 }
 
@@ -486,14 +506,22 @@ export function decodeProjectDescriptionWire(payload: unknown, authoritativeRequ
     const value = asRecord(raw, `/constraints/${index}`, findings); exact(value, ["key", "statement"], `/constraints/${index}`, findings);
     return { key: text(value.key, `/constraints/${index}/key`, findings), statement: text(value.statement, `/constraints/${index}/statement`, findings) };
   });
-  const determinations = list(root.determinations, "/determinations", findings).map((raw, index) => {
-    const value = asRecord(raw, `/determinations/${index}`, findings); exact(value, ["key", "statement", "rationale", "materiality", "rigidity", "source"], `/determinations/${index}`, findings);
-    return {
-      key: text(value.key, `/determinations/${index}/key`, findings), statement: text(value.statement, `/determinations/${index}/statement`, findings), rationale: text(value.rationale, `/determinations/${index}/rationale`, findings),
-      materiality: enumValue(value.materiality, ["product", "architecture", "implementation", "preference"] as const, `/determinations/${index}/materiality`, findings),
-      rigidity: enumValue(value.rigidity, ["RIGID", "FLEXIBLE"] as const, `/determinations/${index}/rigidity`, findings),
-      source: decodeSource(value.source, `/determinations/${index}/source`, findings),
+  const determinations = list(root.determinations, "/determinations", findings).map((raw, index): ProjectDescriptionWireDetermination => {
+    const pointer = `/determinations/${index}`;
+    const value = asRecord(raw, pointer, findings);
+    const source = decodeSource(value.source, `${pointer}/source`, findings);
+    const common = {
+      key: text(value.key, `${pointer}/key`, findings),
+      rationale: text(value.rationale, `${pointer}/rationale`, findings),
+      materiality: enumValue(value.materiality, ["product", "architecture", "implementation", "preference"] as const, `${pointer}/materiality`, findings),
+      rigidity: enumValue(value.rigidity, ["RIGID", "FLEXIBLE"] as const, `${pointer}/rigidity`, findings),
     };
+    if (source.kind === "request") {
+      exact(value, ["key", "rationale", "materiality", "rigidity", "source"], pointer, findings);
+      return { ...common, source };
+    }
+    exact(value, ["key", "statement", "rationale", "materiality", "rigidity", "source"], pointer, findings);
+    return { ...common, statement: text(value.statement, `${pointer}/statement`, findings), source };
   });
   const qualityCommands = list(root.qualityCommands, "/qualityCommands", findings).map((raw, index) => {
     const value = asRecord(raw, `/qualityCommands/${index}`, findings); exact(value, ["key", "kind", "command"], `/qualityCommands/${index}`, findings);
@@ -512,9 +540,10 @@ export function decodeProjectDescriptionWire(payload: unknown, authoritativeRequ
     const problem = questionProblem(question); if (problem) add(findings, "semantic", `/questions/${index}`, problem);
     return question;
   });
-  const questionKeys = new Set(questions.map((entry) => entry.key));
-  determinations.forEach((entry, index) => {
-    if (entry.source.kind === "question" && !questionKeys.has(entry.source.questionKey)) add(findings, "authority", `/determinations/${index}/source/questionKey`, "unknown project-description question key");
+  const questionKeys = new Set<string>();
+  questions.forEach((entry, index) => {
+    if (questionKeys.has(entry.key)) add(findings, "semantic", `/questions/${index}/key`, `duplicate project-description question key '${entry.key}'`);
+    questionKeys.add(entry.key);
   });
   const wire: ProjectDescriptionWire = { contract: PROJECT_DESCRIPTION_CONTRACT, stage: "project-description", originalRequest, project, actors, capabilities, workflows, constraints, determinations, qualityCommands, questions };
   return findings.length ? { ok: false, findings } : { ok: true, value: wire };
@@ -526,48 +555,59 @@ export function resolveProjectDescriptionWire(
   existingDeveloperAuthority?: ProjectDescription,
 ): ProjectDescriptionOutcome<ProjectDescription> {
   const findings: ProjectDescriptionFinding[] = [];
-  const decisions = new Map(evidence.map((entry) => [entry.key, verifyInterviewEvidence(entry)]));
-  const determinations: ProjectDescriptionDetermination[] = wire.determinations.flatMap((entry, index) => {
+  const providerDeterminations: ProjectDescriptionDetermination[] = wire.determinations.flatMap((entry, index) => {
     let source: ProjectDescriptionAuthority;
-    let statement = entry.statement;
-    if (entry.source.kind === "question") {
-      const decision = decisions.get(entry.source.questionKey);
-      if (!decision) {
-        add(findings, "authority", `/determinations/${index}/source`, "question-backed determination has no resolved stage decision");
+    let statement = "statement" in entry ? entry.statement : "";
+    if (entry.source.kind === "request") {
+      if (!progressiveRequestEvidenceIsVerified(wire.originalRequest, entry.source.evidence)) {
+        add(findings, "authority", `/determinations/${index}/source/evidence`, "request evidence is not a meaningful contiguous span of the authoritative request");
         return [];
       }
-      statement = decision.selectedValue;
-      source = decision.source.kind === "user-answer"
-        ? { kind: "user-answer", questionKey: decision.questionKey, value: decision.selectedValue }
-        : {
-            kind: "accepted-recommendation",
-            questionKey: decision.questionKey,
-            value: decision.selectedValue,
-            acceptanceMode: decision.acceptanceMode as "blank-interactive" | "non-interactive-policy",
-          };
-    } else if (entry.source.kind === "request") source = entry.source;
-    else if (entry.source.kind === "user-answer") {
-      const key = semanticKey(entry.source.questionKey);
-      const decision = decisions.get(entry.source.questionKey);
-      if (!key || decision?.source.kind !== "user-answer" || decision.selectedValue.trim() !== entry.source.value.trim()) {
-        add(findings, "authority", `/determinations/${index}/source`, "user-answer authority has no matching current verified interview evidence");
-        return [];
-      }
-      source = { ...entry.source, questionKey: key };
-    } else if (entry.source.kind === "accepted-recommendation") {
-      const key = semanticKey(entry.source.questionKey);
-      const decision = decisions.get(entry.source.questionKey);
-      if (!key || decision?.source.kind !== "accepted-recommendation"
-        || decision.selectedValue.trim() !== entry.source.value.trim()
-        || decision.acceptanceMode !== entry.source.acceptanceMode) {
-        add(findings, "authority", `/determinations/${index}/source`, "accepted-recommendation authority has no matching current verified interview evidence");
-        return [];
-      }
-      source = { ...entry.source, questionKey: key };
-    } else source = entry.source;
+      statement = progressiveRequestBackedStatement(entry.source.evidence);
+      source = entry.source;
+    } else {
+      source = entry.source;
+    }
     const key = semanticKey(entry.key); if (!key) return [];
     return [{ ...entry, key, statement, source }];
   });
+  const providerKeys = new Set(providerDeterminations.map((entry) => entry.key));
+  const existingKeys = new Set(existingDeveloperAuthority?.determinations.map((entry) => entry.key) ?? []);
+  const interviewDeterminations: ProjectDescriptionDetermination[] = evidence.flatMap((entry, index) => {
+    const decision = verifyInterviewEvidence(entry);
+    const key = semanticKey(decision.questionKey);
+    if (!key) {
+      add(findings, "authority", `/questions/${index}/key`, "verified interview decision key is not a SemanticKey");
+      return [];
+    }
+    if (providerKeys.has(key)) {
+      add(findings, "authority", `/questions/${index}/key`, `interview determination key '${key}' conflicts with a provider-authored determination`);
+      return [];
+    }
+    if (existingKeys.has(key)) {
+      add(findings, "preservation", `/questions/${index}/key`, `interview determination key '${key}' conflicts with an existing developer-owned determination`);
+      return [];
+    }
+    const source: ProjectDescriptionAuthority = decision.source.kind === "user-answer"
+      ? { kind: "user-answer", questionKey: key, value: decision.selectedValue }
+      : {
+          kind: "accepted-recommendation",
+          questionKey: key,
+          value: decision.selectedValue,
+          acceptanceMode: decision.acceptanceMode as "blank-interactive" | "non-interactive-policy",
+        };
+    return [{
+      key,
+      statement: decision.selectedValue,
+      rationale: decision.source.kind === "user-answer"
+        ? "Selected through an explicit user answer to a material interview question."
+        : entry.recommendedAnswer.rationale,
+      materiality: entry.materiality,
+      rigidity: entry.rigidity,
+      source,
+    }];
+  });
+  const determinations = [...providerDeterminations, ...interviewDeterminations];
   const key = semanticKey(wire.project.key);
   const actors = wire.actors.flatMap((entry) => { const parsed = semanticKey(entry.key); return parsed ? [{ ...entry, key: parsed }] : []; });
   const capabilities = wire.capabilities.flatMap((entry) => { const parsed = semanticKey(entry.key); return parsed ? [{ ...entry, key: parsed }] : []; });

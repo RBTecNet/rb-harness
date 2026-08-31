@@ -42,7 +42,7 @@ describe("public CLI compatibility", () => {
     const previous = await baseline();
     // A future edit must not quietly reintroduce the retired planner surface
     // into the published promise for canonical Init.
-    for (const option of ["--adapter", "--answers", "--effort", "--model", "--non-interactive", "--output", "--prompt", "--provider", "--questions", "--first-output-timeout"]) {
+    for (const option of ["--adapter", "--answers", "--effort", "--non-interactive", "--output", "--prompt", "--provider", "--questions", "--first-output-timeout"]) {
       expect(previous["rb-harness init"], `baseline resurrected ${option}`).not.toContain(option);
     }
     expect(previous["rb-harness vnext init"]).toBeUndefined();
@@ -54,7 +54,7 @@ describe("public CLI compatibility", () => {
   it("keeps the workflow, wizard, login, provider, and dashboard entry points", () => {
     const current = harnessCommandSurface();
     expect(current["rb-harness init"]).toEqual(expect.arrayContaining([
-      "--project", "--profile", "--file", "--credential", "--headless", "--timeout", "--dashboard", "--stage",
+      "--project", "--profile", "--model", "--file", "--credential", "--headless", "--timeout", "--dashboard", "--stage",
     ]));
     for (const command of ["ai-context", "plan", "evolve", "review"]) {
       expect(current[`rb-harness ${command}`]).toEqual(expect.arrayContaining([
@@ -68,6 +68,7 @@ describe("public CLI compatibility", () => {
     expect(current["rb-harness contract validate"]).toEqual(expect.arrayContaining(["--project", "--json"]));
     expect(current["rb-harness"]).toEqual(expect.arrayContaining(["--init", "--dashboard", "--login", "--splash", "--no-splash", "--ver", "--version"]));
     expect(current["rb-harness resume"]).toEqual(expect.arrayContaining(["--dashboard", "--answers", "--questions"]));
+    expect(current["rb-harness vnext conformance"]).toEqual(expect.arrayContaining(["--record", "--verify-runtime-model", "--credential"]));
   });
 
   it("fails removed semantic-manager options with explicit guidance instead of silence", async () => {

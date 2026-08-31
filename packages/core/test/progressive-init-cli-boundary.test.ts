@@ -12,4 +12,9 @@ describe("Progressive Init Phase-1 CLI boundary", () => {
     process.argv = [process.execPath, "rb-harness", "init", "--stage", "project-description", "--dashboard"];
     await expect(runHarnessCli()).rejects.toThrow("PROGRESSIVE_INIT_DASHBOARD_NOT_IMPLEMENTED_PHASE_1");
   });
+
+  it("keeps runtime --model scoped to explicit Progressive execution", async () => {
+    process.argv = [process.execPath, "rb-harness", "init", "--profile", "anthropic:claude-code-cli", "--model", "sonnet", "--headless"];
+    await expect(runHarnessCli()).rejects.toThrow("DYNAMIC_MODEL_SELECTION_PROGRESSIVE_ONLY");
+  });
 });

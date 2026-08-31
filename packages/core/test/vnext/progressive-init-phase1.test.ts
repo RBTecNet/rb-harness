@@ -3,13 +3,16 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { semanticKey } from "../../src/vnext/identity.js";
+import { pendingQuestionEvidence, selectInterviewAnswer } from "../../src/vnext/interview.js";
 import { PROGRESSIVE_INIT_STAGES, parseProgressiveInitStage } from "../../src/vnext/progressive-init/stages.js";
 import { parseProjectDescriptionDocument, renderProjectDescriptionDocument } from "../../src/vnext/progressive-init/project-description-document.js";
 import {
   PROJECT_DESCRIPTION_SCHEMA,
   decodeProjectDescriptionWire,
-  progressiveRequestDeterminationIsVerified,
+  progressiveRequestBackedStatement,
+  progressiveRequestEvidenceIsVerified,
   projectDescriptionAcceptedDecisionProjection,
+  projectDescriptionForPersistence,
   projectDescriptionSemanticSha256,
   resolveProjectDescriptionWire,
   type ProjectDescription,
@@ -22,6 +25,12 @@ import { CANONICAL_INIT_RECOVERY_BUDGET } from "../../src/vnext/recovery-budget.
 import type { CanonicalSemanticResponse, ModelProfile, ProviderAdapter, ProviderOutcome, ResolvedProviderAuth, SemanticRequest } from "../../src/vnext/providers/contract.js";
 
 const REQUEST = "Build a small issue tracker for developers and include automated tests.";
+const DOGFOOD_REQUEST = [
+  "O sistema deve permitir cadastrar clientes e equipamentos.",
+  "O cliente aprova ou rejeita o orçamento.",
+  "No primeiro MVP não precisamos de estoque, financeiro, emissão fiscal ou integração com WhatsApp.",
+  "Quero testes automatizados para os principais fluxos.",
+].join("\n");
 const payload = (objective = "Track project issues through a small reliable workflow.") => ({
   contract: "rb-project-description/v1", stage: "project-description", originalRequest: REQUEST,
   project: { key: "issue-tracker", name: "Issue Tracker", objective },
@@ -29,21 +38,44 @@ const payload = (objective = "Track project issues through a small reliable work
   capabilities: [{ key: "manage-issues", statement: "Create and update project issues." }],
   workflows: [{ key: "issue-lifecycle", statement: "A developer creates and updates an issue.", actorKeys: ["developer"], capabilityKeys: ["manage-issues"] }],
   constraints: [],
-  determinations: [{ key: "automated-tests", statement: "include automated tests", rationale: "The request explicitly requires automated tests.", materiality: "implementation", rigidity: "RIGID", source: { kind: "request", evidence: "include automated tests" } }],
+  determinations: [{ key: "automated-tests", rationale: "The request explicitly requires automated tests.", materiality: "implementation", rigidity: "RIGID", source: { kind: "request", evidence: "include automated tests" } }],
   qualityCommands: [{ key: "test-suite", kind: "test", command: "npm test" }], questions: [],
 });
 
 const questionPayload = () => ({
   ...payload(),
-  determinations: [{
-    key: "scope-choice", statement: "Keep the first release small", rationale: "A bounded release is independently verifiable.",
-    materiality: "product", rigidity: "RIGID", source: { kind: "question", questionKey: "scope-choice" },
-  }],
+  determinations: [],
   questions: [{
     key: "scope-choice", question: "Should the first release remain deliberately small?", materiality: "product", rigidity: "RIGID",
     recommendedAnswer: { value: "Keep the first release small", rationale: "It creates a bounded and verifiable MVP." },
     alternatives: ["Include all future capabilities"],
   }],
+});
+
+const manualDogfoodQuestionPayload = () => ({
+  ...payload(),
+  questions: [
+    {
+      key: "interface-mvp", question: "Qual interface o MVP deve expor?", materiality: "product", rigidity: "RIGID",
+      recommendedAnswer: { value: "API HTTP REST com persistência local simples, sem interface gráfica no MVP.", rationale: "Mantém uma fronteira de interface explícita e pequena." },
+      alternatives: ["Interface gráfica"],
+    },
+    {
+      key: "registro-decisao-orcamento", question: "Quem registra a decisão sobre o orçamento?", materiality: "product", rigidity: "RIGID",
+      recommendedAnswer: { value: "O atendente registra no sistema a decisão informada pelo cliente, identificando a ordem de serviço.", rationale: "Preserva a responsabilidade operacional do atendente." },
+      alternatives: ["O cliente registra diretamente"],
+    },
+    {
+      key: "autenticacao-mvp", question: "Como deve funcionar a autenticação no MVP?", materiality: "architecture", rigidity: "FLEXIBLE",
+      recommendedAnswer: { value: "Autenticação simples por usuário e senha.", rationale: "Fornece uma fronteira de acesso mínima." },
+      alternatives: ["Sem autenticação"],
+    },
+    {
+      key: "persistencia-mvp", question: "Como os dados devem ser persistidos no MVP?", materiality: "architecture", rigidity: "RIGID",
+      recommendedAnswer: { value: "Banco relacional embarcado (SQLite) atrás de uma camada de repositório.", rationale: "Oferece persistência local com separação arquitetural." },
+      alternatives: ["Arquivo JSON"],
+    },
+  ],
 });
 
 const profile: ModelProfile = {
@@ -92,15 +124,64 @@ describe("Progressive Init Phase 1", () => {
     expect(adapter.requests).toHaveLength(1); expect(adapter.requests[0]?.slice).toBe("project-description");
     expect((await inspectProgressiveInit(projectRoot, REQUEST))[0]?.status).toBe("complete-fresh");
     expect((await inspectProgressiveInit(projectRoot, REQUEST))[0]?.status).toBe("complete-fresh");
+    expect((await inspectProgressiveInit(projectRoot, REQUEST))[1]?.status).toBe("incomplete");
     await expect(readFile(resolve(projectRoot, ".rb", "init", "PHASES.md"))).rejects.toMatchObject({ code: "ENOENT" });
-    const noCall = new Adapter([]); await expect(runProgressiveInit(common(projectRoot, noCall))).rejects.toThrow(/STAGE_NOT_IMPLEMENTED_PHASE_1: user-stories/); expect(noCall.requests).toHaveLength(0);
+    await expect(readFile(resolve(projectRoot, ".spec", "init", "user-stories.md"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("focused project-description stops, and focused later stages fail without generation or predecessor mutation", async () => {
+  it("treats focused complete-fresh project-description as an idempotent zero-call success", async () => {
+    const projectRoot = await root();
+    const first = await runProgressiveInit({ ...common(projectRoot, new Adapter([payload()])), selectedStage: "project-description" });
+    const sourceBefore = await readFile(first.artifactPath!, "utf8");
+    const recordPath = resolve(projectRoot, ".rb-harness", "progressive-init", "project-description.json");
+    const recordBefore = await readFile(recordPath, "utf8");
+    const adapter = new Adapter([]);
+    const events: string[] = [];
+    let beforeWriteCalled = false;
+    const result = await runProgressiveInit({
+      projectRoot,
+      originalRequest: REQUEST,
+      selectedStage: "project-description",
+      adapter,
+      beforeWrite: () => { beforeWriteCalled = true; },
+      presentation: {
+        stage: (stage) => { events.push(`stage:${stage}`); },
+        complete: (stage, disposition) => { events.push(`complete:${stage}:${disposition}`); },
+      },
+    });
+    expect(result).toEqual({
+      mode: "focused",
+      selectedStage: "project-description",
+      completedStage: "project-description",
+      semanticOperations: 0,
+      correctiveRegenerations: 0,
+    });
+    expect(events).toEqual(["stage:project-description", "complete:project-description:existing-fresh"]);
+    expect(adapter.requests).toHaveLength(0);
+    expect(beforeWriteCalled).toBe(false);
+    expect(await readFile(first.artifactPath!, "utf8")).toBe(sourceBefore);
+    expect(await readFile(recordPath, "utf8")).toBe(recordBefore);
+    expect((await inspectProgressiveInit(projectRoot, REQUEST))[0]?.status).toBe("complete-fresh");
+  });
+
+  it("still executes incomplete and complete-stale project-description stages", async () => {
+    const incompleteRoot = await root();
+    const incompleteAdapter = new Adapter([payload()]);
+    expect((await runProgressiveInit({ ...common(incompleteRoot, incompleteAdapter), selectedStage: "project-description" })).semanticOperations).toBe(1);
+    expect(incompleteAdapter.requests).toHaveLength(1);
+
+    await writeFile(resolve(incompleteRoot, "stale-input.ts"), "export {};\n");
+    expect((await inspectProgressiveInit(incompleteRoot, REQUEST))[0]?.status).toBe("complete-stale");
+    const staleAdapter = new Adapter([payload()]);
+    expect((await runProgressiveInit({ ...common(incompleteRoot, staleAdapter), selectedStage: "project-description" })).semanticOperations).toBe(1);
+    expect(staleAdapter.requests).toHaveLength(1);
+  });
+
+  it("focused project-description stops, and unready downstream stages fail without generation or predecessor mutation", async () => {
     const projectRoot = await root(); const adapter = new Adapter([payload()]);
     const result = await runProgressiveInit({ ...common(projectRoot, adapter), selectedStage: "project-description" });
     expect(result.nextStage).toBeUndefined(); const before = await readFile(result.artifactPath!, "utf8");
-    const noCall = new Adapter([]); await expect(runProgressiveInit({ ...common(projectRoot, noCall), selectedStage: "user-stories" })).rejects.toThrow(/NOT_IMPLEMENTED_PHASE_1/);
+    const noCall = new Adapter([]); await expect(runProgressiveInit({ ...common(projectRoot, noCall), selectedStage: "database-schema" })).rejects.toThrow(/PREREQUISITE_INVALID/);
     expect(noCall.requests).toHaveLength(0); expect(await readFile(result.artifactPath!, "utf8")).toBe(before);
     await expect(runProgressiveInit({ ...common(await root(), noCall), selectedStage: "user-stories" })).rejects.toThrow(/PREREQUISITE_INVALID/);
   });
@@ -139,6 +220,7 @@ describe("Progressive Init Phase 1", () => {
   it("fails closed on concurrent edits and preserves the developer bytes", async () => {
     const projectRoot = await root(); const path = resolve(projectRoot, ".spec", "init", "project-description.md");
     await runProgressiveInit({ ...common(projectRoot, new Adapter([payload()])), selectedStage: "project-description" });
+    await writeFile(resolve(projectRoot, "stale-source.ts"), "export {};\n");
     await expect(runProgressiveInit({ ...common(projectRoot, new Adapter([payload()])), selectedStage: "project-description", beforeWrite: () => writeFile(path, "developer concurrent edit\n") })).rejects.toThrow(/CONCURRENT_MODIFICATION/);
     expect(await readFile(path, "utf8")).toBe("developer concurrent edit\n");
   });
@@ -154,7 +236,10 @@ describe("Progressive Init Phase 1", () => {
   });
 
   it("includes canonical request, interview, and developer decisions in freshness authority", () => {
-    const base = payload() as unknown as ProjectDescription;
+    const base = {
+      ...payload(),
+      determinations: [{ ...payload().determinations[0]!, statement: "include automated tests" }],
+    } as unknown as ProjectDescription;
     const sources = [
       { kind: "request", evidence: "automated tests" },
       { kind: "user-answer", questionKey: semanticKey("scope-choice")!, value: "Use automated tests" },
@@ -177,11 +262,29 @@ describe("Progressive Init Phase 1", () => {
 
   it("removes developer from the provider schema and rejects it in the production decoder", () => {
     const properties = PROJECT_DESCRIPTION_SCHEMA.properties as Record<string, unknown>;
-    const sourceKind = ((((properties.determinations as Record<string, unknown>).items as Record<string, unknown>).properties as Record<string, unknown>).source) as Record<string, unknown>;
-    const enumValues = (((sourceKind.properties as Record<string, unknown>).kind as Record<string, unknown>).enum);
-    expect(enumValues).toEqual(["request", "user-answer", "accepted-recommendation", "model-default", "question"]);
+    const variants = (((properties.determinations as Record<string, unknown>).items as Record<string, unknown>).oneOf) as Record<string, unknown>[];
+    const requestVariant = variants[0]!;
+    const authoredVariant = variants[1]!;
+    const requestProperties = requestVariant.properties as Record<string, unknown>;
+    expect(requestVariant.required).not.toContain("statement");
+    expect(requestProperties).not.toHaveProperty("statement");
+    expect(((((requestProperties.source as Record<string, unknown>).properties as Record<string, unknown>).kind as Record<string, unknown>).enum)).toEqual(["request"]);
+    expect((((((authoredVariant.properties as Record<string, unknown>).source as Record<string, unknown>).properties as Record<string, unknown>).kind as Record<string, unknown>).enum))
+      .toEqual(["model-default"]);
     const malformed = payload();
     malformed.determinations[0] = { ...malformed.determinations[0]!, source: { kind: "developer" } } as any;
+    const decoded = decodeProjectDescriptionWire(malformed, REQUEST);
+    expect(decoded.ok).toBe(false);
+    if (!decoded.ok) expect(decoded.findings).toContainEqual(expect.objectContaining({ pointer: "/determinations/0/source/kind", code: "shape" }));
+  });
+
+  it.each([
+    { kind: "question", questionKey: "scope-choice" },
+    { kind: "user-answer", questionKey: "scope-choice", value: "Keep the first release small" },
+    { kind: "accepted-recommendation", questionKey: "scope-choice", value: "Keep the first release small", acceptanceMode: "non-interactive-policy" },
+  ])("rejects obsolete provider-authored interview authority $kind", (source) => {
+    const malformed = payload();
+    malformed.determinations[0] = { ...malformed.determinations[0]!, statement: "Provider-restated interview value", source } as any;
     const decoded = decodeProjectDescriptionWire(malformed, REQUEST);
     expect(decoded.ok).toBe(false);
     if (!decoded.ok) expect(decoded.findings).toContainEqual(expect.objectContaining({ pointer: "/determinations/0/source/kind", code: "shape" }));
@@ -205,6 +308,7 @@ describe("Progressive Init Phase 1", () => {
     const projectRoot = await root();
     const first = await runProgressiveInit({ ...common(projectRoot, new Adapter([payload()])), selectedStage: "project-description" });
     const before = await readFile(first.artifactPath!, "utf8");
+    await writeFile(resolve(projectRoot, "stale-source.ts"), "export {};\n");
     const changed = payload();
     changed.determinations[0] = {
       ...changed.determinations[0]!, statement: "Replace the developer decision", materiality: "product", rigidity: "RIGID", source: { kind: "model-default" },
@@ -217,24 +321,90 @@ describe("Progressive Init Phase 1", () => {
   });
 
   it.each([
-    ["exact PostgreSQL fact", "Use PostgreSQL", "Use PostgreSQL", true],
-    ["exact test requirement", "include automated tests", "include automated tests", true],
-    ["over-specific interpretation", "automated tests", "Adopt Vitest as the automated test runner.", false],
-    ["semantic inversion", "include automated tests", "Skip automated tests entirely.", false],
-    ["unrelated determination", "Use PostgreSQL", "Deploy using Kubernetes.", false],
-  ] as const)("binds Progressive request authority structurally: %s", (_case, evidence, statement, expected) => {
-    const request = "Use PostgreSQL and include automated tests.";
-    expect(progressiveRequestDeterminationIsVerified(request, evidence, statement)).toBe(expected);
-    const candidate = { ...payload(), originalRequest: request };
-    candidate.determinations[0] = { ...candidate.determinations[0]!, statement, source: { kind: "request", evidence } };
-    const decoded = decodeProjectDescriptionWire(candidate, request);
+    "O cliente aprova ou rejeita o orçamento.",
+    "No primeiro MVP não precisamos de estoque, financeiro, emissão fiscal ou integração com WhatsApp.",
+    "Quero testes automatizados para os principais fluxos.",
+  ])("derives a real-model-style request fact from verified evidence without a provider statement: %s", (evidence) => {
+    const candidate = { ...payload(), originalRequest: DOGFOOD_REQUEST };
+    candidate.determinations[0] = {
+      ...candidate.determinations[0]!,
+      materiality: "product",
+      rigidity: "RIGID",
+      source: { kind: "request", evidence },
+    };
+    expect(candidate.determinations[0]).not.toHaveProperty("statement");
+    const decoded = decodeProjectDescriptionWire(candidate, DOGFOOD_REQUEST);
     expect(decoded.ok).toBe(true);
-    if (decoded.ok) expect(resolveProjectDescriptionWire(decoded.value, []).ok).toBe(expected);
+    if (decoded.ok) {
+      const resolved = resolveProjectDescriptionWire(decoded.value, []);
+      expect(resolved.ok).toBe(true);
+      if (resolved.ok) {
+        expect(resolved.value.determinations[0]).toMatchObject({
+          statement: progressiveRequestBackedStatement(evidence),
+          materiality: "product",
+          rigidity: "RIGID",
+          source: { kind: "request", evidence },
+        });
+      }
+    }
+  });
+
+  it.each([
+    ["model interpretation", "Quero testes automatizados para os principais fluxos.", "Adopt Vitest as the automated test runner."],
+    ["semantic inversion", "O cliente aprova ou rejeita o orçamento.", "O cliente não pode rejeitar o orçamento."],
+    ["unrelated interpretation", "O cliente aprova ou rejeita o orçamento.", "Deploy using Kubernetes."],
+  ] as const)("rejects a second model-authored request statement structurally: %s", (_case, evidence, statement) => {
+    const candidate = { ...payload(), originalRequest: DOGFOOD_REQUEST };
+    candidate.determinations[0] = {
+      ...candidate.determinations[0]!,
+      statement,
+      source: { kind: "request", evidence },
+    } as any;
+    const decoded = decodeProjectDescriptionWire(candidate, DOGFOOD_REQUEST);
+    expect(decoded.ok).toBe(false);
+    if (!decoded.ok) expect(decoded.findings).toContainEqual(expect.objectContaining({
+      code: "shape",
+      pointer: "/determinations/0",
+      message: "unexpected fields: statement",
+    }));
   });
 
   it("rejects request authority from another request and incidental evidence", () => {
-    expect(progressiveRequestDeterminationIsVerified("Build a dashboard.", "Use PostgreSQL", "Use PostgreSQL")).toBe(false);
-    expect(progressiveRequestDeterminationIsVerified("Build a dashboard with a UI.", "a UI", "a UI")).toBe(false);
+    expect(progressiveRequestEvidenceIsVerified("Build a dashboard.", "Use PostgreSQL")).toBe(false);
+    expect(progressiveRequestEvidenceIsVerified(DOGFOOD_REQUEST, "estoque")).toBe(false);
+    const wrongRequest = { ...payload(), originalRequest: DOGFOOD_REQUEST };
+    wrongRequest.determinations[0] = {
+      ...wrongRequest.determinations[0]!,
+      source: { kind: "request", evidence: "Use PostgreSQL" },
+    };
+    const decoded = decodeProjectDescriptionWire(wrongRequest, DOGFOOD_REQUEST);
+    expect(decoded.ok).toBe(true);
+    if (decoded.ok) expect(resolveProjectDescriptionWire(decoded.value, []).ok).toBe(false);
+  });
+
+  it("accepts RIGID request evidence resolved by Core and still forbids a RIGID product model-default", () => {
+    const requestBacked = { ...payload(), originalRequest: DOGFOOD_REQUEST };
+    requestBacked.determinations[0] = {
+      ...requestBacked.determinations[0]!,
+      materiality: "architecture",
+      rigidity: "RIGID",
+      source: { kind: "request", evidence: "Quero testes automatizados para os principais fluxos." },
+    };
+    const requestDecoded = decodeProjectDescriptionWire(requestBacked, DOGFOOD_REQUEST);
+    expect(requestDecoded.ok).toBe(true);
+    if (requestDecoded.ok) expect(resolveProjectDescriptionWire(requestDecoded.value, []).ok).toBe(true);
+
+    const modelDefault = { ...payload(), originalRequest: DOGFOOD_REQUEST };
+    modelDefault.determinations[0] = {
+      ...modelDefault.determinations[0]!,
+      statement: "Adopt Vitest as the automated test runner.",
+      materiality: "architecture",
+      rigidity: "RIGID",
+      source: { kind: "model-default" },
+    } as any;
+    const defaultDecoded = decodeProjectDescriptionWire(modelDefault, DOGFOOD_REQUEST);
+    expect(defaultDecoded.ok).toBe(true);
+    if (defaultDecoded.ok) expect(resolveProjectDescriptionWire(defaultDecoded.value, []).ok).toBe(false);
   });
 
   it.each(["request", "user-answer", "accepted-recommendation", "model-default"] as const)(
@@ -278,6 +448,104 @@ describe("Progressive Init Phase 1", () => {
     expect(parseProjectDescriptionDocument(source).value.determinations[0]?.source).toEqual({ kind: "developer" });
     expect((await inspectProgressiveInit(projectRoot, REQUEST))[0]?.status).toBe("complete-fresh");
     expect((await inspectProgressiveInit(projectRoot, REQUEST))[0]?.status).toBe("complete-fresh");
+  });
+
+  it("materializes every resolved manual-dogfood question in Core and persists the explicit no-auth decision", async () => {
+    const explicitNoAuth = "Sem autenticação no MVP, apenas identificação do papel na requisição";
+    const answer = async (question: { readonly key: string }) => question.key === "autenticacao-mvp" ? explicitNoAuth : "";
+    const liveRoot = await root();
+    const live = await runProjectDescriptionOperation({
+      originalRequest: REQUEST,
+      discovery: await discoverProjectDescriptionEnvironment(liveRoot),
+      profile,
+      adapter: new Adapter([manualDogfoodQuestionPayload()]),
+      auth,
+      interview: { kind: "interactive", answer },
+      deadlineMs: 10_000,
+    });
+    const interviewKeys = new Set(["interface-mvp", "registro-decisao-orcamento", "autenticacao-mvp", "persistencia-mvp"]);
+    const materialized = live.value.determinations.filter((entry) => interviewKeys.has(entry.key));
+    expect(materialized).toHaveLength(4);
+    expect(materialized.find((entry) => entry.key === "interface-mvp")).toMatchObject({
+      statement: "API HTTP REST com persistência local simples, sem interface gráfica no MVP.",
+      materiality: "product", rigidity: "RIGID", source: { kind: "accepted-recommendation", acceptanceMode: "blank-interactive" },
+    });
+    expect(materialized.find((entry) => entry.key === "registro-decisao-orcamento")?.statement)
+      .toBe("O atendente registra no sistema a decisão informada pelo cliente, identificando a ordem de serviço.");
+    expect(materialized.find((entry) => entry.key === "autenticacao-mvp")).toMatchObject({
+      statement: explicitNoAuth,
+      rationale: "Selected through an explicit user answer to a material interview question.",
+      materiality: "architecture", rigidity: "FLEXIBLE",
+      source: { kind: "user-answer", questionKey: "autenticacao-mvp", value: explicitNoAuth },
+    });
+    expect(materialized.find((entry) => entry.key === "persistencia-mvp")?.statement)
+      .toBe("Banco relacional embarcado (SQLite) atrás de uma camada de repositório.");
+
+    const persistedRoot = await root();
+    const persisted = await runProgressiveInit({
+      projectRoot: persistedRoot,
+      originalRequest: REQUEST,
+      selectedStage: "project-description",
+      profile,
+      adapter: new Adapter([manualDogfoodQuestionPayload()]),
+      auth,
+      interview: { kind: "interactive", answer },
+    });
+    const reloaded = parseProjectDescriptionDocument(await readFile(persisted.artifactPath!, "utf8")).value;
+    const persistedNoAuth = reloaded.determinations.find((entry) => entry.key === "autenticacao-mvp");
+    expect(persistedNoAuth).toMatchObject({ statement: explicitNoAuth, source: { kind: "developer" } });
+    expect(reloaded.determinations.filter((entry) => interviewKeys.has(entry.key))).toHaveLength(4);
+  });
+
+  it("fails closed on provider/interview and developer/interview determination-key collisions", async () => {
+    const providerCollision = manualDogfoodQuestionPayload();
+    providerCollision.determinations.push({
+      key: "interface-mvp", rationale: "The request requires automated tests.", materiality: "implementation", rigidity: "FLEXIBLE",
+      source: { kind: "request", evidence: "include automated tests" },
+    });
+    const decoded = decodeProjectDescriptionWire(providerCollision, REQUEST);
+    expect(decoded.ok).toBe(true);
+    if (decoded.ok) {
+      const evidence = decoded.value.questions.map((question) => selectInterviewAnswer(pendingQuestionEvidence(question), { kind: "headless" }));
+      const outcome = resolveProjectDescriptionWire(decoded.value, evidence);
+      expect(outcome.ok).toBe(false);
+      if (!outcome.ok) expect(outcome.findings).toContainEqual(expect.objectContaining({ message: expect.stringContaining("conflicts with a provider-authored determination") }));
+    }
+
+    const cleanWire = decodeProjectDescriptionWire(manualDogfoodQuestionPayload(), REQUEST);
+    expect(cleanWire.ok).toBe(true);
+    if (cleanWire.ok) {
+      const evidence = cleanWire.value.questions.map((question) => selectInterviewAnswer(pendingQuestionEvidence(question), { kind: "headless" }));
+      const existing = projectDescriptionForPersistence({
+        ...(payload() as unknown as ProjectDescription),
+        determinations: [{
+          key: semanticKey("interface-mvp")!, statement: "Existing developer interface", rationale: "Developer-owned decision.",
+          materiality: "product", rigidity: "RIGID", source: { kind: "developer" },
+        }],
+      });
+      const outcome = resolveProjectDescriptionWire(cleanWire.value, evidence, existing);
+      expect(outcome.ok).toBe(false);
+      if (!outcome.ok) expect(outcome.findings).toContainEqual(expect.objectContaining({ message: expect.stringContaining("conflicts with an existing developer-owned determination") }));
+    }
+  });
+
+  it("binds Project Description freshness to Core-owned interview decisions, not presentation text", async () => {
+    const run = async (answerValue: string) => {
+      const projectRoot = await root();
+      return runProjectDescriptionOperation({
+        originalRequest: REQUEST,
+        discovery: await discoverProjectDescriptionEnvironment(projectRoot),
+        profile,
+        adapter: new Adapter([manualDogfoodQuestionPayload()]),
+        auth,
+        interview: { kind: "interactive", answer: async (question) => question.key === "autenticacao-mvp" ? answerValue : "" },
+        deadlineMs: 10_000,
+      });
+    };
+    const withoutAuth = await run("Sem autenticação no MVP, apenas identificação do papel na requisição");
+    const withAuth = await run("Com autenticação obrigatória no MVP");
+    expect(projectDescriptionAcceptedDecisionProjection(withoutAuth.value)).not.toEqual(projectDescriptionAcceptedDecisionProjection(withAuth.value));
+    expect(projectDescriptionSemanticSha256(withoutAuth.value)).not.toBe(projectDescriptionSemanticSha256(withAuth.value));
   });
 
   it("uses one complete-stage correction and leaves canonical recovery authority unchanged", async () => {

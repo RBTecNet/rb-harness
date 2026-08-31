@@ -21,6 +21,11 @@ export interface ProposedQuestion {
 
 export type InterviewAcceptanceMode = "explicit" | RecommendationAcceptanceMode;
 
+export interface InterviewChoicePresentation {
+  readonly label: string;
+  readonly details?: readonly string[];
+}
+
 /** Orchestration evidence. It is deliberately not part of InitProjectModel. */
 export interface InterviewQuestionEvidence {
   readonly key: string;
@@ -34,6 +39,14 @@ export interface InterviewQuestionEvidence {
   readonly response: string | null;
   readonly selectedValue: string | null;
   readonly acceptanceMode: InterviewAcceptanceMode | null;
+  /** Presentation-only prompt override. Omitted by ordinary semantic questions. */
+  readonly answerPrompt?: string;
+  /** Presentation-only numbered choices. Selection identity remains outside this view. */
+  readonly choices?: readonly InterviewChoicePresentation[];
+  /** Presentation-only recommendation visibility. Defaults to true. */
+  readonly showRecommendation?: boolean;
+  /** Presentation-only recommendation label. Semantic selection keeps recommendedAnswer.value. */
+  readonly recommendedLabel?: string;
 }
 
 export interface VerifiedInterviewDecision {
@@ -160,11 +173,32 @@ export function verifyInterviewEvidence(evidence: InterviewQuestionEvidence): Ve
 }
 
 export function formatInteractiveQuestion(question: InterviewQuestionEvidence): string {
-  const alternatives = question.alternatives.length ? `\nAlternatives: ${question.alternatives.join(" | ")}` : "";
-  return [
-    `\n${question.question}`,
-    `Recommended: ${question.recommendedAnswer.value}`,
-    `Why: ${question.recommendedAnswer.rationale}${alternatives}`,
-    "Answer (blank accepts the recommendation): ",
-  ].join("\n");
+  const lines = [`\n${question.question}`];
+  if (question.choices?.length) {
+    lines.push("");
+    question.choices.forEach((choice, index) => {
+      lines.push(`${index + 1}. ${choice.label}`);
+      lines.push(...(choice.details ?? []).map((detail) => `   ${detail}`));
+      if (index < question.choices!.length - 1) lines.push("");
+    });
+  }
+  if (question.showRecommendation !== false) {
+    lines.push(
+      "",
+      "Recommended:",
+      `  ${question.recommendedLabel ?? question.recommendedAnswer.value}`,
+      "",
+      "Why:",
+      `  ${question.recommendedAnswer.rationale}`,
+    );
+  }
+  if (question.alternatives.length) {
+    lines.push(
+      "",
+      "Alternatives:",
+      ...question.alternatives.map((alternative, index) => `  ${index + 1}. ${alternative}`),
+    );
+  }
+  lines.push("", question.answerPrompt ?? "Answer (blank accepts the recommendation): ");
+  return lines.join("\n");
 }

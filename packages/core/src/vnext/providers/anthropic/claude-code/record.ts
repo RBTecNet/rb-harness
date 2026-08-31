@@ -23,6 +23,11 @@ import {
 } from "../../conformance/recording.js";
 import { replayConformance } from "../../conformance/runner.js";
 import { CONFORMANCE_SUITE_VERSION, type ConformanceResult } from "../../conformance/suite.js";
+import {
+  createClaudeCodeRuntimeProfile,
+  isClaudeCodeRuntimeProfile,
+  resolvedModelForProfile,
+} from "./runtime-model.js";
 
 interface CapturedInvocation {
   readonly id: string;
@@ -100,13 +105,14 @@ function skippedSmoke(kind: "cancelled" | "timeout", reason: string): LiveSmokeR
 export async function recordClaudeCodeConformance(
   profile: ModelProfile,
   auth: ResolvedProviderAuth,
-): Promise<{ readonly record: ConformanceRecord; readonly providerRequests: Measured<number>; readonly transportInvocations: number }> {
-  if (profile.id !== "anthropic:claude-code-cli:claude-opus-5" || profile.transport !== "claude-code-cli") {
-    throw new Error(`live Claude Code recording is restricted to the exact Opus 5 CLI profile, received ${profile.id}`);
+  adapter: ClaudeCodeAdapter = new ClaudeCodeAdapter(),
+): Promise<{ readonly record: ConformanceRecord; readonly profile: ModelProfile; readonly providerRequests: Measured<number>; readonly transportInvocations: number }> {
+  const legacyExact = profile.id === "anthropic:claude-code-cli:claude-opus-5" && profile.modelId === "claude-opus-5";
+  if ((!legacyExact && !isClaudeCodeRuntimeProfile(profile)) || profile.transport !== "claude-code-cli") {
+    throw new Error(`live Claude Code recording requires the legacy exact profile or runtime Claude Code transport profile, received ${profile.id}`);
   }
   if (auth.kind !== "ambient-session") throw new Error("Claude Code conformance requires ambient subscription authentication");
 
-  const adapter = new ClaudeCodeAdapter();
   const runtime = await adapter.runtimePreflight();
   if (!runtime.ok) throw new Error(`Claude Code preflight failed: ${runtime.error.kind}: ${runtime.error.message}`);
   const rawResponses: Record<string, RecordedRawResponse> = {};
@@ -195,6 +201,34 @@ export async function recordClaudeCodeConformance(
     capabilitiesActuallyTested: [],
   };
   const observedModelIds = [...new Set(allObservations.flatMap((item) => item.modelIds))].sort();
+  if (observedModelIds.length !== 1) {
+    throw new Error(`MODEL_IDENTITY_DISAGREEMENT: conformance observed ${observedModelIds.join(", ") || "no model"}`);
+  }
+  const resolvedModel = observedModelIds[0]!;
+  const observedMaxOutputTokens = [...new Set(captures.flatMap((capture) => {
+    const events = capture.result.raw?.events ?? [];
+    return events.flatMap((eventValue) => {
+      if (!eventValue || typeof eventValue !== "object" || (eventValue as Record<string, unknown>).type !== "result") return [];
+      const event = eventValue as Record<string, unknown>;
+      const usage = event.modelUsage && typeof event.modelUsage === "object"
+        ? event.modelUsage as Record<string, unknown>
+        : event.model_usage && typeof event.model_usage === "object"
+          ? event.model_usage as Record<string, unknown>
+          : {};
+      const model = usage[resolvedModel];
+      if (!model || typeof model !== "object") return [];
+      const value = (model as Record<string, unknown>).maxOutputTokens;
+      return typeof value === "number" && Number.isInteger(value) && value > 0 ? [value] : [];
+    });
+  }))].sort((left, right) => left - right);
+  const resolvedProfile = isClaudeCodeRuntimeProfile(profile)
+    ? createClaudeCodeRuntimeProfile({
+        requestedModel: profile.runtimeModel!.requestedModel,
+        resolvedModel,
+        transportVersion: runtime.value.transportVersion,
+        maxOutputTokens: observedMaxOutputTokens[0] ?? profile.maxOutputTokens,
+      })
+    : profile;
   const observedSteps = allObservations.map((item) => item.assistantStepIds.length);
   const apiKeySources = allObservations.flatMap((item) => item.apiKeySource === undefined ? [] : [item.apiKeySource]);
   const observedApiKeySource = apiKeySources.length === 0
@@ -205,11 +239,11 @@ export async function recordClaudeCodeConformance(
   const body: ConformanceRecordBody = {
     format: "rb-adapter-conformance-record/v1",
     producer: "rb-harness-conformance-runner",
-    providerFamily: profile.family,
-    profileId: profile.id,
-    modelId: profile.modelId,
-    transport: profile.transport,
-    requestAccounting: profile.requestAccounting,
+    providerFamily: resolvedProfile.family,
+    profileId: resolvedProfile.id,
+    modelId: resolvedModelForProfile(resolvedProfile),
+    transport: resolvedProfile.transport,
+    requestAccounting: resolvedProfile.requestAccounting,
     transportVersion: runtime.value.transportVersion,
     suiteVersion: CONFORMANCE_SUITE_VERSION,
     ...identity,
@@ -248,7 +282,7 @@ export async function recordClaudeCodeConformance(
           executable: "claude",
         },
       ],
-      invocationConfiguration: claudeCodeInvocationConfigurationEvidence(profile),
+      invocationConfiguration: claudeCodeInvocationConfigurationEvidence(resolvedProfile),
       invocations: captures.map((capture) => ({
         id: capture.id,
         recordingKey: capture.recordingKey,
@@ -263,9 +297,9 @@ export async function recordClaudeCodeConformance(
     result: provisionalResult,
   };
   const provisional = sealRecord(body);
-  const result = replayConformance({ adapter, profile, cases: CLAUDE_CODE_CONFORMANCE_CASES, record: provisional });
+  const result = replayConformance({ adapter, profile: resolvedProfile, cases: CLAUDE_CODE_CONFORMANCE_CASES, record: provisional });
   const providerRequests = unmeasured<number>("unsupported-by-provider");
-  return { record: sealRecord({ ...body, result }), providerRequests, transportInvocations: adapter.modelInvocations };
+  return { record: sealRecord({ ...body, result }), profile: resolvedProfile, providerRequests, transportInvocations: adapter.modelInvocations };
 }
 
 /**

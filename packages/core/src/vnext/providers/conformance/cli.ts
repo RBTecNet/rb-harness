@@ -44,10 +44,10 @@ export async function runVnextConformanceCommand(options: {
   credential?: string;
   recordsRoot?: string;
 }): Promise<void> {
+  const root = options.recordsRoot ?? defaultConformanceRecordsRoot();
   const profile = resolveProviderProfile(options.profileId);
   const adapter = resolveProviderAdapter(options.profileId);
   const cases = resolveProviderConformanceCases(options.profileId);
-  const root = options.recordsRoot ?? defaultConformanceRecordsRoot();
   if (profile.transport !== "direct-api" && options.credential) {
     throw new Error(`--credential is not accepted for ambient-session profile ${profile.id}`);
   }

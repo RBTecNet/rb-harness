@@ -14,13 +14,30 @@ import {
 import { runProjectDescriptionOperation } from "./project-description-operation.js";
 import { loadProjectDescription, writeProjectDescriptionAtomically, writeProjectDescriptionStageRecord } from "./project-description-store.js";
 import { PROGRESSIVE_INIT_STAGES, progressiveInitPrerequisites, progressiveInitStageDefinition, type ProgressiveInitStage } from "./stages.js";
+import { renderUserStoriesDocument } from "./user-stories-document.js";
+import {
+  userStoriesAcceptedDecisionProjection,
+  userStoriesAuthoritativeInputSha256,
+  userStoriesForPersistence,
+  userStoriesUpstreamProjection,
+  userStoriesUpstreamProjectionSha256,
+  validateUserStories,
+  validateUserStoriesUpstreamReadiness,
+} from "./user-stories-ir.js";
+import { runUserStoriesOperation } from "./user-stories-operation.js";
+import { loadUserStories, writeUserStoriesAtomically } from "./user-stories-store.js";
 
-export type ProgressiveStageStatus = "complete-fresh" | "complete-stale" | "incomplete";
-export interface ProgressiveStageSnapshot { readonly stage: ProgressiveInitStage; readonly status: ProgressiveStageStatus }
+export type ProgressiveStageStatus = "complete-fresh" | "complete-stale" | "reconciliation-required" | "incomplete";
+export interface ProgressiveStageFinding { readonly pointer: string; readonly message: string }
+export interface ProgressiveStageSnapshot {
+  readonly stage: ProgressiveInitStage;
+  readonly status: ProgressiveStageStatus;
+  readonly findings?: readonly ProgressiveStageFinding[];
+}
 export interface ProgressiveInitPresentation {
   readonly stage: (stage: ProgressiveInitStage, statuses: readonly ProgressiveStageSnapshot[]) => void | Promise<void>;
   readonly question?: (question: InterviewQuestionEvidence) => void | Promise<void>;
-  readonly complete?: (stage: ProgressiveInitStage) => void | Promise<void>;
+  readonly complete?: (stage: ProgressiveInitStage, disposition: "generated" | "existing-fresh") => void | Promise<void>;
   readonly transition?: (next: ProgressiveInitStage) => void | Promise<void>;
 }
 export interface ProgressiveInitOptions {
@@ -40,7 +57,7 @@ export interface ProgressiveInitOptions {
 export interface ProgressiveInitResult {
   readonly mode: "automatic" | "focused";
   readonly selectedStage: ProgressiveInitStage;
-  readonly completedStage?: "project-description";
+  readonly completedStage?: ProgressiveInitStage;
   readonly nextStage?: ProgressiveInitStage;
   readonly artifactPath?: string;
   readonly semanticOperations: number;
@@ -48,7 +65,15 @@ export interface ProgressiveInitResult {
 }
 
 function boundary(stage: ProgressiveInitStage): never {
-  throw new Error(`PROGRESSIVE_INIT_STAGE_NOT_IMPLEMENTED_PHASE_1: ${stage}`);
+  throw new Error(`PROGRESSIVE_INIT_STAGE_NOT_IMPLEMENTED: ${stage}`);
+}
+
+function reconciliationRequired(findings: readonly ProgressiveStageFinding[]): never {
+  const details = findings.map((entry) => `${entry.pointer}: ${entry.message}`).join("; ");
+  throw new Error(
+    "USER_STORIES_RECONCILIATION_REQUIRED: Existing developer-owned user stories conflict with the current project-description. "
+      + `${details}. Update .spec/init/user-stories.md to reconcile these developer-owned semantics, then rerun --stage user-stories.`,
+  );
 }
 
 export async function inspectProgressiveInit(root: string, request?: string): Promise<readonly ProgressiveStageSnapshot[]> {
@@ -56,6 +81,8 @@ export async function inspectProgressiveInit(root: string, request?: string): Pr
   const discoverySha256 = projectDescriptionDiscoverySha256(discovery);
   const existing = await loadProjectDescription(root);
   let projectDescription: ProgressiveStageStatus = "incomplete";
+  let userStories: ProgressiveStageStatus = "incomplete";
+  let userStoriesFindings: readonly ProgressiveStageFinding[] | undefined;
   if (existing) {
     const originalRequest = request?.trim() || existing.document.value.originalRequest;
     const expected = projectDescriptionAuthoritativeInputSha256({
@@ -64,8 +91,35 @@ export async function inspectProgressiveInit(root: string, request?: string): Pr
       acceptedDecisions: projectDescriptionAcceptedDecisionProjection(existing.document.value),
     });
     projectDescription = expected === existing.document.metadata.authoritativeInputSha256 ? "complete-fresh" : "complete-stale";
+    const upstream = userStoriesUpstreamProjection(existing.document.value);
+    const stories = await loadUserStories(root, upstream);
+    if (stories) {
+      if (projectDescription === "complete-fresh" && stories.document.upstreamCompatibilityFindings.length) {
+        userStories = "reconciliation-required";
+        userStoriesFindings = stories.document.upstreamCompatibilityFindings.map(({ pointer, message }) => ({ pointer, message }));
+      } else {
+        const upstreamProjectionSha256 = userStoriesUpstreamProjectionSha256(upstream);
+        const expectedUserStories = userStoriesAuthoritativeInputSha256({
+          upstreamProjectionSha256,
+          acceptedDecisions: userStoriesAcceptedDecisionProjection(stories.document.value),
+        });
+        const currentSemantics = validateUserStories(stories.document.value, upstream);
+        const upstreamReady = validateUserStoriesUpstreamReadiness(upstream).length === 0;
+        userStories = projectDescription === "complete-fresh"
+          && upstreamReady
+          && currentSemantics.ok
+          && stories.document.metadata.upstreamProjectionSha256 === upstreamProjectionSha256
+          && stories.document.metadata.authoritativeInputSha256 === expectedUserStories
+          ? "complete-fresh"
+          : "complete-stale";
+      }
+    }
   }
-  return PROGRESSIVE_INIT_STAGES.map((stage) => ({ stage, status: stage === "project-description" ? projectDescription : "incomplete" }));
+  return PROGRESSIVE_INIT_STAGES.map((stage) => ({
+    stage,
+    status: stage === "project-description" ? projectDescription : stage === "user-stories" ? userStories : "incomplete",
+    ...(stage === "user-stories" && userStoriesFindings ? { findings: userStoriesFindings } : {}),
+  }));
 }
 
 function requireOperation(options: ProgressiveInitOptions): asserts options is ProgressiveInitOptions & Required<Pick<ProgressiveInitOptions, "profile" | "adapter" | "auth" | "interview">> {
@@ -83,7 +137,78 @@ export async function runProgressiveInit(options: ProgressiveInitOptions): Promi
     }
   }
   await options.presentation?.stage(selectedStage, statuses);
-  if (selectedStage !== "project-description") return boundary(selectedStage);
+  const selectedStatus = statuses.find((entry) => entry.stage === selectedStage);
+  if (selectedStatus?.status === "complete-fresh") {
+    await options.presentation?.complete?.(selectedStage, "existing-fresh");
+    return {
+      mode,
+      selectedStage,
+      completedStage: selectedStage,
+      semanticOperations: 0,
+      correctiveRegenerations: 0,
+    };
+  }
+  if (selectedStage !== "project-description" && selectedStage !== "user-stories") return boundary(selectedStage);
+  if (selectedStage === "user-stories") {
+    if (selectedStatus?.status === "reconciliation-required") reconciliationRequired(selectedStatus.findings ?? []);
+    const projectDescription = await loadProjectDescription(options.projectRoot);
+    if (!projectDescription) throw new Error("PROGRESSIVE_INIT_PREREQUISITE_INVALID: user-stories requires complete/fresh project-description");
+    const upstream = userStoriesUpstreamProjection(projectDescription.document.value);
+    const readiness = validateUserStoriesUpstreamReadiness(upstream);
+    if (readiness.length) {
+      throw new Error(`USER_STORIES_UPSTREAM_NOT_READY: ${readiness.map((entry) => `${entry.pointer}: ${entry.message}`).join("; ")}`);
+    }
+    const loaded = await loadUserStories(options.projectRoot, upstream);
+    if (loaded?.document.upstreamCompatibilityFindings.length) {
+      reconciliationRequired(loaded.document.upstreamCompatibilityFindings);
+    }
+    requireOperation(options);
+    const operation = await runUserStoriesOperation({
+      upstream,
+      existing: loaded?.document.value,
+      profile: options.profile,
+      adapter: options.adapter,
+      auth: options.auth,
+      interview: options.interview,
+      deadlineMs: options.deadlineMs ?? 120_000,
+      signal: options.signal,
+      onQuestion: options.presentation?.question,
+    });
+    const persistedValue = userStoriesForPersistence(operation.value);
+    const upstreamProjectionSha256 = userStoriesUpstreamProjectionSha256(upstream);
+    const authoritativeInputSha256 = userStoriesAuthoritativeInputSha256({
+      upstreamProjectionSha256,
+      acceptedDecisions: userStoriesAcceptedDecisionProjection(persistedValue),
+    });
+    const source = renderUserStoriesDocument(persistedValue, upstream, {
+      upstreamProjectionSha256,
+      authoritativeInputSha256,
+    });
+    await options.beforeWrite?.();
+    const artifactPath = await writeUserStoriesAtomically(options.projectRoot, upstream, source, loaded?.sourceSha256);
+    await options.presentation?.complete?.("user-stories", "generated");
+    if (mode === "focused") {
+      return {
+        mode,
+        selectedStage,
+        completedStage: "user-stories",
+        artifactPath,
+        semanticOperations: operation.semanticOperations,
+        correctiveRegenerations: operation.correctiveRegenerations,
+      };
+    }
+    const nextStage = "database-schema";
+    await options.presentation?.transition?.(nextStage);
+    return {
+      mode,
+      selectedStage,
+      completedStage: "user-stories",
+      nextStage,
+      artifactPath,
+      semanticOperations: operation.semanticOperations,
+      correctiveRegenerations: operation.correctiveRegenerations,
+    };
+  }
   requireOperation(options);
   const loaded = await loadProjectDescription(options.projectRoot);
   const originalRequest = options.originalRequest?.trim() || loaded?.document.value.originalRequest;
@@ -111,7 +236,7 @@ export async function runProgressiveInit(options: ProgressiveInitOptions): Promi
     contract: "rb-progressive-init-stage-record/v1", stage: "project-description", completion: "complete",
     semanticSha256: projectDescriptionSemanticSha256(persistedValue), authoritativeInputSha256,
   });
-  await options.presentation?.complete?.("project-description");
+  await options.presentation?.complete?.("project-description", "generated");
   if (mode === "focused") return { mode, selectedStage, completedStage: "project-description", artifactPath, semanticOperations: operation.semanticOperations, correctiveRegenerations: operation.correctiveRegenerations };
   const nextStage = "user-stories";
   await options.presentation?.transition?.(nextStage);
@@ -122,7 +247,7 @@ export function formatProgressiveStagePresentation(stage: ProgressiveInitStage, 
   const definition = progressiveInitStageDefinition(stage);
   const lines = [`RB Harness Init`, "", `Stage ${PROGRESSIVE_INIT_STAGES.indexOf(stage) + 1}/${PROGRESSIVE_INIT_STAGES.length} — ${definition.label}`, definition.purpose, ""];
   for (const item of statuses) {
-    const marker = item.stage === stage ? "→" : item.status === "complete-fresh" ? "✓" : item.status === "complete-stale" ? "!" : "○";
+    const marker = item.stage === stage ? "→" : item.status === "complete-fresh" ? "✓" : item.status === "complete-stale" || item.status === "reconciliation-required" ? "!" : "○";
     lines.push(`${marker} ${progressiveInitStageDefinition(item.stage).label}`);
   }
   return `${lines.join("\n")}\n`;

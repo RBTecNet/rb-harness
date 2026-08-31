@@ -98,10 +98,16 @@
     "--dashboard",
     "--file",
     "--headless",
+    "--model",
     "--profile",
     "--project",
     "--stage",
     "--timeout"
+  ],
+  "rb-harness vnext conformance": [
+    "--credential",
+    "--record",
+    "--verify-runtime-model"
   ],
   "rb-harness ai-context": [
     "--adapter",

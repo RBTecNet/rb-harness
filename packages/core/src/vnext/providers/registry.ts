@@ -10,6 +10,7 @@ import type { ResolvedProviderCredential } from "./contract.js";
 import { CONFORMANCE_CASES } from "./conformance/fixtures.js";
 import { validateConformanceRecord } from "./conformance/runner.js";
 import type { ConformanceCase } from "./conformance/suite.js";
+import { CLAUDE_CODE_TRANSPORT_PROFILE_ID } from "./anthropic/claude-code/runtime-model.js";
 
 export class ProviderRegistryError extends Error {
   constructor(message: string) {
@@ -35,6 +36,12 @@ export function resolveProviderProfile(profileId: string, family?: string): Mode
 }
 
 export function resolveProviderAdapter(profileId: string, family?: string): ProviderAdapter {
+  if (profileId === CLAUDE_CODE_TRANSPORT_PROFILE_ID) {
+    if (family !== undefined && family !== "anthropic") {
+      throw new ProviderRegistryError(`profile ${profileId} belongs to anthropic, not ${family}`);
+    }
+    return claudeCodeAdapter;
+  }
   const profile = resolveProviderProfile(profileId, family);
   const adapter = ADAPTERS.find((candidate) => candidate.family === profile.family && candidate.transport === profile.transport);
   if (!adapter) throw new ProviderRegistryError(`no adapter is registered for profile ${profileId}`);
@@ -110,5 +117,17 @@ export async function loadVerifiedProviderProfile(profileId: string, recordsRoot
       normalizationsOnHappyPath: result.normalizationsOnHappyPath,
       verifiedRecord: true,
     },
+    ...(profile.transport === "claude-code-cli" ? {
+      runtimeModel: {
+        transportProfileId: CLAUDE_CODE_TRANSPORT_PROFILE_ID,
+        transportVersion: record.transportVersion!,
+        requestedModel: profile.modelId,
+        selectorKind: "exact" as const,
+        resolvedModel: profile.modelId,
+        compatibilityEvidenceId: `packaged:${record.integritySha256}`,
+        compatibilityEvidenceSha256: record.integritySha256,
+        compatibilitySource: "packaged" as const,
+      },
+    } : {}),
   };
 }

@@ -23,6 +23,11 @@ import {
   type ClaudeCodeProcess,
 } from "./process.js";
 import { CLAUDE_CODE_OPUS_5_PROFILE_ID, CLAUDE_CODE_PROFILES } from "./profiles.js";
+import {
+  isClaudeCodeRuntimeProfile,
+  requestedModelForProfile,
+} from "./runtime-model.js";
+import { invalidateClaudeCodeCompatibilityEvidence } from "./compatibility-store.js";
 
 export const CLAUDE_CODE_AMBIENT_AUTH_ID = "claude-code-subscription";
 
@@ -39,7 +44,8 @@ export function preflightClaudeCode(profile: ModelProfile, request: SemanticRequ
   if (profile.family !== "anthropic" || profile.transport !== "claude-code-cli") {
     return unsupported(`profile ${profile.id} is not an Anthropic Claude Code CLI profile`);
   }
-  if (profile.id !== CLAUDE_CODE_OPUS_5_PROFILE_ID || profile.modelId !== "claude-opus-5") {
+  const legacy = profile.id === CLAUDE_CODE_OPUS_5_PROFILE_ID && profile.modelId === "claude-opus-5";
+  if (!legacy && !isClaudeCodeRuntimeProfile(profile)) {
     return unsupported(`unknown Claude Code CLI profile: ${profile.id}`);
   }
   if (profile.structuredOutput !== "claude-code-json-schema") {
@@ -71,7 +77,7 @@ export function claudeCodeInvocationArgs(input: {
     "--verbose",
     "--mcp-config", JSON.stringify({ mcpServers: {} }),
     "--max-turns", String(CLAUDE_CODE_INVOCATION_POLICY.maxTurns),
-    "--model", input.profile.modelId,
+    "--model", requestedModelForProfile(input.profile),
     "--effort", input.request.reasoning.mode === "on" ? input.request.reasoning.effort : "low",
     "--system-prompt-file", input.systemPromptFile,
     "--json-schema", JSON.stringify(input.request.schema),
@@ -91,7 +97,7 @@ export function claudeCodeInvocationArgs(input: {
 
 export function claudeCodeInvocationConfigurationEvidence(profile: ModelProfile): ModelInvocationConfigurationEvidence {
   return {
-    modelId: profile.modelId,
+    modelId: requestedModelForProfile(profile),
     effort: profile.reasoning.supported ? profile.reasoning.efforts[0] ?? "" : "",
     ...CLAUDE_CODE_INVOCATION_POLICY,
   };
@@ -131,6 +137,10 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
   private runtimeCommandCount = 0;
 
   constructor(private readonly processRunner: ClaudeCodeProcess = new SpawnClaudeCodeProcess()) {}
+
+  acceptsProfile(profile: ModelProfile): boolean {
+    return this.profiles.some((entry) => entry.id === profile.id) || isClaudeCodeRuntimeProfile(profile);
+  }
 
   get modelInvocations(): number {
     return this.modelInvocationCount;
@@ -221,6 +231,18 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
     }
     const runtime = await this.runtimePreflight();
     if (!runtime.ok) return { outcome: runtime };
+    if (profile.runtimeModel && runtime.value.transportVersion !== profile.runtimeModel.transportVersion) {
+      return {
+        outcome: {
+          ok: false,
+          error: {
+            kind: "provider-error",
+            message: `MODEL_COMPATIBILITY_STALE: Claude Code ${runtime.value.transportVersion} does not match verified runtime ${profile.runtimeModel.transportVersion}`,
+            transportRetryable: false,
+          },
+        },
+      };
+    }
     if (request.signal.aborted) {
       return { outcome: { ok: false, error: { kind: "cancelled", message: "Claude Code request was cancelled during runtime preflight", transportRetryable: false } } };
     }
@@ -251,9 +273,26 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
       }
       const decoded = decodeClaudeCodeStream(processResult);
       if (!decoded.ok) return { outcome: decoded };
+      const outcome = extractClaudeCodePayload(profile, request, decoded.value);
+      if (
+        !outcome.ok
+        && outcome.error.message.startsWith("MODEL_COMPATIBILITY_STALE:")
+        && profile.runtimeModel?.compatibilitySource === "runtime"
+        && profile.runtimeModel.compatibilityStoreRoot
+        && profile.runtimeModel.compatibilityEvidenceId
+        && profile.runtimeModel.compatibilityEvidenceSha256
+      ) {
+        const observation = observeClaudeCode(decoded.value);
+        await invalidateClaudeCodeCompatibilityEvidence({
+          root: profile.runtimeModel.compatibilityStoreRoot,
+          evidenceId: profile.runtimeModel.compatibilityEvidenceId,
+          evidenceSha256: profile.runtimeModel.compatibilityEvidenceSha256,
+          observedModelIdentities: observation.modelIds,
+        });
+      }
       return {
         raw: decoded.value,
-        outcome: extractClaudeCodePayload(profile, request, decoded.value),
+        outcome,
         treeQuiescent: processResult.settlement.quiescent,
         treeVerified: processResult.settlement.verified,
       };
