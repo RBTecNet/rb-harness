@@ -1920,7 +1920,7 @@ describe("Progressive Init Phase 2 user-stories", () => {
     const automatic = await runProgressiveInit(common(projectRoot, new Adapter([emptyQuestions(), candidate()])));
     expect(automatic).toMatchObject({ mode: "automatic", selectedStage: "user-stories", completedStage: "user-stories", nextStage: "database-schema", semanticOperations: 2, correctiveRegenerations: 0 });
     const noCall = new Adapter([]);
-    await expect(runProgressiveInit(common(projectRoot, noCall))).rejects.toThrow(/STAGE_NOT_IMPLEMENTED: database-schema/);
+    await expect(runProgressiveInit(common(projectRoot, noCall))).rejects.toThrow(/DATABASE_SCHEMA_INTERACTIVE_AUTHORITY_REQUIRED/);
     expect(noCall.requests).toHaveLength(0);
 
     const focusedRoot = await root();

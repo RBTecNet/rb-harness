@@ -2,6 +2,17 @@ import { sha256Text } from "../../hash.js";
 import type { InitInterviewMode } from "../init.js";
 import type { InterviewQuestionEvidence } from "../interview.js";
 import type { ModelProfile, ProviderAdapter, ResolvedProviderAuth } from "../providers/contract.js";
+import { renderDatabaseSchemaDocument } from "./database-schema-document.js";
+import {
+  databaseSchemaAcceptedDecisionProjection,
+  databaseSchemaAuthoritativeInputSha256,
+  databaseSchemaForPersistence,
+  databaseSchemaUpstreamProjection,
+  databaseSchemaUpstreamProjectionSha256,
+  validateDatabaseSchema,
+} from "./database-schema-ir.js";
+import { runDatabaseSchemaOperation } from "./database-schema-operation.js";
+import { loadDatabaseSchema, writeDatabaseSchemaAtomically } from "./database-schema-store.js";
 import { discoverProjectDescriptionEnvironment, projectDescriptionDiscoverySha256 } from "./discovery.js";
 import { renderProjectDescriptionDocument } from "./project-description-document.js";
 import {
@@ -76,6 +87,14 @@ function reconciliationRequired(findings: readonly ProgressiveStageFinding[]): n
   );
 }
 
+function databaseSchemaReconciliationRequired(findings: readonly ProgressiveStageFinding[]): never {
+  const details = findings.map((entry) => `${entry.pointer}: ${entry.message}`).join("; ");
+  throw new Error(
+    "DATABASE_SCHEMA_RECONCILIATION_REQUIRED: Existing developer-owned database schema references User Stories that are no longer current. "
+      + `${details}. Reconcile .spec/init/database-schema.md explicitly, then rerun --stage database-schema.`,
+  );
+}
+
 export async function inspectProgressiveInit(root: string, request?: string): Promise<readonly ProgressiveStageSnapshot[]> {
   const discovery = await discoverProjectDescriptionEnvironment(root);
   const discoverySha256 = projectDescriptionDiscoverySha256(discovery);
@@ -83,6 +102,8 @@ export async function inspectProgressiveInit(root: string, request?: string): Pr
   let projectDescription: ProgressiveStageStatus = "incomplete";
   let userStories: ProgressiveStageStatus = "incomplete";
   let userStoriesFindings: readonly ProgressiveStageFinding[] | undefined;
+  let databaseSchema: ProgressiveStageStatus = "incomplete";
+  let databaseSchemaFindings: readonly ProgressiveStageFinding[] | undefined;
   if (existing) {
     const originalRequest = request?.trim() || existing.document.value.originalRequest;
     const expected = projectDescriptionAuthoritativeInputSha256({
@@ -113,12 +134,38 @@ export async function inspectProgressiveInit(root: string, request?: string): Pr
           ? "complete-fresh"
           : "complete-stale";
       }
+      const userStoriesUpstreamSha256 = userStoriesUpstreamProjectionSha256(upstream);
+      const databaseUpstream = databaseSchemaUpstreamProjection(stories.document.value, userStoriesUpstreamSha256);
+      const schema = await loadDatabaseSchema(root, databaseUpstream);
+      if (schema) {
+        if (userStories === "complete-fresh" && schema.document.upstreamCompatibilityFindings.length) {
+          databaseSchema = "reconciliation-required";
+          databaseSchemaFindings = schema.document.upstreamCompatibilityFindings.map(({ pointer, message }) => ({ pointer, message }));
+        } else {
+          const upstreamProjectionSha256 = databaseSchemaUpstreamProjectionSha256(databaseUpstream);
+          const expectedDatabaseSchema = databaseSchemaAuthoritativeInputSha256({
+            upstreamProjectionSha256,
+            acceptedDecisions: databaseSchemaAcceptedDecisionProjection(schema.document.value),
+          });
+          const currentSemantics = validateDatabaseSchema(schema.document.value, databaseUpstream);
+          databaseSchema = userStories === "complete-fresh"
+            && currentSemantics.ok
+            && schema.document.metadata.upstreamProjectionSha256 === upstreamProjectionSha256
+            && schema.document.metadata.authoritativeInputSha256 === expectedDatabaseSchema
+            ? "complete-fresh"
+            : "complete-stale";
+        }
+      }
     }
   }
   return PROGRESSIVE_INIT_STAGES.map((stage) => ({
     stage,
-    status: stage === "project-description" ? projectDescription : stage === "user-stories" ? userStories : "incomplete",
+    status: stage === "project-description" ? projectDescription
+      : stage === "user-stories" ? userStories
+        : stage === "database-schema" ? databaseSchema
+          : "incomplete",
     ...(stage === "user-stories" && userStoriesFindings ? { findings: userStoriesFindings } : {}),
+    ...(stage === "database-schema" && databaseSchemaFindings ? { findings: databaseSchemaFindings } : {}),
   }));
 }
 
@@ -126,16 +173,23 @@ function requireOperation(options: ProgressiveInitOptions): asserts options is P
   if (!options.profile || !options.adapter || !options.auth || !options.interview) throw new Error("PROGRESSIVE_INIT_PROVIDER_CONFIGURATION_REQUIRED: --profile is required when a stage needs semantic generation");
 }
 
-export async function runProgressiveInit(options: ProgressiveInitOptions): Promise<ProgressiveInitResult> {
-  const mode = options.selectedStage ? "focused" : "automatic";
-  const statuses = await inspectProgressiveInit(options.projectRoot, options.originalRequest);
-  const selectedStage = options.selectedStage ?? statuses.find((entry) => entry.status !== "complete-fresh")?.stage;
-  if (!selectedStage) throw new Error("PROGRESSIVE_INIT_COMPLETE: all stages are complete and fresh");
+export function assertProgressiveInitPrerequisites(
+  selectedStage: ProgressiveInitStage,
+  statuses: readonly ProgressiveStageSnapshot[],
+): void {
   for (const prerequisite of progressiveInitPrerequisites(selectedStage)) {
     if (statuses.find((entry) => entry.stage === prerequisite)?.status !== "complete-fresh") {
       throw new Error(`PROGRESSIVE_INIT_PREREQUISITE_INVALID: ${selectedStage} requires complete/fresh ${prerequisite}`);
     }
   }
+}
+
+export async function runProgressiveInit(options: ProgressiveInitOptions): Promise<ProgressiveInitResult> {
+  const mode = options.selectedStage ? "focused" : "automatic";
+  const statuses = await inspectProgressiveInit(options.projectRoot, options.originalRequest);
+  const selectedStage = options.selectedStage ?? statuses.find((entry) => entry.status !== "complete-fresh")?.stage;
+  if (!selectedStage) throw new Error("PROGRESSIVE_INIT_COMPLETE: all stages are complete and fresh");
+  assertProgressiveInitPrerequisites(selectedStage, statuses);
   await options.presentation?.stage(selectedStage, statuses);
   const selectedStatus = statuses.find((entry) => entry.stage === selectedStage);
   if (selectedStatus?.status === "complete-fresh") {
@@ -148,7 +202,69 @@ export async function runProgressiveInit(options: ProgressiveInitOptions): Promi
       correctiveRegenerations: 0,
     };
   }
-  if (selectedStage !== "project-description" && selectedStage !== "user-stories") return boundary(selectedStage);
+  if (selectedStage !== "project-description" && selectedStage !== "user-stories" && selectedStage !== "database-schema") return boundary(selectedStage);
+  if (selectedStage === "database-schema") {
+    if (selectedStatus?.status === "reconciliation-required") databaseSchemaReconciliationRequired(selectedStatus.findings ?? []);
+    if (options.interview?.kind === "headless") {
+      throw new Error("DATABASE_SCHEMA_INTERACTIVE_AUTHORITY_REQUIRED: incomplete or stale database-schema requires interactive developer authority");
+    }
+    const projectDescription = await loadProjectDescription(options.projectRoot);
+    if (!projectDescription) throw new Error("PROGRESSIVE_INIT_PREREQUISITE_INVALID: database-schema requires complete/fresh project-description");
+    const userStoriesUpstream = userStoriesUpstreamProjection(projectDescription.document.value);
+    const stories = await loadUserStories(options.projectRoot, userStoriesUpstream);
+    if (!stories) throw new Error("PROGRESSIVE_INIT_PREREQUISITE_INVALID: database-schema requires complete/fresh user-stories");
+    const upstream = databaseSchemaUpstreamProjection(stories.document.value, userStoriesUpstreamProjectionSha256(userStoriesUpstream));
+    const loaded = await loadDatabaseSchema(options.projectRoot, upstream);
+    if (loaded?.document.upstreamCompatibilityFindings.length) {
+      databaseSchemaReconciliationRequired(loaded.document.upstreamCompatibilityFindings);
+    }
+    requireOperation(options);
+    const operation = await runDatabaseSchemaOperation({
+      upstream,
+      existing: loaded?.document.value,
+      profile: options.profile,
+      adapter: options.adapter,
+      auth: options.auth,
+      interview: options.interview,
+      deadlineMs: options.deadlineMs ?? 120_000,
+      signal: options.signal,
+      onQuestion: options.presentation?.question,
+    });
+    const persistedValue = databaseSchemaForPersistence(operation.value);
+    const upstreamProjectionSha256 = databaseSchemaUpstreamProjectionSha256(upstream);
+    const authoritativeInputSha256 = databaseSchemaAuthoritativeInputSha256({
+      upstreamProjectionSha256,
+      acceptedDecisions: databaseSchemaAcceptedDecisionProjection(persistedValue),
+    });
+    const source = renderDatabaseSchemaDocument(persistedValue, upstream, {
+      upstreamProjectionSha256,
+      authoritativeInputSha256,
+    });
+    await options.beforeWrite?.();
+    const artifactPath = await writeDatabaseSchemaAtomically(options.projectRoot, upstream, source, loaded?.sourceSha256);
+    await options.presentation?.complete?.("database-schema", "generated");
+    if (mode === "focused") {
+      return {
+        mode,
+        selectedStage,
+        completedStage: "database-schema",
+        artifactPath,
+        semanticOperations: operation.semanticOperations,
+        correctiveRegenerations: operation.correctiveRegenerations,
+      };
+    }
+    const nextStage = "project-phases";
+    await options.presentation?.transition?.(nextStage);
+    return {
+      mode,
+      selectedStage,
+      completedStage: "database-schema",
+      nextStage,
+      artifactPath,
+      semanticOperations: operation.semanticOperations,
+      correctiveRegenerations: operation.correctiveRegenerations,
+    };
+  }
   if (selectedStage === "user-stories") {
     if (selectedStatus?.status === "reconciliation-required") reconciliationRequired(selectedStatus.findings ?? []);
     const projectDescription = await loadProjectDescription(options.projectRoot);

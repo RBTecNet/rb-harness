@@ -21,6 +21,7 @@ import {
 } from "../providers/anthropic/claude-code/runtime-compatibility.js";
 import { CLAUDE_CODE_TRANSPORT_PROFILE_ID } from "../providers/anthropic/claude-code/runtime-model.js";
 import {
+  assertProgressiveInitPrerequisites,
   formatProgressiveStagePresentation,
   inspectProgressiveInit,
   runProgressiveInit,
@@ -85,7 +86,7 @@ function semanticExecutionStage(
   statuses: readonly ProgressiveStageSnapshot[],
 ): ProgressiveInitStage | undefined {
   const stage = requested ?? statuses.find((entry) => entry.status !== "complete-fresh")?.stage;
-  if (stage !== "project-description" && stage !== "user-stories") return undefined;
+  if (stage !== "project-description" && stage !== "user-stories" && stage !== "database-schema") return undefined;
   const status = statuses.find((entry) => entry.stage === stage)?.status;
   return status === "incomplete" || status === "complete-stale" ? stage : undefined;
 }
@@ -211,9 +212,15 @@ export async function executeProgressiveInitCommand(
   const projectRoot = resolve(options.projectRoot);
   const originalRequest = await requestText(options);
   const statuses = await runtime.inspect(projectRoot, originalRequest);
+  const headless = options.headless || !runtime.inputIsTTY || !runtime.outputIsTTY;
+  const selectedStage = options.stage ?? statuses.find((entry) => entry.status !== "complete-fresh")?.stage;
+  const selectedStatus = statuses.find((entry) => entry.stage === selectedStage)?.status;
+  if (selectedStage) assertProgressiveInitPrerequisites(selectedStage, statuses);
+  if (headless && selectedStage === "database-schema" && (selectedStatus === "incomplete" || selectedStatus === "complete-stale")) {
+    throw new Error("DATABASE_SCHEMA_INTERACTIVE_AUTHORITY_REQUIRED: incomplete or stale database-schema requires interactive developer authority before provider/profile resolution");
+  }
   const requiresSemanticExecution = Boolean(semanticExecutionStage(options.stage, statuses));
   const configuration = await resolveExecutionProfile(options, runtime, requiresSemanticExecution);
-  const headless = options.headless || !runtime.inputIsTTY || !runtime.outputIsTTY;
   const answer = async (question: InterviewQuestionEvidence): Promise<string> => runtime.ask(formatInteractiveQuestion(question));
   let activeStage: ProgressiveInitStage | undefined;
   const result = await runtime.execute({
