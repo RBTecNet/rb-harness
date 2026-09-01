@@ -85,8 +85,9 @@ function semanticExecutionStage(
   requested: ProgressiveInitStage | undefined,
   statuses: readonly ProgressiveStageSnapshot[],
 ): ProgressiveInitStage | undefined {
-  const stage = requested ?? statuses.find((entry) => entry.status !== "complete-fresh")?.stage;
-  if (stage !== "project-description" && stage !== "user-stories" && stage !== "database-schema") return undefined;
+  const stage = requested ?? statuses.find((entry) => entry.status !== "complete-fresh"
+    || entry.stage === "project-phases" && entry.closureStatus !== "fresh")?.stage;
+  if (stage !== "project-description" && stage !== "user-stories" && stage !== "database-schema" && stage !== "project-phases") return undefined;
   const status = statuses.find((entry) => entry.stage === stage)?.status;
   return status === "incomplete" || status === "complete-stale" ? stage : undefined;
 }
@@ -213,11 +214,15 @@ export async function executeProgressiveInitCommand(
   const originalRequest = await requestText(options);
   const statuses = await runtime.inspect(projectRoot, originalRequest);
   const headless = options.headless || !runtime.inputIsTTY || !runtime.outputIsTTY;
-  const selectedStage = options.stage ?? statuses.find((entry) => entry.status !== "complete-fresh")?.stage;
+  const selectedStage = options.stage ?? statuses.find((entry) => entry.status !== "complete-fresh"
+    || entry.stage === "project-phases" && entry.closureStatus !== "fresh")?.stage;
   const selectedStatus = statuses.find((entry) => entry.stage === selectedStage)?.status;
   if (selectedStage) assertProgressiveInitPrerequisites(selectedStage, statuses);
   if (headless && selectedStage === "database-schema" && (selectedStatus === "incomplete" || selectedStatus === "complete-stale")) {
     throw new Error("DATABASE_SCHEMA_INTERACTIVE_AUTHORITY_REQUIRED: incomplete or stale database-schema requires interactive developer authority before provider/profile resolution");
+  }
+  if (headless && selectedStage === "project-phases" && selectedStatus !== "complete-fresh") {
+    throw new Error("PROJECT_PHASES_INTERACTIVE_AUTHORITY_REQUIRED: incomplete, stale, or reconciliation-required project-phases requires interactive developer authority before provider/profile resolution");
   }
   const requiresSemanticExecution = Boolean(semanticExecutionStage(options.stage, statuses));
   const configuration = await resolveExecutionProfile(options, runtime, requiresSemanticExecution);
@@ -245,7 +250,7 @@ export async function executeProgressiveInitCommand(
           ? `\n✓ ${label} already complete and fresh\nNo regeneration required.\n`
           : `\n✓ ${label} complete\n`);
       },
-      transition: (next) => { runtime.write(`\nNext stage: ${next}\nThis stage is not implemented in the current Progressive Init construction phase.\n`); },
+      transition: (next) => { runtime.write(`\nNext stage: ${next}\nRun the focused stage when ready.\n`); },
     },
   });
   if (result.artifactPath) runtime.write(`Progressive specification: ${result.artifactPath}\n`);

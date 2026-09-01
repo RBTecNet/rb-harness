@@ -944,6 +944,47 @@ describe("Progressive Init Phase 3 database-schema", () => {
     expect(() => parseDatabaseSchemaDocument(broken, upstream)).toThrow(/unknown table/);
   });
 
+  it("surfaces database-schema reconciliation headlessly before profile, compatibility, adapter, or provider work", async () => {
+    const projectRoot = await root();
+    const upstream = await seedUpstream(projectRoot);
+    const answers = ["persisted", "not-persisted", "approve"];
+    await runProgressiveInit({
+      projectRoot, originalRequest: REQUEST, selectedStage: "database-schema", profile,
+      adapter: new Adapter([persistenceRecommendations(upstream, { "create-issue": "persisted", "read-status": "not-persisted" }), validProposal()]), auth,
+      interview: { kind: "interactive", answer: async () => answers.shift()! },
+    });
+    await editUserStories(projectRoot, (value) => ({
+      ...value,
+      stories: value.stories.map((story) => story.key === "create-issue" ? { ...story, key: "create-ticket" as any } : story),
+    }));
+    const statuses = await inspectProgressiveInit(projectRoot, REQUEST);
+    expect(statuses[1]?.status).toBe("complete-fresh");
+    expect(statuses[2]?.status).toBe("reconciliation-required");
+
+    const cliAdapter = new Adapter([]);
+    const calls = { profile: 0, compatibility: 0, adapter: 0, execute: 0 };
+    const runtime: ProgressiveInitCliRuntime = {
+      inputIsTTY: false,
+      outputIsTTY: false,
+      write: () => undefined,
+      ask: async () => "",
+      inspect: inspectProgressiveInit,
+      listProfiles: () => { calls.profile += 1; return [profile]; },
+      loadProfile: async () => { calls.profile += 1; return profile; },
+      adapterFor: () => { calls.adapter += 1; return cliAdapter; },
+      authFor: async () => { calls.profile += 1; return auth; },
+      listClaudeCodeModels: async () => { calls.compatibility += 1; return []; },
+      inspectClaudeCodeModel: async () => { calls.compatibility += 1; throw new Error("unexpected compatibility lookup"); },
+      verifyClaudeCodeModel: async () => { calls.compatibility += 1; return profile; },
+      execute: async (options) => { calls.execute += 1; return runProgressiveInit(options); },
+    };
+    await expect(executeProgressiveInitCommand({
+      requestParts: [REQUEST], projectRoot, headless: true, deadlineSeconds: 120, stage: "database-schema",
+    }, runtime)).rejects.toThrow(/DATABASE_SCHEMA_RECONCILIATION_REQUIRED.*Reconcile \.spec\/init\/database-schema\.md/);
+    expect(calls).toEqual({ profile: 0, compatibility: 0, adapter: 0, execute: 1 });
+    expect(cliAdapter.requests).toHaveLength(0);
+  });
+
   it("preserves store safety and concurrent-modification semantics", async () => {
     const upstream = directUpstream();
     const schema = applicableSchema(upstream);

@@ -24,6 +24,17 @@ import {
 } from "./project-description-ir.js";
 import { runProjectDescriptionOperation } from "./project-description-operation.js";
 import { loadProjectDescription, writeProjectDescriptionAtomically, writeProjectDescriptionStageRecord } from "./project-description-store.js";
+import { inspectProjectPhasesClosure, publishProjectPhasesClosure, type ProjectPhasesClosureState } from "./project-phases-closure.js";
+import { renderProjectPhasesDocument } from "./project-phases-document.js";
+import {
+  projectPhasesAuthoritativeInputSha256,
+  projectPhasesUpstreamProjection,
+  projectPhasesUpstreamProjectionSha256,
+  validateProjectPhases,
+  type ProjectPhasesUpstreamProjection,
+} from "./project-phases-ir.js";
+import { runProjectPhasesOperation } from "./project-phases-operation.js";
+import { loadProjectPhases, writeProjectPhasesAtomically, type LoadedProjectPhases } from "./project-phases-store.js";
 import { PROGRESSIVE_INIT_STAGES, progressiveInitPrerequisites, progressiveInitStageDefinition, type ProgressiveInitStage } from "./stages.js";
 import { renderUserStoriesDocument } from "./user-stories-document.js";
 import {
@@ -44,6 +55,7 @@ export interface ProgressiveStageSnapshot {
   readonly stage: ProgressiveInitStage;
   readonly status: ProgressiveStageStatus;
   readonly findings?: readonly ProgressiveStageFinding[];
+  readonly closureStatus?: ProjectPhasesClosureState["status"];
 }
 export interface ProgressiveInitPresentation {
   readonly stage: (stage: ProgressiveInitStage, statuses: readonly ProgressiveStageSnapshot[]) => void | Promise<void>;
@@ -95,6 +107,48 @@ function databaseSchemaReconciliationRequired(findings: readonly ProgressiveStag
   );
 }
 
+function projectPhasesReconciliationRequired(findings: readonly ProgressiveStageFinding[]): never {
+  const details = findings.map((entry) => `${entry.pointer}: ${entry.message}`).join("; ");
+  throw new Error(
+    "PROJECT_PHASES_RECONCILIATION_REQUIRED: Existing developer-owned Project Phases references upstream authority that is no longer current. "
+      + `${details}. Reconcile .spec/init/project-phases.md explicitly, then rerun --stage project-phases.`,
+  );
+}
+
+interface LoadedProjectPhasesAuthority {
+  readonly upstream: ProjectPhasesUpstreamProjection;
+  readonly loaded?: LoadedProjectPhases;
+}
+
+async function loadProjectPhasesAuthority(root: string): Promise<LoadedProjectPhasesAuthority | undefined> {
+  const project = await loadProjectDescription(root);
+  if (!project) return undefined;
+  const storiesUpstream = userStoriesUpstreamProjection(project.document.value);
+  const stories = await loadUserStories(root, storiesUpstream);
+  if (!stories) return undefined;
+  const storiesProjectionSha256 = userStoriesUpstreamProjectionSha256(storiesUpstream);
+  const databaseUpstream = databaseSchemaUpstreamProjection(stories.document.value, storiesProjectionSha256);
+  const database = await loadDatabaseSchema(root, databaseUpstream);
+  if (!database) return undefined;
+  const upstream = projectPhasesUpstreamProjection(
+    project.document.value,
+    stories.document.value,
+    database.document.value,
+    {
+      projectDescriptionAuthoritativeInputSha256: project.document.metadata.authoritativeInputSha256,
+      userStoriesUpstreamProjectionSha256: stories.document.metadata.upstreamProjectionSha256,
+      userStoriesAuthoritativeInputSha256: stories.document.metadata.authoritativeInputSha256,
+      databaseSchemaUpstreamProjectionSha256: database.document.metadata.upstreamProjectionSha256,
+      databaseSchemaAuthoritativeInputSha256: database.document.metadata.authoritativeInputSha256,
+    },
+  );
+  return { upstream, loaded: await loadProjectPhases(root, upstream) };
+}
+
+function stageNeedsWork(snapshot: ProgressiveStageSnapshot): boolean {
+  return snapshot.status !== "complete-fresh" || snapshot.stage === "project-phases" && snapshot.closureStatus !== "fresh";
+}
+
 export async function inspectProgressiveInit(root: string, request?: string): Promise<readonly ProgressiveStageSnapshot[]> {
   const existing = await loadProjectDescription(root);
   let projectDescription: ProgressiveStageStatus = "incomplete";
@@ -102,6 +156,9 @@ export async function inspectProgressiveInit(root: string, request?: string): Pr
   let userStoriesFindings: readonly ProgressiveStageFinding[] | undefined;
   let databaseSchema: ProgressiveStageStatus = "incomplete";
   let databaseSchemaFindings: readonly ProgressiveStageFinding[] | undefined;
+  let projectPhases: ProgressiveStageStatus = "incomplete";
+  let projectPhasesFindings: readonly ProgressiveStageFinding[] | undefined;
+  let projectPhasesClosure: ProjectPhasesClosureState["status"] | undefined;
   if (existing) {
     const originalRequest = request?.trim() || existing.document.value.originalRequest;
     const expected = projectDescriptionAuthoritativeInputSha256({
@@ -152,6 +209,38 @@ export async function inspectProgressiveInit(root: string, request?: string): Pr
             ? "complete-fresh"
             : "complete-stale";
         }
+        const projectPhasesUpstream = projectPhasesUpstreamProjection(
+          existing.document.value,
+          stories.document.value,
+          schema.document.value,
+          {
+            projectDescriptionAuthoritativeInputSha256: existing.document.metadata.authoritativeInputSha256,
+            userStoriesUpstreamProjectionSha256: stories.document.metadata.upstreamProjectionSha256,
+            userStoriesAuthoritativeInputSha256: stories.document.metadata.authoritativeInputSha256,
+            databaseSchemaUpstreamProjectionSha256: schema.document.metadata.upstreamProjectionSha256,
+            databaseSchemaAuthoritativeInputSha256: schema.document.metadata.authoritativeInputSha256,
+          },
+        );
+        const phases = await loadProjectPhases(root, projectPhasesUpstream);
+        if (phases) {
+          if (databaseSchema === "complete-fresh" && phases.document.upstreamCompatibilityFindings.length) {
+            projectPhases = "reconciliation-required";
+            projectPhasesFindings = phases.document.upstreamCompatibilityFindings.map(({ pointer, message }) => ({ pointer, message }));
+          } else {
+            const upstreamProjectionSha256 = projectPhasesUpstreamProjectionSha256(projectPhasesUpstream);
+            const expectedAuthoritative = projectPhasesAuthoritativeInputSha256(upstreamProjectionSha256);
+            const currentSemantics = validateProjectPhases(phases.document.value, projectPhasesUpstream);
+            projectPhases = databaseSchema === "complete-fresh"
+              && currentSemantics.ok
+              && phases.document.metadata.upstreamProjectionSha256 === upstreamProjectionSha256
+              && phases.document.metadata.authoritativeInputSha256 === expectedAuthoritative
+              ? "complete-fresh"
+              : "complete-stale";
+            if (projectPhases === "complete-fresh") {
+              projectPhasesClosure = (await inspectProjectPhasesClosure(root, projectPhasesUpstream, phases.document.value)).status;
+            }
+          }
+        }
       }
     }
   }
@@ -160,9 +249,11 @@ export async function inspectProgressiveInit(root: string, request?: string): Pr
     status: stage === "project-description" ? projectDescription
       : stage === "user-stories" ? userStories
         : stage === "database-schema" ? databaseSchema
-          : "incomplete",
+          : projectPhases,
     ...(stage === "user-stories" && userStoriesFindings ? { findings: userStoriesFindings } : {}),
     ...(stage === "database-schema" && databaseSchemaFindings ? { findings: databaseSchemaFindings } : {}),
+    ...(stage === "project-phases" && projectPhasesFindings ? { findings: projectPhasesFindings } : {}),
+    ...(stage === "project-phases" && projectPhasesClosure ? { closureStatus: projectPhasesClosure } : {}),
   }));
 }
 
@@ -184,12 +275,12 @@ export function assertProgressiveInitPrerequisites(
 export async function runProgressiveInit(options: ProgressiveInitOptions): Promise<ProgressiveInitResult> {
   const mode = options.selectedStage ? "focused" : "automatic";
   const statuses = await inspectProgressiveInit(options.projectRoot, options.originalRequest);
-  const selectedStage = options.selectedStage ?? statuses.find((entry) => entry.status !== "complete-fresh")?.stage;
+  const selectedStage = options.selectedStage ?? statuses.find(stageNeedsWork)?.stage;
   if (!selectedStage) throw new Error("PROGRESSIVE_INIT_COMPLETE: all stages are complete and fresh");
   assertProgressiveInitPrerequisites(selectedStage, statuses);
   await options.presentation?.stage(selectedStage, statuses);
   const selectedStatus = statuses.find((entry) => entry.stage === selectedStage);
-  if (selectedStatus?.status === "complete-fresh") {
+  if (selectedStatus?.status === "complete-fresh" && !(selectedStage === "project-phases" && selectedStatus.closureStatus !== "fresh")) {
     await options.presentation?.complete?.(selectedStage, "existing-fresh");
     return {
       mode,
@@ -197,6 +288,60 @@ export async function runProgressiveInit(options: ProgressiveInitOptions): Promi
       completedStage: selectedStage,
       semanticOperations: 0,
       correctiveRegenerations: 0,
+    };
+  }
+  if (selectedStage === "project-phases") {
+    if (selectedStatus?.status === "reconciliation-required") projectPhasesReconciliationRequired(selectedStatus.findings ?? []);
+    const authority = await loadProjectPhasesAuthority(options.projectRoot);
+    if (!authority) throw new Error("PROGRESSIVE_INIT_PREREQUISITE_INVALID: project-phases requires complete/fresh P1, P2, and P3 authority");
+    if (selectedStatus?.status === "complete-fresh") {
+      if (!authority.loaded) throw new Error("PROJECT_PHASES_DOCUMENT_INVALID: complete/fresh status has no strict Project Phases document");
+      await publishProjectPhasesClosure(options.projectRoot, authority.upstream, authority.loaded.document.value);
+      await options.presentation?.complete?.("project-phases", "generated");
+      return {
+        mode,
+        selectedStage,
+        completedStage: "project-phases",
+        semanticOperations: 0,
+        correctiveRegenerations: 0,
+      };
+    }
+    if (options.interview?.kind !== "interactive") {
+      throw new Error("PROJECT_PHASES_INTERACTIVE_AUTHORITY_REQUIRED: incomplete or stale project-phases requires interactive developer authority");
+    }
+    requireOperation(options);
+    const discovery = await discoverProjectDescriptionEnvironment(options.projectRoot);
+    const operation = await runProjectPhasesOperation({
+      upstream: authority.upstream,
+      existing: authority.loaded?.document.value,
+      existingRepositoryPaths: discovery.files.map((entry) => entry.path),
+      profile: options.profile,
+      adapter: options.adapter,
+      auth: options.auth,
+      interview: options.interview,
+      deadlineMs: options.deadlineMs ?? 120_000,
+      signal: options.signal,
+      onQuestion: options.presentation?.question,
+    });
+    const upstreamProjectionSha256 = projectPhasesUpstreamProjectionSha256(authority.upstream);
+    const authoritativeInputSha256 = projectPhasesAuthoritativeInputSha256(upstreamProjectionSha256);
+    const source = renderProjectPhasesDocument(operation.value, authority.upstream, { upstreamProjectionSha256, authoritativeInputSha256 });
+    await options.beforeWrite?.();
+    const artifactPath = await writeProjectPhasesAtomically(
+      options.projectRoot,
+      authority.upstream,
+      source,
+      authority.loaded?.sourceSha256,
+    );
+    await publishProjectPhasesClosure(options.projectRoot, authority.upstream, operation.value);
+    await options.presentation?.complete?.("project-phases", "generated");
+    return {
+      mode,
+      selectedStage,
+      completedStage: "project-phases",
+      artifactPath,
+      semanticOperations: operation.semanticOperations,
+      correctiveRegenerations: operation.correctiveRegenerations,
     };
   }
   if (selectedStage !== "project-description" && selectedStage !== "user-stories" && selectedStage !== "database-schema") return boundary(selectedStage);
@@ -360,7 +505,10 @@ export function formatProgressiveStagePresentation(stage: ProgressiveInitStage, 
   const lines = [`RB Harness Init`, "", `Stage ${PROGRESSIVE_INIT_STAGES.indexOf(stage) + 1}/${PROGRESSIVE_INIT_STAGES.length} — ${definition.label}`, definition.purpose, ""];
   for (const item of statuses) {
     const marker = item.stage === stage ? "→" : item.status === "complete-fresh" ? "✓" : item.status === "complete-stale" || item.status === "reconciliation-required" ? "!" : "○";
-    lines.push(`${marker} ${progressiveInitStageDefinition(item.stage).label}`);
+    const closure = item.stage === "project-phases" && item.status === "complete-fresh" && item.closureStatus
+      ? ` (closure ${item.closureStatus})`
+      : "";
+    lines.push(`${marker} ${progressiveInitStageDefinition(item.stage).label}${closure}`);
   }
   return `${lines.join("\n")}\n`;
 }

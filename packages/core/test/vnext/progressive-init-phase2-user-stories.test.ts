@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { inspectProgressiveInit, runProgressiveInit } from "../../src/vnext/progressive-init/coordinator.js";
-import { runProgressiveInitCommand } from "../../src/vnext/progressive-init/cli.js";
+import { executeProgressiveInitCommand, runProgressiveInitCommand, type ProgressiveInitCliRuntime } from "../../src/vnext/progressive-init/cli.js";
 import { parseProjectDescriptionDocument, renderProjectDescriptionDocument } from "../../src/vnext/progressive-init/project-description-document.js";
 import type { ProjectDescription } from "../../src/vnext/progressive-init/project-description-ir.js";
 import { formatProgressiveStagePresentation } from "../../src/vnext/progressive-init/coordinator.js";
@@ -1834,6 +1834,29 @@ describe("Progressive Init Phase 2 user-stories", () => {
       expect(await readFile(storyPath, "utf8")).toBe(storyBefore);
       expect(await readFile(projectPath, "utf8")).toBe(projectBefore);
     }
+
+    const cliAdapter = new Adapter([]);
+    const calls = { profile: 0, compatibility: 0, adapter: 0, execute: 0 };
+    const runtime: ProgressiveInitCliRuntime = {
+      inputIsTTY: false,
+      outputIsTTY: false,
+      write: () => undefined,
+      ask: async () => "",
+      inspect: inspectProgressiveInit,
+      listProfiles: () => { calls.profile += 1; return [profile]; },
+      loadProfile: async () => { calls.profile += 1; return profile; },
+      adapterFor: () => { calls.adapter += 1; return cliAdapter; },
+      authFor: async () => { calls.profile += 1; return auth; },
+      listClaudeCodeModels: async () => { calls.compatibility += 1; return []; },
+      inspectClaudeCodeModel: async () => { calls.compatibility += 1; throw new Error("unexpected compatibility lookup"); },
+      verifyClaudeCodeModel: async () => { calls.compatibility += 1; return profile; },
+      execute: async (options) => { calls.execute += 1; return runProgressiveInit(options); },
+    };
+    await expect(executeProgressiveInitCommand({
+      requestParts: [REQUEST], projectRoot, headless: true, deadlineSeconds: 120, stage: "user-stories",
+    }, runtime)).rejects.toThrow(/USER_STORIES_RECONCILIATION_REQUIRED.*Update \.spec\/init\/user-stories\.md/);
+    expect(calls).toEqual({ profile: 0, compatibility: 0, adapter: 0, execute: 1 });
+    expect(cliAdapter.requests).toHaveLength(0);
     await expect(readFile(resolve(projectRoot, ".rb", "rb-manifest.json"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
