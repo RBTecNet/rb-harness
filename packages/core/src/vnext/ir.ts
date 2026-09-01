@@ -22,12 +22,15 @@ export interface AcceptedRecommendationProof {
   readonly acceptanceMode: RecommendationAcceptanceMode;
 }
 
-/** Authored provenance claim. Core verifies it before constructing the canonical model. */
+/** Semantic provenance accepted by trusted Core resolution. Provider wire remains narrower. */
 export type DeterminationSourceInput =
   | { readonly kind: "request"; readonly evidence: string }
   | { readonly kind: "user-answer"; readonly questionKey: string }
   | { readonly kind: "accepted-recommendation"; readonly questionKey: string }
-  | { readonly kind: "model-default" };
+  | { readonly kind: "model-default" }
+  | { readonly kind: "developer" };
+
+export type ProtectedPathSourceInput = Exclude<DeterminationSourceInput, { readonly kind: "developer" }>;
 
 export interface SemanticDeterminationInput {
   readonly key: string;
@@ -77,7 +80,7 @@ export interface SemanticPhaseInput {
 export interface SemanticProtectedPathInput {
   readonly path: string;
   readonly reason: string;
-  readonly source: DeterminationSourceInput;
+  readonly source: ProtectedPathSourceInput;
 }
 
 /** Hand-authored semantic input. It intentionally has no machine identity. */
@@ -98,7 +101,8 @@ export type DeterminationSource =
   | { readonly kind: "request"; readonly evidence: string }
   | { readonly kind: "user-answer"; readonly questionKey: SemanticKey }
   | { readonly kind: "accepted-recommendation"; readonly questionKey: SemanticKey }
-  | { readonly kind: "model-default" };
+  | { readonly kind: "model-default" }
+  | { readonly kind: "developer" };
 
 export interface Determination {
   readonly key: SemanticKey;
@@ -215,6 +219,7 @@ type RequestDeterminationSource = Extract<DeterminationSource, { readonly kind: 
 type AnswerDeterminationSource = Extract<DeterminationSource, { readonly kind: "user-answer" }>;
 type AcceptedDeterminationSource = Extract<DeterminationSource, { readonly kind: "accepted-recommendation" }>;
 type DefaultDeterminationSource = Extract<DeterminationSource, { readonly kind: "model-default" }>;
+type DeveloperDeterminationSource = Extract<DeterminationSource, { readonly kind: "developer" }>;
 type BuiltInProtectedPathSource = Extract<ProtectedPathSource, { readonly kind: "built-in" }>;
 type RequestProtectedPathSource = Extract<ProtectedPathSource, { readonly kind: "request" }>;
 type AnswerProtectedPathSource = Extract<ProtectedPathSource, { readonly kind: "user-answer" }>;
@@ -283,6 +288,9 @@ const ACCEPTED_DETERMINATION_SOURCE_CONSUMERS = {
 const DEFAULT_DETERMINATION_SOURCE_CONSUMERS = {
   kind: { path: "core.determinations[].source.kind", consumer: "authority validation applies model-default rigidity policy" },
 } satisfies Record<keyof DefaultDeterminationSource, IrConsumerRegistration>;
+const DEVELOPER_DETERMINATION_SOURCE_CONSUMERS = {
+  kind: { path: "core.determinations[].source.kind", consumer: "authority validation recognizes trusted developer-owned semantic artifacts" },
+} satisfies Record<keyof DeveloperDeterminationSource, IrConsumerRegistration>;
 
 const PROTECTED_PATH_CONSUMERS = {
   path: { path: "core.protectedPaths[].path", consumer: "scope validation rejects intersections and BRIEF renders authority" },
@@ -359,7 +367,8 @@ export const INIT_PROJECT_IR_CONSUMERS: readonly IrConsumerRegistration[] = [...
   ...Object.values(MODEL_CONSUMERS), ...Object.values(CORE_CONSUMERS), ...Object.values(IDENTITY_CONSUMERS),
   ...Object.values(PROVENANCE_CONSUMERS), ...Object.values(DETERMINATION_CONSUMERS),
   ...Object.values(REQUEST_DETERMINATION_SOURCE_CONSUMERS), ...Object.values(ANSWER_DETERMINATION_SOURCE_CONSUMERS),
-  ...Object.values(ACCEPTED_DETERMINATION_SOURCE_CONSUMERS), ...Object.values(DEFAULT_DETERMINATION_SOURCE_CONSUMERS), ...Object.values(PROTECTED_PATH_CONSUMERS),
+  ...Object.values(ACCEPTED_DETERMINATION_SOURCE_CONSUMERS), ...Object.values(DEFAULT_DETERMINATION_SOURCE_CONSUMERS),
+  ...Object.values(DEVELOPER_DETERMINATION_SOURCE_CONSUMERS), ...Object.values(PROTECTED_PATH_CONSUMERS),
   ...Object.values(BUILTIN_PATH_SOURCE_CONSUMERS), ...Object.values(REQUEST_PATH_SOURCE_CONSUMERS),
   ...Object.values(ANSWER_PATH_SOURCE_CONSUMERS), ...Object.values(ACCEPTED_PATH_SOURCE_CONSUMERS), ...Object.values(REQUIREMENT_CONSUMERS),
   ...Object.values(QUALITY_COMMAND_CONSUMERS), ...Object.values(PHASE_CONSUMERS), ...Object.values(TASK_CONSUMERS),

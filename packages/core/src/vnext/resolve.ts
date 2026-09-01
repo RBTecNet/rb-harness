@@ -12,6 +12,7 @@ import {
 } from "./identity.js";
 import {
   INIT_PROJECT_MODEL_VERSION,
+  type DeterminationSourceInput,
   type DeterminationSource,
   type InitProjectModel,
   type ProtectedPath,
@@ -64,15 +65,12 @@ function stableTopological<T>(
 }
 
 function verifiedSource(
-  source: { readonly kind: "request"; readonly evidence: string }
-    | { readonly kind: "user-answer"; readonly questionKey: string }
-    | { readonly kind: "accepted-recommendation"; readonly questionKey: string }
-    | { readonly kind: "model-default" },
+  source: DeterminationSourceInput,
   context: ResolutionContext,
   pointer: string,
   findings: Finding[],
 ): DeterminationSource | undefined {
-  if (source.kind === "model-default") return source;
+  if (source.kind === "model-default" || source.kind === "developer") return source;
   if (source.kind === "request") {
     const evidence = canonicalEvidenceText(source.evidence);
     if (!requestEvidenceIsVerified(context.originalRequest, evidence)) {
@@ -240,8 +238,9 @@ export function resolveInitProject(
   ];
   for (const [index, entry] of input.protectedPaths.entries()) {
     const source = verifiedSource(entry.source, context, `/protectedPaths/${index}/source`, findings);
-    if (!source || source.kind === "model-default") {
+    if (!source || source.kind === "model-default" || source.kind === "developer") {
       if (source?.kind === "model-default") findings.push(finding("I-17", "A model default cannot create an authoritative protected path", `/protectedPaths/${index}/source`));
+      if (source?.kind === "developer") findings.push(finding("I-17", "Developer determination provenance cannot create an authoritative protected path", `/protectedPaths/${index}/source`));
       continue;
     }
     if (source.kind === "accepted-recommendation"

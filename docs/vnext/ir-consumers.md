@@ -2,6 +2,8 @@
 
 Every production `InitProjectModel` surface is witnessed by a `satisfies Record<keyof …>` registration in `vnext/ir.ts`. Adding a field to any model interface or discriminated-union variant fails typecheck until a present Phase 1 consumer is declared. The executable register test also requires this table to match the typed registrations exactly and requires every code registration to have a non-empty consumer.
 
+Canonical determination provenance additionally accepts `{ kind: "developer" }` only from trusted Core construction of already-approved developer-owned semantic artifacts. The provider-facing Init wire remains limited to its existing source kinds, and protected-path provenance does not gain this variant.
+
 `core.provenance.harnessVersion` was removed: it had no present deterministic consumer.
 
 | path | author | current consumer(s) | invariant(s) |
@@ -14,7 +16,7 @@ Every production `InitProjectModel` surface is witnessed by a `satisfies Record<
 | core.determinations[].rigidity | semantic input | default authority policy and BRIEF | I-17 |
 | core.determinations[].source | Core-verified | authority validation | I-17 |
 | core.determinations[].source.evidence | verified request | meaningful request-phrase verification | I-17 |
-| core.determinations[].source.kind | Core-verified | provenance rule dispatch | I-17 |
+| core.determinations[].source.kind | Core-verified, including trusted developer artifacts | provenance rule dispatch and developer authority recognition | I-17 |
 | core.determinations[].source.questionKey | verified answer | supplied-answer resolution | I-17 |
 | core.determinations[].statement | semantic input | BRIEF determinations | I-18 |
 | core.identity | Core | artifact and document identity | typed witness |

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { InitProjectModel } from "../../src/vnext/ir.js";
+import type { InitProjectModel, Materiality, SemanticInitProject } from "../../src/vnext/ir.js";
 import { resolveInitProject } from "../../src/vnext/resolve.js";
-import { canonicalize, projectRelativePathIsSafe, validate } from "../../src/vnext/validate.js";
+import { canonicalize, projectRelativePathIsSafe, sourceIsVerified, validate } from "../../src/vnext/validate.js";
 import { deriveExecutionDocument, renderPhases } from "../../src/vnext/render/execution.js";
+import { renderBrief } from "../../src/vnext/render/brief.js";
 import { acceptedRecommendationIsVerified, requestEvidenceIsVerified, userAnswerIsVerified } from "../../src/vnext/provenance.js";
 import { containsCodeOwnedMachineIdentity, modelFacingRecoveryFindings } from "../../src/vnext/recovery-findings.js";
 import { PROJECT_RELATIVE_PATH_PATTERN, projectRelativePathSyntaxIsSafe } from "../../src/vnext/path-contract.js";
@@ -35,6 +36,22 @@ function withCommand(command: string): InitProjectModel {
   const model = structuredClone(hello()) as any;
   model.qualityCommands[0].command = command;
   return model;
+}
+
+function developerSemantic(materiality: Materiality): SemanticInitProject {
+  return {
+    ...structuredClone(HELLO_SEMANTIC_FIXTURE),
+    determinations: HELLO_SEMANTIC_FIXTURE.determinations.map((entry, index) => index === 0
+      ? {
+          ...entry,
+          statement: "The approved product remains a command-line application.",
+          rationale: "This decision comes from an approved developer-owned semantic artifact.",
+          materiality,
+          rigidity: "RIGID",
+          source: { kind: "developer" },
+        }
+      : entry),
+  };
 }
 
 describe("vNext semantic validation closure", () => {
@@ -272,6 +289,75 @@ describe("vNext semantic validation closure", () => {
     expect(userAnswerIsVerified({ "runtime-choice": "Node.js" }, "other-choice")).toBe(false);
     expect(acceptedRecommendationIsVerified({ "runtime-choice": { value: "Node.js", acceptanceMode: "blank-interactive" } }, "runtime-choice")).toBe(true);
     expect(acceptedRecommendationIsVerified({}, "runtime-choice")).toBe(false);
+  });
+
+  it.each(["product", "architecture"] as const)(
+    "accepts Core-created developer provenance for a RIGID %s determination while preserving I-17 for model defaults",
+    (materiality) => {
+      const resolved = resolveInitProject(developerSemantic(materiality), {
+        originalRequest: HELLO_REQUEST,
+        runId: `developer-${materiality}-run`,
+        generatedAt: "2026-08-28T12:00:00.000Z",
+      });
+      expect(resolved.ok).toBe(true);
+      if (!resolved.ok) return;
+
+      const canonical = canonicalize(resolved.value);
+      const determination = canonical.core.determinations[0]!;
+      expect(determination.source).toEqual({ kind: "developer" });
+      expect(sourceIsVerified(determination.source, canonical)).toBe(true);
+      expect(validate(canonical).valid).toBe(true);
+
+      const modelDefault = structuredClone(canonical) as any;
+      modelDefault.core.determinations[0].source = { kind: "model-default" };
+      expect(validate(modelDefault).findings).toContainEqual(expect.objectContaining({
+        invariant: "I-17",
+        pointer: "/core/determinations/0/source",
+        message: "A model default cannot decide a RIGID product or architecture determination",
+      }));
+    },
+  );
+
+  it("renders developer authority through the existing confirmed-determination BRIEF surface", () => {
+    const resolved = resolveInitProject(developerSemantic("architecture"), {
+      originalRequest: HELLO_REQUEST,
+      runId: "developer-brief-run",
+      generatedAt: "2026-08-28T12:00:00.000Z",
+    });
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    const brief = renderBrief(canonicalize(resolved.value));
+    const confirmed = brief.slice(brief.indexOf("## Confirmed determinations"), brief.indexOf("## Assumptions and defaults"));
+    expect(confirmed).toContain("The approved product remains a command-line application.");
+    expect(brief).not.toMatch(/questionKey|sourceKind|model-default|accepted-recommendation|\{\s*"kind"/);
+    expect(brief.match(/^## .+$/gm)).toEqual([
+      "## Objective",
+      "## Confirmed determinations",
+      "## Assumptions and defaults",
+      "## Requirements",
+      "## Protected paths",
+      "## Quality context",
+    ]);
+  });
+
+  it("does not extend developer provenance to protected paths", () => {
+    const semantic = structuredClone(HELLO_SEMANTIC_FIXTURE) as any;
+    semantic.protectedPaths.push({
+      path: "vendor/generated",
+      reason: "Forged developer path authority",
+      source: { kind: "developer" },
+    });
+    const result = resolveInitProject(semantic, {
+      originalRequest: HELLO_REQUEST,
+      runId: "developer-path-run",
+      generatedAt: "2026-08-28T12:00:00.000Z",
+    });
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.findings).toContainEqual(expect.objectContaining({
+      invariant: "I-17",
+      pointer: "/protectedPaths/0/source",
+      message: "Developer determination provenance cannot create an authoritative protected path",
+    }));
   });
 
   it("keeps canonical request provenance at the frozen contiguous-evidence contract", () => {

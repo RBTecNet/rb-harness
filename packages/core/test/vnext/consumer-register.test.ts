@@ -16,5 +16,6 @@ describe("vNext IR consumer register", () => {
     expect(registered).toEqual([...INIT_PROJECT_IR_FIELDS].sort());
     expect(rows.every((match) => Boolean(match[3]?.trim()))).toBe(true);
     expect(INIT_PROJECT_IR_CONSUMERS.every((entry) => entry.path.trim() && entry.consumer.trim())).toBe(true);
+    expect(source).toContain("| core.determinations[].source.kind | Core-verified, including trusted developer artifacts | provenance rule dispatch and developer authority recognition | I-17 |");
   });
 });

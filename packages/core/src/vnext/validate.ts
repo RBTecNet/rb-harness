@@ -171,8 +171,8 @@ function isIsoDateTime(value: string): boolean {
     && !Number.isNaN(Date.parse(value));
 }
 
-function sourceIsVerified(source: DeterminationSource, model: InitProjectModel): boolean {
-  if (source.kind === "model-default") return true;
+export function sourceIsVerified(source: DeterminationSource, model: InitProjectModel): boolean {
+  if (source.kind === "model-default" || source.kind === "developer") return true;
   if (source.kind === "request") return requestEvidenceIsVerified(model.core.provenance.originalRequest, source.evidence);
   return source.kind === "user-answer"
     ? userAnswerIsVerified(model.core.provenance.answers, source.questionKey)

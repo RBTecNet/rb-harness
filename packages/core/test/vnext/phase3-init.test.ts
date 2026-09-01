@@ -359,6 +359,33 @@ describe("Phase 3 semantic vnext init", () => {
     }, INVENTORY_REQUEST)).toMatchObject({ ok: false });
   });
 
+  it("keeps canonical developer provenance unreachable from the provider wire", () => {
+    const schema = INIT_INTENT_SCHEMA as any;
+    const sourceKind = schema.properties.determinations.items.properties.sourceKind;
+    expect(sourceKind.enum).toEqual(["request", "model-default"]);
+    expect(JSON.stringify(INIT_INTENT_SCHEMA)).not.toContain('"developer"');
+
+    const forgedKind = structuredClone(inventoryIntent(false)) as any;
+    forgedKind.determinations[0].sourceKind = "developer";
+    const kindOutcome = decodeIntentWire(forgedKind, INVENTORY_REQUEST);
+    expect(kindOutcome.ok).toBe(false);
+    if (!kindOutcome.ok) expect(kindOutcome.findings).toContainEqual(expect.objectContaining({
+      code: "wire-shape",
+      pointer: "/determinations/0/sourceKind",
+    }));
+
+    const forgedObject = structuredClone(inventoryIntent(false)) as any;
+    delete forgedObject.determinations[0].sourceKind;
+    forgedObject.determinations[0].source = { kind: "developer" };
+    const objectOutcome = decodeIntentWire(forgedObject, INVENTORY_REQUEST);
+    expect(objectOutcome.ok).toBe(false);
+    if (!objectOutcome.ok) expect(objectOutcome.findings).toContainEqual(expect.objectContaining({
+      code: "wire-shape",
+      pointer: "/determinations/0",
+      message: "unknown fields: source",
+    }));
+  });
+
   it("makes mandatory task structure explicit in the provider schema and Core decoder", () => {
     const intent = inventoryIntent(false) as any;
     const schema = deriveWorkSchema(intent) as any;
