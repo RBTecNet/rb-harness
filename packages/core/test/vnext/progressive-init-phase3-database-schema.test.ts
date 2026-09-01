@@ -534,7 +534,7 @@ describe("Progressive Init Phase 3 database-schema", () => {
     }
   });
 
-  it("writes a strict not-applicable artifact after one operation and fresh rerun performs zero calls and writes", async () => {
+  it("keeps P1/P2/P3 and their semantic hashes fresh across repository-only mutations", async () => {
     const projectRoot = await root();
     const upstream = await seedUpstream(projectRoot);
     const adapter = new Adapter([persistenceRecommendations(upstream, { "create-issue": "not-persisted", "read-status": "not-persisted" })]);
@@ -548,6 +548,58 @@ describe("Progressive Init Phase 3 database-schema", () => {
     const source = await readFile(result.artifactPath!, "utf8");
     const parsed = parseDatabaseSchemaDocument(source, upstream);
     expect(parsed.value).toMatchObject({ disposition: "not-applicable", tables: [], foreignKeys: [] });
+
+    const projectPath = resolve(projectRoot, ".spec", "init", "project-description.md");
+    const initialProject = parseProjectDescriptionDocument(await readFile(projectPath, "utf8")).value;
+    const initialUserStoriesUpstreamSha256 = userStoriesUpstreamProjectionSha256(userStoriesUpstreamProjection(initialProject));
+    const initialDatabaseUpstreamSha256 = databaseSchemaUpstreamProjectionSha256(upstream);
+    const initialDecisionInputs = enumerateStoryPersistenceSubjects(upstream).map((entry) => [entry.storyKey, entry.decisionInputSha256]);
+    const sourcePath = resolve(projectRoot, "src", "foo.ts");
+    await mkdir(resolve(projectRoot, "src"));
+    for (const mutation of [
+      async () => writeFile(sourcePath, "export const version = 1;\n"),
+      async () => writeFile(sourcePath, "export const version = 2;\n"),
+      async () => rm(sourcePath),
+    ]) {
+      await mutation();
+      expect((await inspectProgressiveInit(projectRoot, REQUEST)).slice(0, 3).map((entry) => entry.status))
+        .toEqual(["complete-fresh", "complete-fresh", "complete-fresh"]);
+      const currentProject = parseProjectDescriptionDocument(await readFile(projectPath, "utf8")).value;
+      expect(userStoriesUpstreamProjectionSha256(userStoriesUpstreamProjection(currentProject)))
+        .toBe(initialUserStoriesUpstreamSha256);
+      const currentUpstream = await currentDatabaseUpstream(projectRoot);
+      expect(databaseSchemaUpstreamProjectionSha256(currentUpstream)).toBe(initialDatabaseUpstreamSha256);
+      expect(enumerateStoryPersistenceSubjects(currentUpstream).map((entry) => [entry.storyKey, entry.decisionInputSha256]))
+        .toEqual(initialDecisionInputs);
+    }
+
+    const cliCalls = { profile: 0, adapter: 0, semanticOperations: -1, writes: 0 };
+    const cliAdapter = new Adapter([]);
+    const runtime: ProgressiveInitCliRuntime = {
+      inputIsTTY: false,
+      outputIsTTY: false,
+      write: () => undefined,
+      ask: async () => "",
+      inspect: inspectProgressiveInit,
+      listProfiles: () => { cliCalls.profile += 1; return []; },
+      loadProfile: async () => { cliCalls.profile += 1; return profile; },
+      adapterFor: () => { cliCalls.adapter += 1; return cliAdapter; },
+      authFor: async () => { cliCalls.profile += 1; return auth; },
+      listClaudeCodeModels: async () => { cliCalls.profile += 1; return []; },
+      inspectClaudeCodeModel: async () => { cliCalls.profile += 1; throw new Error("unexpected profile inspection"); },
+      verifyClaudeCodeModel: async () => { cliCalls.profile += 1; return profile; },
+      execute: async (options) => {
+        const execution = await runProgressiveInit({ ...options, beforeWrite: () => { cliCalls.writes += 1; } });
+        cliCalls.semanticOperations = execution.semanticOperations;
+        return execution;
+      },
+    };
+    await executeProgressiveInitCommand({
+      requestParts: [REQUEST], projectRoot, headless: true, deadlineSeconds: 120, stage: "database-schema",
+    }, runtime);
+    expect(cliCalls).toEqual({ profile: 0, adapter: 0, semanticOperations: 0, writes: 0 });
+    expect(cliAdapter.requests).toHaveLength(0);
+
     let writes = 0;
     const freshAdapter = new Adapter([]);
     const rerun = await runProgressiveInit({

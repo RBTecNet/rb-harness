@@ -1,7 +1,7 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { semanticKey } from "../../src/vnext/identity.js";
 import { pendingQuestionEvidence, selectInterviewAnswer } from "../../src/vnext/interview.js";
 import { PROGRESSIVE_INIT_STAGES, parseProgressiveInitStage } from "../../src/vnext/progressive-init/stages.js";
@@ -20,6 +20,7 @@ import {
 import { runProjectDescriptionOperation } from "../../src/vnext/progressive-init/project-description-operation.js";
 import { inspectProgressiveInit, runProgressiveInit } from "../../src/vnext/progressive-init/coordinator.js";
 import { discoverProjectDescriptionEnvironment, projectDescriptionDiscoverySha256 } from "../../src/vnext/progressive-init/discovery.js";
+import * as discoveryModule from "../../src/vnext/progressive-init/discovery.js";
 import { projectDescriptionAuthoritativeInputSha256 } from "../../src/vnext/progressive-init/project-description-ir.js";
 import { CANONICAL_INIT_RECOVERY_BUDGET } from "../../src/vnext/recovery-budget.js";
 import type { CanonicalSemanticResponse, ModelProfile, ProviderAdapter, ProviderOutcome, ResolvedProviderAuth, SemanticRequest } from "../../src/vnext/providers/contract.js";
@@ -101,6 +102,15 @@ class Adapter implements ProviderAdapter {
 const root = () => mkdtemp(resolve(tmpdir(), "rb-progressive-phase1-"));
 const common = (projectRoot: string, adapter: Adapter) => ({ projectRoot, originalRequest: REQUEST, profile, adapter, auth, interview: { kind: "headless" as const } });
 
+async function invalidateStoredProjectDescriptionAuthority(projectRoot: string): Promise<void> {
+  const path = resolve(projectRoot, ".spec", "init", "project-description.md");
+  const source = await readFile(path, "utf8");
+  await writeFile(path, source.replace(
+    /(?<=rb-project-description-authoritative-input-sha256: )[a-f0-9]{64}/,
+    "0".repeat(64),
+  ));
+}
+
 describe("Progressive Init Phase 1", () => {
   it("owns one exact closed stage vocabulary and rejects arbitrary stages", () => {
     expect(PROGRESSIVE_INIT_STAGES).toEqual(["project-description", "user-stories", "database-schema", "project-phases"]);
@@ -135,6 +145,7 @@ describe("Progressive Init Phase 1", () => {
     const sourceBefore = await readFile(first.artifactPath!, "utf8");
     const recordPath = resolve(projectRoot, ".rb-harness", "progressive-init", "project-description.json");
     const recordBefore = await readFile(recordPath, "utf8");
+    await writeFile(resolve(projectRoot, "ordinary-source.ts"), "export const version = 1;\n");
     const adapter = new Adapter([]);
     const events: string[] = [];
     let beforeWriteCalled = false;
@@ -170,7 +181,7 @@ describe("Progressive Init Phase 1", () => {
     expect((await runProgressiveInit({ ...common(incompleteRoot, incompleteAdapter), selectedStage: "project-description" })).semanticOperations).toBe(1);
     expect(incompleteAdapter.requests).toHaveLength(1);
 
-    await writeFile(resolve(incompleteRoot, "stale-input.ts"), "export {};\n");
+    await invalidateStoredProjectDescriptionAuthority(incompleteRoot);
     expect((await inspectProgressiveInit(incompleteRoot, REQUEST))[0]?.status).toBe("complete-stale");
     const staleAdapter = new Adapter([payload()]);
     expect((await runProgressiveInit({ ...common(incompleteRoot, staleAdapter), selectedStage: "project-description" })).semanticOperations).toBe(1);
@@ -206,6 +217,7 @@ describe("Progressive Init Phase 1", () => {
     expect(parsed.value.project.objective).toBe("Developer-edited objective remains authoritative.");
     expect(parsed.value.determinations[0]).toMatchObject({ statement: "Developer requires contract-level verification", materiality: "product", rigidity: "RIGID", source: { kind: "developer" } });
     expect(parsed.developerModified).toBe(true);
+    expect((await inspectProgressiveInit(projectRoot, REQUEST))[0]?.status).toBe("complete-stale");
     const echo = payload("Developer-edited objective remains authoritative.");
     echo.determinations[0] = { ...echo.determinations[0]!, statement: "Developer requires contract-level verification", materiality: "product", source: { kind: "model-default" } } as any;
     const rerunAdapter = new Adapter([echo]); await runProgressiveInit({ ...common(projectRoot, rerunAdapter), selectedStage: "project-description" });
@@ -220,19 +232,41 @@ describe("Progressive Init Phase 1", () => {
   it("fails closed on concurrent edits and preserves the developer bytes", async () => {
     const projectRoot = await root(); const path = resolve(projectRoot, ".spec", "init", "project-description.md");
     await runProgressiveInit({ ...common(projectRoot, new Adapter([payload()])), selectedStage: "project-description" });
-    await writeFile(resolve(projectRoot, "stale-source.ts"), "export {};\n");
+    await invalidateStoredProjectDescriptionAuthority(projectRoot);
     await expect(runProgressiveInit({ ...common(projectRoot, new Adapter([payload()])), selectedStage: "project-description", beforeWrite: () => writeFile(path, "developer concurrent edit\n") })).rejects.toThrow(/CONCURRENT_MODIFICATION/);
     expect(await readFile(path, "utf8")).toBe("developer concurrent edit\n");
   });
 
-  it("classifies deterministic request, discovery, and contract freshness", async () => {
+  it("keeps repository discovery diagnostic while request, accepted decisions, and contract remain freshness authority", async () => {
     const projectRoot = await root(); await runProgressiveInit({ ...common(projectRoot, new Adapter([payload()])), selectedStage: "project-description" });
     expect((await inspectProgressiveInit(projectRoot, REQUEST))[0]?.status).toBe("complete-fresh");
     expect((await inspectProgressiveInit(projectRoot, "A materially changed request"))[0]?.status).toBe("complete-stale");
-    await writeFile(resolve(projectRoot, "new-source.ts"), "export {};\n"); expect((await inspectProgressiveInit(projectRoot, REQUEST))[0]?.status).toBe("complete-stale");
-    expect(projectDescriptionAuthoritativeInputSha256({ originalRequest: REQUEST, discoverySha256: "x", acceptedDecisions: [], contractVersion: "v2" })).not.toBe(projectDescriptionAuthoritativeInputSha256({ originalRequest: REQUEST, discoverySha256: "x", acceptedDecisions: [] }));
+    await mkdir(resolve(projectRoot, "src"));
+    const ordinarySource = resolve(projectRoot, "src", "foo.ts");
+    await writeFile(ordinarySource, "export const version = 1;\n");
+    expect((await inspectProgressiveInit(projectRoot, REQUEST))[0]?.status).toBe("complete-fresh");
+    await writeFile(ordinarySource, "export const version = 2;\n");
+    expect((await inspectProgressiveInit(projectRoot, REQUEST))[0]?.status).toBe("complete-fresh");
+    await rm(ordinarySource);
+    expect((await inspectProgressiveInit(projectRoot, REQUEST))[0]?.status).toBe("complete-fresh");
+    expect(projectDescriptionAuthoritativeInputSha256({ originalRequest: REQUEST, acceptedDecisions: [], contractVersion: "v2" })).not.toBe(projectDescriptionAuthoritativeInputSha256({ originalRequest: REQUEST, acceptedDecisions: [] }));
     const path = resolve(projectRoot, ".spec", "init", "project-description.md"); const source = await readFile(path, "utf8");
     await writeFile(path, source.replace("rb-project-description/v1", "rb-project-description/v2")); await expect(inspectProgressiveInit(projectRoot, REQUEST)).rejects.toThrow(/contract must be rb-project-description\/v1/);
+  });
+
+  it("does not discover during inspection but still discovers repository evidence for semantic authoring", async () => {
+    const projectRoot = await root();
+    await writeFile(resolve(projectRoot, "authoring-context.ts"), "export const context = true;\n");
+    const discoverySpy = vi.spyOn(discoveryModule, "discoverProjectDescriptionEnvironment");
+    const adapter = new Adapter([payload()]);
+    await runProgressiveInit({ ...common(projectRoot, adapter), selectedStage: "project-description" });
+    expect(discoverySpy).toHaveBeenCalledTimes(1);
+    const authoringInput = JSON.parse(adapter.requests[0]!.input);
+    expect(authoringInput.repositoryDiscovery.files).toContainEqual(expect.objectContaining({ path: "authoring-context.ts" }));
+    discoverySpy.mockClear();
+    await inspectProgressiveInit(projectRoot, REQUEST);
+    expect(discoverySpy).not.toHaveBeenCalled();
+    discoverySpy.mockRestore();
   });
 
   it("includes canonical request, interview, and developer decisions in freshness authority", () => {
@@ -307,8 +341,8 @@ describe("Progressive Init Phase 1", () => {
   it("does not launder a changed model candidate through an existing developer key", async () => {
     const projectRoot = await root();
     const first = await runProgressiveInit({ ...common(projectRoot, new Adapter([payload()])), selectedStage: "project-description" });
+    await invalidateStoredProjectDescriptionAuthority(projectRoot);
     const before = await readFile(first.artifactPath!, "utf8");
-    await writeFile(resolve(projectRoot, "stale-source.ts"), "export {};\n");
     const changed = payload();
     changed.determinations[0] = {
       ...changed.determinations[0]!, statement: "Replace the developer decision", materiality: "product", rigidity: "RIGID", source: { kind: "model-default" },

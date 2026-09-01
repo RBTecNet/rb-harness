@@ -893,7 +893,7 @@ describe("Progressive Init Phase 2 user-stories", () => {
     await expect(readFile(resolve(projectRoot, ".spec", "init", "user-stories.md"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("accepts capability-to-workflow closure and rejects missing or stale project-description prerequisites", async () => {
+  it("accepts capability-to-workflow closure and rejects missing or semantically stale project-description prerequisites", async () => {
     const missingRoot = await root();
     const missingAdapter = new Adapter([]);
     await expect(runProgressiveInit({ ...common(missingRoot, missingAdapter), selectedStage: "user-stories" })).rejects.toThrow(/PREREQUISITE_INVALID/);
@@ -902,9 +902,12 @@ describe("Progressive Init Phase 2 user-stories", () => {
     const projectRoot = await root();
     await seedProject(projectRoot);
     expect(validateUserStoriesUpstreamReadiness(await projectionFor(projectRoot))).toEqual([]);
-    await writeFile(resolve(projectRoot, "source-change.ts"), "export {};\n");
     const staleAdapter = new Adapter([]);
-    await expect(runProgressiveInit({ ...common(projectRoot, staleAdapter), selectedStage: "user-stories" })).rejects.toThrow(/PREREQUISITE_INVALID/);
+    await expect(runProgressiveInit({
+      ...common(projectRoot, staleAdapter),
+      originalRequest: "A materially changed project request",
+      selectedStage: "user-stories",
+    })).rejects.toThrow(/PREREQUISITE_INVALID/);
     expect(staleAdapter.requests).toHaveLength(0);
   });
 
@@ -1680,7 +1683,7 @@ describe("Progressive Init Phase 2 user-stories", () => {
     expect((await inspectProgressiveInit(projectRoot, REQUEST))[1]?.status).toBe("complete-fresh");
   });
 
-  it("stales on relevant upstream semantics, blocks on stale prerequisite, and returns fresh after identical revalidation", async () => {
+  it("stales on relevant upstream semantics while repository mutations leave the prerequisite fresh", async () => {
     const projectRoot = await root();
     await seedProject(projectRoot);
     await seedStories(projectRoot);
@@ -1701,28 +1704,31 @@ describe("Progressive Init Phase 2 user-stories", () => {
 
     await writeFile(resolve(projectRoot, "repository-change.ts"), "export {};\n");
     const statuses = await inspectProgressiveInit(projectRoot, REQUEST);
-    expect(statuses[0]?.status).toBe("complete-stale");
+    expect(statuses[0]?.status).toBe("complete-fresh");
     expect(statuses[1]?.status).toBe("complete-stale");
     const noCall = new Adapter([]);
-    await expect(runProgressiveInit({ ...common(projectRoot, noCall), selectedStage: "user-stories" })).rejects.toThrow(/PREREQUISITE_INVALID/);
+    await expect(runProgressiveInit({
+      ...common(projectRoot, noCall),
+      originalRequest: "A materially changed project request",
+      selectedStage: "user-stories",
+    })).rejects.toThrow(/PREREQUISITE_INVALID/);
     expect(noCall.requests).toHaveLength(0);
-
-    const exactChangedPayload = projectPayload();
-    exactChangedPayload.workflows[0]!.statement = "A developer creates, updates, and closes an issue.";
-    await runProgressiveInit({ ...common(projectRoot, new Adapter([exactChangedPayload])), selectedStage: "project-description" });
-    expect((await inspectProgressiveInit(projectRoot, REQUEST))[1]?.status).toBe("complete-stale");
   });
 
-  it("allows stories to return fresh after prerequisite revalidation with an identical relevant projection", async () => {
+  it("keeps complete User Stories fresh and provider-free after a repository-only mutation", async () => {
     const projectRoot = await root();
     await seedProject(projectRoot);
     await seedStories(projectRoot);
     await writeFile(resolve(projectRoot, "repository-change.ts"), "export {};\n");
-    expect((await inspectProgressiveInit(projectRoot, REQUEST))[0]?.status).toBe("complete-stale");
-    await runProgressiveInit({ ...common(projectRoot, new Adapter([projectPayload()])), selectedStage: "project-description" });
     const statuses = await inspectProgressiveInit(projectRoot, REQUEST);
     expect(statuses[0]?.status).toBe("complete-fresh");
     expect(statuses[1]?.status).toBe("complete-fresh");
+    const adapter = new Adapter([]);
+    let writes = 0;
+    expect(await runProgressiveInit({ ...common(projectRoot, adapter), selectedStage: "user-stories", beforeWrite: () => { writes += 1; } }))
+      .toMatchObject({ completedStage: "user-stories", semanticOperations: 0, correctiveRegenerations: 0 });
+    expect(adapter.requests).toHaveLength(0);
+    expect(writes).toBe(0);
   });
 
   it("classifies upstream-breaking developer stories without deadlocking inspection", async () => {

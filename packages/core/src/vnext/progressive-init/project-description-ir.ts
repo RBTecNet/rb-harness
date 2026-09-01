@@ -416,7 +416,6 @@ export function projectDescriptionAcceptedDecisionProjection(value: ProjectDescr
 
 export function projectDescriptionAuthoritativeInputSha256(input: {
   readonly originalRequest: string;
-  readonly discoverySha256: string;
   readonly acceptedDecisions: readonly unknown[];
   readonly contractVersion?: string;
 }): string {
@@ -424,7 +423,6 @@ export function projectDescriptionAuthoritativeInputSha256(input: {
     stage: "project-description",
     contract: input.contractVersion ?? PROJECT_DESCRIPTION_CONTRACT,
     originalRequestSha256: sha256Text(input.originalRequest.trim()),
-    discoverySha256: input.discoverySha256,
     acceptedDecisions: input.acceptedDecisions,
   }));
 }

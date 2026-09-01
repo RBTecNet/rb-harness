@@ -96,8 +96,6 @@ function databaseSchemaReconciliationRequired(findings: readonly ProgressiveStag
 }
 
 export async function inspectProgressiveInit(root: string, request?: string): Promise<readonly ProgressiveStageSnapshot[]> {
-  const discovery = await discoverProjectDescriptionEnvironment(root);
-  const discoverySha256 = projectDescriptionDiscoverySha256(discovery);
   const existing = await loadProjectDescription(root);
   let projectDescription: ProgressiveStageStatus = "incomplete";
   let userStories: ProgressiveStageStatus = "incomplete";
@@ -108,7 +106,6 @@ export async function inspectProgressiveInit(root: string, request?: string): Pr
     const originalRequest = request?.trim() || existing.document.value.originalRequest;
     const expected = projectDescriptionAuthoritativeInputSha256({
       originalRequest,
-      discoverySha256,
       acceptedDecisions: projectDescriptionAcceptedDecisionProjection(existing.document.value),
     });
     projectDescription = expected === existing.document.metadata.authoritativeInputSha256 ? "complete-fresh" : "complete-stale";
@@ -340,7 +337,6 @@ export async function runProgressiveInit(options: ProgressiveInitOptions): Promi
   const persistedValue = projectDescriptionForPersistence(operation.value);
   const authoritativeInputSha256 = projectDescriptionAuthoritativeInputSha256({
     originalRequest,
-    discoverySha256,
     acceptedDecisions: projectDescriptionAcceptedDecisionProjection(persistedValue),
   });
   const source = renderProjectDescriptionDocument(persistedValue, {
