@@ -1,4 +1,5 @@
-import { mkdtemp } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -14,7 +15,14 @@ import {
 } from "../../../src/vnext/providers/conformance/recording.js";
 import { deriveConformanceTier, replayConformance, validateConformanceRecord } from "../../../src/vnext/providers/conformance/runner.js";
 import { CONFORMANCE_SUITE_VERSION, MANDATORY_CATEGORIES, type ConformanceResult } from "../../../src/vnext/providers/conformance/suite.js";
-import type { ModelProfile, NormalizationCode } from "../../../src/vnext/providers/contract.js";
+import {
+  measured,
+  unmeasured,
+  type CanonicalUsage,
+  type ModelProfile,
+  type NormalizationCode,
+  type ProviderAdapter,
+} from "../../../src/vnext/providers/contract.js";
 import { anthropicSse } from "./helpers.js";
 import { loadVerifiedProviderProfile } from "../../../src/vnext/providers/registry.js";
 import {
@@ -22,6 +30,11 @@ import {
   defaultConformanceRecordsRoot,
   runVnextConformanceCommand,
 } from "../../../src/vnext/providers/conformance/cli.js";
+import {
+  resolveProviderAdapter,
+  resolveProviderConformanceCases,
+  resolveProviderProfile,
+} from "../../../src/vnext/providers/registry.js";
 
 function noNetworkAdapter(counter = vi.fn()): AnthropicAdapter {
   return new AnthropicAdapter({
@@ -30,6 +43,53 @@ function noNetworkAdapter(counter = vi.fn()): AnthropicAdapter {
       throw new Error("network forbidden during replay");
     },
   } as AnthropicTransport);
+}
+
+function usageAdapter(usage: CanonicalUsage): ProviderAdapter {
+  const delegate = noNetworkAdapter();
+  return {
+    family: delegate.family,
+    transport: delegate.transport,
+    profiles: delegate.profiles,
+    checkCapabilities: (profile, request) => delegate.checkCapabilities(profile, request),
+    request: (profile, auth, request) => delegate.request(profile, auth, request),
+    replay(profile, request, raw) {
+      const outcome = delegate.replay(profile, request, raw);
+      return outcome.ok ? { ok: true, value: { ...outcome.value, usage } } : outcome;
+    },
+  };
+}
+
+function canonicalUsage(inputTokens: CanonicalUsage["inputTokens"], providerRequests = measured(1)): CanonicalUsage {
+  return {
+    inputTokens,
+    cachedInputTokens: unmeasured("unsupported-by-provider"),
+    cacheWriteTokens: unmeasured("unsupported-by-provider"),
+    outputTokens: unmeasured("unsupported-by-provider"),
+    reasoningTokens: unmeasured("unsupported-by-provider"),
+    costUsd: unmeasured("unsupported-by-provider"),
+    providerRequests,
+  };
+}
+
+function usageProfile(inputTokens: boolean, requestAccounting: ModelProfile["requestAccounting"] = "exact"): ModelProfile {
+  return {
+    ...CLAUDE_OPUS_5_PROFILE,
+    requestAccounting,
+    usageReporting: {
+      inputTokens,
+      cachedInputTokens: false,
+      cacheWriteTokens: false,
+      outputTokens: false,
+      reasoningTokens: false,
+      costUsd: false,
+    },
+  };
+}
+
+function usageCase(profile: ModelProfile, usage: CanonicalUsage) {
+  return replayConformance({ adapter: usageAdapter(usage), profile, cases: CONFORMANCE_CASES, record: record() })
+    .cases.find((test) => test.id === "usage-reporting")!;
 }
 
 function record(): ConformanceRecord {
@@ -85,6 +145,54 @@ describe("provider/model conformance runner", () => {
     expect(first.normalizationsOnHappyPath).toEqual([]);
     expect(first.cases.every((test) => test.passed)).toBe(true);
     expect(first.cases.find((test) => test.id === "semantically-incomplete")).toMatchObject({ passed: true });
+  });
+
+  it.each([
+    ["supported metric with a measured value", true, measured(7), true],
+    ["supported metric marked unsupported", true, unmeasured<number>("unsupported-by-provider"), false],
+    ["supported metric not reported", true, unmeasured<number>("not-reported-in-this-response"), false],
+    ["unsupported metric explicitly unsupported", false, unmeasured<number>("unsupported-by-provider"), true],
+    ["unsupported metric fabricated as measured zero", false, measured(0), false],
+    ["unsupported metric merely not reported", false, unmeasured<number>("not-reported-in-this-response"), false],
+  ] as const)("projects profile usage support: %s", (_label, supported, observed, expected) => {
+    expect(usageCase(usageProfile(supported), canonicalUsage(observed)).passed).toBe(expected);
+  });
+
+  it("keeps exact and opaque provider request accounting separate from usageReporting", () => {
+    const unsupportedInput = unmeasured<number>("unsupported-by-provider");
+    expect(usageCase(usageProfile(false, "exact"), canonicalUsage(unsupportedInput, measured(1))).passed).toBe(true);
+    expect(usageCase(usageProfile(false, "exact"), canonicalUsage(unsupportedInput, unmeasured("unsupported-by-provider"))).passed).toBe(false);
+    expect(usageCase(usageProfile(false, "opaque"), canonicalUsage(unsupportedInput, unmeasured("unsupported-by-provider"))).passed).toBe(true);
+    expect(usageCase(usageProfile(false, "opaque"), canonicalUsage(unsupportedInput, measured(1))).passed).toBe(false);
+  });
+
+  it("replays every packaged Anthropic record with unchanged bytes, results, and supported tier", async () => {
+    const packaged = [
+      {
+        profileId: "anthropic:claude-opus-5",
+        file: "anthropic_claude-opus-5.json",
+        sha256: "60e725d25a338d932ee475d1500452315f898a5c9427ac948c5213dbcf5752fc",
+      },
+      {
+        profileId: "anthropic:claude-code-cli:claude-opus-5",
+        file: "anthropic_claude-code-cli_claude-opus-5.json",
+        sha256: "917b493846ccdbdd3aaaf1d8ab3cf463d84aeb802e2b3ebcd2439a049bc50d4a",
+      },
+    ] as const;
+    const root = defaultConformanceRecordsRoot();
+    for (const expected of packaged) {
+      const bytes = await readFile(resolve(root, expected.file));
+      expect(createHash("sha256").update(bytes).digest("hex"), expected.profileId).toBe(expected.sha256);
+      const source = await readConformanceRecord(root, expected.profileId);
+      const replayed = validateConformanceRecord({
+        adapter: resolveProviderAdapter(expected.profileId),
+        profile: resolveProviderProfile(expected.profileId),
+        cases: resolveProviderConformanceCases(expected.profileId),
+        record: source,
+      });
+      expect(replayed, expected.profileId).toEqual(source.result);
+      expect(replayed.tier, expected.profileId).toBe("SUPPORTED");
+    }
   });
 
   it("performs zero transport/network requests during replay", () => {

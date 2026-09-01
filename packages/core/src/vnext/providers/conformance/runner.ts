@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import type {
+  CanonicalUsage,
   ConformanceTier,
   ModelProfile,
   NormalizationCode,
@@ -31,6 +32,40 @@ function resolvedModelForProfile(profile: ModelProfile): string | undefined {
 
 function fail(test: ConformanceCase, diagnostic: string): ConformanceCaseResult {
   return { id: test.id, category: test.category, mandatory: test.mandatory, passed: false, normalizations: [], diagnostic };
+}
+
+type ProfileUsageMetric = keyof ModelProfile["usageReporting"];
+
+function usageDiagnostic(input: {
+  readonly profile: ModelProfile;
+  readonly usage: CanonicalUsage;
+  readonly required: readonly (keyof CanonicalUsage)[];
+}): string | undefined {
+  const { profile, usage } = input;
+  const required = new Set(input.required);
+  for (const key of Object.keys(profile.usageReporting) as ProfileUsageMetric[]) {
+    if (!required.has(key)) return `usage conformance fixture omitted profile metric '${key}'`;
+    const observed = usage[key];
+    if (profile.usageReporting[key]) {
+      if (!observed.measured) {
+        return `supported usage metric '${key}' is unmeasured (${observed.reason})`;
+      }
+      continue;
+    }
+    if (observed.measured || observed.reason !== "unsupported-by-provider") {
+      const observedState = observed.measured ? "measured" : observed.reason;
+      return `unsupported usage metric '${key}' was reported as ${observedState}`;
+    }
+  }
+
+  if (profile.requestAccounting === "opaque") {
+    return usage.providerRequests.measured
+      ? "opaque provider request accounting was reported as measured"
+      : undefined;
+  }
+  return required.has("providerRequests") && !usage.providerRequests.measured
+    ? `exact provider request accounting is unmeasured (${usage.providerRequests.reason})`
+    : undefined;
 }
 
 interface ReplayedRuntimeInvocation {
@@ -344,12 +379,9 @@ export function replayConformance(input: {
         passed = isDeepStrictEqual(outcome.value.payload, test.expect.value);
         diagnostic = "canonical payload differs from expected payload";
       } else {
-        const required = profile.requestAccounting === "opaque"
-          ? test.expect.required.filter((key) => key !== "providerRequests")
-          : test.expect.required;
-        passed = required.every((key) => outcome.value.usage[key].measured)
-          && (profile.requestAccounting !== "opaque" || !outcome.value.usage.providerRequests.measured);
-        diagnostic = "a profile-claimed usage metric is unmeasured";
+        const usageFailure = usageDiagnostic({ profile, usage: outcome.value.usage, required: test.expect.required });
+        passed = usageFailure === undefined;
+        diagnostic = usageFailure ?? "usage reporting conforms to profile declarations";
       }
       if (test.happyPath) for (const code of normalizations) happyPathCodes.add(code);
     }

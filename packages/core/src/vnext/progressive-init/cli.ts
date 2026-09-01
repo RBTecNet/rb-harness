@@ -120,7 +120,10 @@ async function selectTransport(runtime: ProgressiveInitCliRuntime): Promise<"cla
   const values = [CLAUDE_CODE_TRANSPORT_PROFILE_ID, ...direct.map((profile) => profile.id)];
   runtime.write("\nSelect AI transport:\n\n");
   runtime.write("1. Claude Code CLI\n   transport: claude-code-cli\n   request accounting: opaque\n\n");
-  direct.forEach((profile, index) => runtime.write(`${index + 2}. Anthropic API\n   ${profile.id}\n   request accounting: ${profile.requestAccounting}\n\n`));
+  direct.forEach((profile, index) => {
+    const provider = profile.family === "anthropic" ? "Anthropic" : profile.family === "deepseek" ? "DeepSeek" : profile.family;
+    runtime.write(`${index + 2}. ${provider} API\n   ${profile.id}\n   request accounting: ${profile.requestAccounting}\n\n`);
+  });
   const selected = await choose(runtime, "Choice: ", values);
   return selected === CLAUDE_CODE_TRANSPORT_PROFILE_ID ? "claude-code-cli" : direct.find((profile) => profile.id === selected)!;
 }

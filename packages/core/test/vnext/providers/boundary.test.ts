@@ -18,6 +18,7 @@ describe("Phase 2 provider boundaries", () => {
   const core = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
   const anthropic = resolve(core, "src/vnext/providers/anthropic");
   const claudeCode = resolve(anthropic, "claude-code");
+  const deepSeek = resolve(core, "src/vnext/providers/deepseek");
 
   it("forbids semantic Core imports and semantic vocabulary in Anthropic normalization", async () => {
     const source = (await Promise.all((await files(anthropic)).map((file) => readFile(file, "utf8")))).join("\n");
@@ -42,6 +43,17 @@ describe("Phase 2 provider boundaries", () => {
     const source = (await Promise.all((await files(anthropic)).map((file) => readFile(file, "utf8")))).join("\n");
     expect(source).not.toMatch(/Respond with valid JSON|Do not output Markdown|Harness requirements|Follow this schema exactly/i);
     expect(source).not.toMatch(/formatter call|semantic repair|second model call/i);
+  });
+
+  it("keeps DeepSeek normalization semantic-blind and independent from Anthropic and the legacy provider stack", async () => {
+    const source = (await Promise.all((await files(deepSeek)).map((file) => readFile(file, "utf8")))).join("\n");
+    expect(source).not.toMatch(/vnext\/(ir|resolve|validate|render|closure|ralph-fidelity)/);
+    expect(source).not.toMatch(/provider-registry|api-agent|api-stream|anthropic-version|x-api-key|v1\/messages|chat\/completions/);
+    expect(source).not.toMatch(/Requirement|SemanticTask|SemanticPhase|TaskId|AcceptanceId|PHASES\.md|BRIEF\.md|Ralph/);
+    expect(await readFile(resolve(deepSeek, "normalize.ts"), "utf8"))
+      .not.toMatch(/requirementsList|requirements|phases|tasks|acceptance|ownedPaths|covers|qualityCommands/);
+    expect(await readFile(resolve(deepSeek, "adapter.ts"), "utf8"))
+      .not.toMatch(/Respond with valid JSON|Do not output Markdown|Harness requirements|Repair your answer/i);
   });
 
   it("keeps one shared Anthropic workspace ID predicate for wizard and adapter", async () => {

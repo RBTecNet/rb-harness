@@ -183,7 +183,15 @@ export const CONFORMANCE_CASES: readonly ConformanceCase[] = [
     request: representation,
     expect: {
       kind: "usage",
-      required: ["inputTokens", "cachedInputTokens", "cacheWriteTokens", "outputTokens", "providerRequests"],
+      required: [
+        "inputTokens",
+        "cachedInputTokens",
+        "cacheWriteTokens",
+        "outputTokens",
+        "reasoningTokens",
+        "costUsd",
+        "providerRequests",
+      ],
     },
   },
   {

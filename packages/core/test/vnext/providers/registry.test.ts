@@ -3,7 +3,15 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { saveCredential } from "../../../src/credential-store.js";
-import { listProviderProfiles, resolveProviderAdapter, resolveProviderAuth, resolveProviderCredential, resolveProviderProfile } from "../../../src/vnext/providers/registry.js";
+import {
+  listProviderProfiles,
+  recordProviderConformance,
+  resolveProviderAdapter,
+  resolveProviderAuth,
+  resolveProviderConformanceCases,
+  resolveProviderCredential,
+  resolveProviderProfile,
+} from "../../../src/vnext/providers/registry.js";
 
 const originalCredentialHome = process.env.RB_CREDENTIAL_HOME;
 
@@ -17,11 +25,29 @@ describe("vNext provider registry", () => {
     expect(resolveProviderProfile("anthropic:claude-opus-5").modelId).toBe("claude-opus-5");
     expect(resolveProviderAdapter("anthropic:claude-opus-5")).toMatchObject({ family: "anthropic", transport: "direct-api" });
     expect(resolveProviderAdapter("anthropic:claude-code-cli:claude-opus-5")).toMatchObject({ family: "anthropic", transport: "claude-code-cli" });
+    expect(resolveProviderProfile("deepseek:deepseek-v4-pro")).toMatchObject({
+      family: "deepseek",
+      transport: "direct-api",
+      modelId: "deepseek-v4-pro",
+      conformance: { tier: "UNSUPPORTED", verifiedRecord: false },
+    });
+    expect(resolveProviderProfile("deepseek:deepseek-v4-flash")).toMatchObject({
+      family: "deepseek",
+      transport: "direct-api",
+      modelId: "deepseek-v4-flash",
+      conformance: { tier: "UNSUPPORTED", verifiedRecord: false, runId: null, recordedAt: null },
+    });
+    const proAdapter = resolveProviderAdapter("deepseek:deepseek-v4-pro");
+    const flashAdapter = resolveProviderAdapter("deepseek:deepseek-v4-flash");
+    expect(proAdapter).toMatchObject({ family: "deepseek", transport: "direct-api" });
+    expect(flashAdapter).toBe(proAdapter);
     expect(() => resolveProviderProfile("anthropic:claude-sonnet-5")).toThrow(/unknown provider profile/);
     expect(() => resolveProviderProfile("anthropic:claude-opus-5", "openai")).toThrow(/belongs to anthropic/);
     expect(listProviderProfiles().map((profile) => profile.id)).toEqual([
       "anthropic:claude-opus-5",
       "anthropic:claude-code-cli:claude-opus-5",
+      "deepseek:deepseek-v4-pro",
+      "deepseek:deepseek-v4-flash",
     ]);
   });
 
@@ -67,5 +93,31 @@ describe("vNext provider registry", () => {
     expect(Object.isFrozen(workspace.attributes)).toBe(true);
     expect(plain.attributes).toEqual({});
     expect(Object.isFrozen(plain.attributes)).toBe(true);
+  });
+
+  it("resolves DeepSeek credentials only from the DeepSeek vault namespace", async () => {
+    process.env.RB_CREDENTIAL_HOME = await mkdtemp(resolve(tmpdir(), "rb-vnext-deepseek-credential-"));
+    await saveCredential({ provider: "anthropic", protocol: "api-key", label: "shared-label", secret: "anthropic-secret" });
+    await saveCredential({ provider: "deepseek", protocol: "api-key", label: "shared-label", secret: "deepseek-secret" });
+    for (const profileId of ["deepseek:deepseek-v4-pro", "deepseek:deepseek-v4-flash"]) {
+      const profile = resolveProviderProfile(profileId);
+      await expect(resolveProviderCredential(profile, "shared-label")).resolves.toMatchObject({
+        id: "deepseek:shared-label",
+        secret: "deepseek-secret",
+      });
+      await expect(resolveProviderAuth(profile, "shared-label")).resolves.toMatchObject({
+        kind: "credential",
+        credential: { id: "deepseek:shared-label", secret: "deepseek-secret" },
+      });
+    }
+  });
+
+  it("exposes DeepSeek to generic conformance without invoking the live recorder offline", async () => {
+    for (const profileId of ["deepseek:deepseek-v4-pro", "deepseek:deepseek-v4-flash"]) {
+      const profile = resolveProviderProfile(profileId);
+      expect(resolveProviderConformanceCases(profile.id).map((test) => test.id)).toContain("valid-structured-response");
+      await expect(recordProviderConformance(profile, { kind: "ambient-session", id: "not-a-vault-credential" }))
+        .rejects.toThrow(/requires a vault credential/);
+    }
   });
 });

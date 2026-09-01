@@ -11,6 +11,8 @@ import { CONFORMANCE_CASES } from "./conformance/fixtures.js";
 import { validateConformanceRecord } from "./conformance/runner.js";
 import type { ConformanceCase } from "./conformance/suite.js";
 import { CLAUDE_CODE_TRANSPORT_PROFILE_ID } from "./anthropic/claude-code/runtime-model.js";
+import { deepSeekAdapter } from "./deepseek/adapter.js";
+import { recordDeepSeekConformance } from "./deepseek/record.js";
 
 export class ProviderRegistryError extends Error {
   constructor(message: string) {
@@ -19,7 +21,7 @@ export class ProviderRegistryError extends Error {
   }
 }
 
-const ADAPTERS: readonly ProviderAdapter[] = [anthropicAdapter, claudeCodeAdapter];
+const ADAPTERS: readonly ProviderAdapter[] = [anthropicAdapter, claudeCodeAdapter, deepSeekAdapter];
 
 export function listProviderProfiles(): readonly ModelProfile[] {
   return ADAPTERS.flatMap((adapter) => adapter.profiles);
@@ -55,8 +57,10 @@ export function resolveProviderConformanceCases(profileId: string): readonly Con
 
 export async function resolveProviderCredential(profile: ModelProfile, selector?: string): Promise<ResolvedProviderCredential> {
   if (profile.transport !== "direct-api") throw new ProviderRegistryError(`profile ${profile.id} does not use a vault credential`);
-  if (profile.family !== "anthropic") throw new ProviderRegistryError(`credential resolution is not registered for family ${profile.family}`);
-  const resolved = await resolveCredential("anthropic", selector);
+  if (profile.family !== "anthropic" && profile.family !== "deepseek") {
+    throw new ProviderRegistryError(`credential resolution is not registered for family ${profile.family}`);
+  }
+  const resolved = await resolveCredential(profile.family, selector);
   if (!resolved.secret) throw new ProviderRegistryError(`credential ${resolved.record.id} has no direct API secret`);
   return {
     id: resolved.record.id,
@@ -80,6 +84,11 @@ export async function recordProviderConformance(
   if (profile.family === "anthropic" && profile.transport === "direct-api") {
     if (auth.kind !== "credential") throw new ProviderRegistryError(`profile ${profile.id} requires a vault credential`);
     const direct = await recordAnthropicConformance(profile, auth.credential);
+    return { record: direct.record, providerRequests: measured(direct.providerRequests), transportInvocations: direct.providerRequests };
+  }
+  if (profile.family === "deepseek" && profile.transport === "direct-api") {
+    if (auth.kind !== "credential") throw new ProviderRegistryError(`profile ${profile.id} requires a vault credential`);
+    const direct = await recordDeepSeekConformance(profile, auth.credential);
     return { record: direct.record, providerRequests: measured(direct.providerRequests), transportInvocations: direct.providerRequests };
   }
   if (profile.family === "anthropic" && profile.transport === "claude-code-cli") {

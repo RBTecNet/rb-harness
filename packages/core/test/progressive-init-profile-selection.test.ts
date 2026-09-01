@@ -9,6 +9,7 @@ import type { InterviewQuestionEvidence } from "../src/vnext/interview.js";
 
 const CLI_ID = "anthropic:claude-code-cli:claude-opus-5";
 const API_ID = "anthropic:claude-opus-5";
+const DEEPSEEK_API_ID = "deepseek:deepseek-v4-pro";
 
 function supported(id: string): ModelProfile {
   return {
@@ -36,6 +37,7 @@ const cliProfile: ModelProfile = {
   },
 };
 const apiProfile = supported(API_ID);
+const deepSeekApiProfile = supported(DEEPSEEK_API_ID);
 const incomplete: readonly ProgressiveStageSnapshot[] = [
   { stage: "project-description", status: "incomplete" },
   { stage: "user-stories", status: "incomplete" },
@@ -147,6 +149,21 @@ describe("Progressive focused AI profile selection", () => {
     await executeProgressiveInitCommand(options, state.runtime);
     expect(state.selectedProfiles).toEqual([API_ID]);
     expect(state.adapters).toEqual([API_ID]);
+  });
+
+  it("labels direct API profiles by family and never presents DeepSeek as Anthropic", async () => {
+    const state = fixture({
+      listProfiles: () => [deepSeekApiProfile, cliProfile, apiProfile],
+      loadProfile: async (id) => id === DEEPSEEK_API_ID ? deepSeekApiProfile : id === CLI_ID ? cliProfile : apiProfile,
+    });
+    state.answers.push("3");
+    await executeProgressiveInitCommand(options, state.runtime);
+    const output = state.writes.join("");
+    expect(state.selectedProfiles).toEqual([DEEPSEEK_API_ID]);
+    expect(state.adapters).toEqual([DEEPSEEK_API_ID]);
+    expect(output).toContain(`Anthropic API\n   ${API_ID}`);
+    expect(output).toContain(`DeepSeek API\n   ${DEEPSEEK_API_ID}`);
+    expect(output).not.toContain(`Anthropic API\n   ${DEEPSEEK_API_ID}`);
   });
 
   it("prints the Progressive interview heading without duplicating the question rendered by the answer prompt", async () => {
@@ -345,5 +362,43 @@ describe("Progressive focused AI profile selection", () => {
     await executeProgressiveInitCommand(options, state.runtime);
     expect(providerResolutionCalls).toBe(0);
     expect(state.writes.join("")).toContain("already complete and fresh");
+  });
+
+  it("does no DeepSeek profile, credential, adapter, or request resolution for a complete-fresh stage", async () => {
+    const fresh: readonly ProgressiveStageSnapshot[] = [
+      { stage: "project-description", status: "complete-fresh" },
+      { stage: "user-stories", status: "incomplete" },
+      { stage: "database-schema", status: "incomplete" },
+      { stage: "project-phases", status: "incomplete" },
+    ];
+    const forbidden: string[] = [];
+    const state = fixture({
+      inspect: async () => fresh,
+      listProfiles: () => { forbidden.push("listProfiles"); return []; },
+      loadProfile: async () => { forbidden.push("loadProfile"); throw new Error("must not resolve profile"); },
+      adapterFor: () => { forbidden.push("adapterFor"); throw new Error("must not resolve adapter"); },
+      authFor: async () => { forbidden.push("authFor"); throw new Error("must not resolve credential"); },
+      execute: async (execution) => {
+        expect(execution.profile).toBeUndefined();
+        expect(execution.adapter).toBeUndefined();
+        expect(execution.auth).toBeUndefined();
+        return {
+          mode: "focused",
+          selectedStage: "project-description",
+          completedStage: "project-description",
+          completionDisposition: "existing-fresh",
+          semanticOperations: 0,
+          correctiveRegenerations: 0,
+        };
+      },
+    });
+    await executeProgressiveInitCommand({
+      ...options,
+      profileId: DEEPSEEK_API_ID,
+      credential: "deepseek-fixture",
+    }, state.runtime);
+    expect(forbidden).toEqual([]);
+    expect(state.adapters).toEqual([]);
+    expect(state.selectedProfiles).toEqual([]);
   });
 });
