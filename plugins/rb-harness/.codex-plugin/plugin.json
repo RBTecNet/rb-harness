@@ -1,6 +1,6 @@
 {
   "name": "rb-harness",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Legacy host adapter for the standalone provider-neutral RB Harness executable.",
   "author": {
     "name": "RB Harness contributors"

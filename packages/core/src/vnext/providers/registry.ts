@@ -20,6 +20,8 @@ import { OPEN_CODE_SERVICES } from "./opencode/catalog.js";
 import { resolveOpenCodeDynamicProfile, openCodeProfileConfiguration } from "./opencode/profiles.js";
 import { recordOpenCodeApiConformance } from "./opencode/api-record.js";
 import { recordOpenCodeCliConformance } from "./opencode/cli-record.js";
+import { openAiAdapter } from "./openai/adapter.js";
+import { recordOpenAiConformance } from "./openai/record.js";
 
 export class ProviderRegistryError extends Error {
   constructor(message: string) {
@@ -28,7 +30,14 @@ export class ProviderRegistryError extends Error {
   }
 }
 
-const ADAPTERS: readonly ProviderAdapter[] = [anthropicAdapter, claudeCodeAdapter, deepSeekAdapter, openCodeApiAdapter, openCodeCliAdapter];
+const ADAPTERS: readonly ProviderAdapter[] = [
+  anthropicAdapter,
+  claudeCodeAdapter,
+  deepSeekAdapter,
+  openCodeApiAdapter,
+  openCodeCliAdapter,
+  openAiAdapter,
+];
 
 export function listProviderProfiles(): readonly ModelProfile[] {
   return ADAPTERS.flatMap((adapter) => adapter.profiles);
@@ -73,7 +82,7 @@ export async function resolveProviderCredential(profile: ModelProfile, selector?
     if (!resolved.secret) throw new ProviderRegistryError(`credential ${resolved.record.id} has no OpenCode API secret`);
     return { id: resolved.record.id, secret: resolved.secret, attributes: Object.freeze({ ...(resolved.record.attributes ?? {}) }) };
   }
-  if (profile.family !== "anthropic" && profile.family !== "deepseek") {
+  if (profile.family !== "anthropic" && profile.family !== "deepseek" && profile.family !== "openai") {
     throw new ProviderRegistryError(`credential resolution is not registered for family ${profile.family}`);
   }
   const resolved = await resolveCredential(profile.family, selector);
@@ -109,6 +118,11 @@ export async function recordProviderConformance(
   if (profile.family === "deepseek" && profile.transport === "direct-api") {
     if (auth.kind !== "credential") throw new ProviderRegistryError(`profile ${profile.id} requires a vault credential`);
     const direct = await recordDeepSeekConformance(profile, auth.credential);
+    return { record: direct.record, providerRequests: measured(direct.providerRequests), transportInvocations: direct.providerRequests };
+  }
+  if (profile.family === "openai" && profile.transport === "direct-api") {
+    if (auth.kind !== "credential") throw new ProviderRegistryError(`profile ${profile.id} requires a vault credential`);
+    const direct = await recordOpenAiConformance(profile, auth.credential);
     return { record: direct.record, providerRequests: measured(direct.providerRequests), transportInvocations: direct.providerRequests };
   }
   if (profile.family === "anthropic" && profile.transport === "claude-code-cli") {

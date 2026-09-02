@@ -51,6 +51,10 @@ describe("vNext provider registry", () => {
       "opencode:go:deepseek-v4-pro",
       "opencode:zen:gpt-5.6-luna",
       "opencode:cli:opencode/gpt-5.6-luna",
+      "openai:gpt-5.6-sol",
+      "openai:gpt-5.6-terra",
+      "openai:gpt-5.6-luna",
+      "openai:gpt-5.3-codex",
     ]));
   });
 
@@ -113,6 +117,21 @@ describe("vNext provider registry", () => {
         credential: { id: "deepseek:shared-label", secret: "deepseek-secret" },
       });
     }
+  });
+
+  it("reuses the existing OpenAI vault namespace with zero migration", async () => {
+    process.env.RB_CREDENTIAL_HOME = await mkdtemp(resolve(tmpdir(), "rb-vnext-openai-credential-"));
+    await saveCredential({ provider: "openai", protocol: "api-key", label: "shared-label", secret: "openai-secret" });
+    await saveCredential({ provider: "anthropic", protocol: "api-key", label: "shared-label", secret: "anthropic-secret" });
+    const profile = resolveProviderProfile("openai:gpt-5.6-sol");
+    await expect(resolveProviderCredential(profile, "shared-label")).resolves.toMatchObject({
+      id: "openai:shared-label",
+      secret: "openai-secret",
+    });
+    await expect(resolveProviderAuth(profile, "shared-label")).resolves.toMatchObject({
+      kind: "credential",
+      credential: { id: "openai:shared-label", secret: "openai-secret" },
+    });
   });
 
   it("uses the existing OpenCode Go/Zen vault namespaces with zero migration or fallback", async () => {
