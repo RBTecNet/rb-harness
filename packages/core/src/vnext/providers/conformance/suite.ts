@@ -55,7 +55,8 @@ export type RuntimeAssertionKey =
   | "no-fallback"
   | "no-agent-tools-or-mcp"
   | "isolated-context"
-  | "no-session-persistence";
+  | "no-session-persistence"
+  | "external-cli-evidence";
 
 export interface ConformanceCase {
   readonly id: string;

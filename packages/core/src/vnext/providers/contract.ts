@@ -79,6 +79,27 @@ export interface ModelInvocationConfigurationEvidence {
   readonly transportRetryLimit: number;
 }
 
+/** Integrity-bound, provider-neutral policy for one external CLI semantic invocation. */
+export interface ExternalCliInvocationPolicyEvidence {
+  readonly format: "rb-external-cli-invocation-policy/v1";
+  readonly outputMode: "json" | "other";
+  readonly transportFraming: "jsonl" | "other";
+  readonly inputMode: "stdin" | "other";
+  readonly ambientAuth: boolean;
+  readonly modelArgument: string;
+  readonly directoryIsolation: "isolated-temporary" | "not-isolated";
+  readonly stderrPolicy: "ignored-not-recorded" | "captured";
+  readonly pluginMode: "pure" | "configured";
+  readonly toolPolicy: "deny" | "configured";
+  readonly externalInstructions: "disabled" | "configured";
+  readonly legacyCompatibilityRules: "disabled" | "enabled";
+  readonly environmentPolicy: "allowlisted" | "inherited";
+  readonly modelBearingProcessesPerSemanticRequest: 1;
+  readonly metadataProcessesPerSemanticRequest: 1;
+  readonly identitySource: "session-export";
+  readonly transportRetryLimit: 0;
+}
+
 export interface CanonicalSemanticResponse {
   readonly slice: string;
   readonly payload: unknown;
@@ -101,6 +122,7 @@ export interface ProviderRuntimeObservation {
   readonly streamComplete: boolean;
   readonly treeQuiescent: boolean;
   readonly treeVerified: boolean;
+  readonly toolEventsObserved?: number;
 }
 
 export type ProviderErrorKind =
@@ -136,7 +158,7 @@ export type StructuredOutputMechanism =
 
 export type ConformanceTier = "SUPPORTED" | "SUPPORTED_WITH_NORMALIZATION" | "UNSUPPORTED";
 
-export type ProviderTransportId = "direct-api" | "claude-code-cli";
+export type ProviderTransportId = "direct-api" | "claude-code-cli" | "opencode-cli";
 
 /**
  * Whether underlying provider/model requests are authoritatively observable.
@@ -149,7 +171,7 @@ export function isRequestAccounting(value: unknown): value is RequestAccounting 
 }
 
 export function isProviderTransportId(value: unknown): value is ProviderTransportId {
-  return value === "direct-api" || value === "claude-code-cli";
+  return value === "direct-api" || value === "claude-code-cli" || value === "opencode-cli";
 }
 
 export interface ConformanceState {
@@ -255,4 +277,6 @@ export interface ProviderAdapter {
   observeRuntime?(raw: unknown): ProviderRuntimeObservation | undefined;
   /** Current production policy used to reject stale external-transport evidence before execution. */
   invocationConfigurationEvidence?(profile: ModelProfile): ModelInvocationConfigurationEvidence;
+  /** Current external-CLI policy used to reject evidence recorded under a different invocation boundary. */
+  currentExternalCliInvocationPolicy?(profile: ModelProfile): ExternalCliInvocationPolicyEvidence;
 }

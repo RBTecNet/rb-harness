@@ -34,6 +34,7 @@ import type {
   ProviderAdapter,
   ProviderOutcome,
   ProviderResponseError,
+  ProviderTransportId,
   ResolvedProviderAuth,
   SemanticRequest,
 } from "../../src/vnext/providers/contract.js";
@@ -88,7 +89,7 @@ type ScriptEntry = { readonly payload: unknown } | { readonly error: ProviderRes
 
 class ScriptedAdapter implements ProviderAdapter {
   readonly family = "fixture";
-  readonly transport: "direct-api" | "claude-code-cli";
+  readonly transport: ProviderTransportId;
   readonly profiles: readonly ModelProfile[];
   readonly requests: SemanticRequest[] = [];
 

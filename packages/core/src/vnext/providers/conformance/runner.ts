@@ -159,6 +159,57 @@ function deriveRuntimeAssertion(input: {
   readonly record: ConformanceRecord;
 }): DerivedRuntimeAssertion {
   const { key, adapter, profile, cases, record } = input;
+  if (key === "external-cli-evidence") {
+    const evidence = record.externalCliEvidence;
+    if (!evidence || evidence.format !== "rb-external-cli-evidence/v1") {
+      return runtimeFail("provider-neutral external CLI evidence is missing");
+    }
+    if (
+      profile.runtime.kind !== "external-executable"
+      || evidence.executable.trim().length === 0
+      || evidence.transportVersion !== record.transportVersion
+      || evidence.requestedModel !== requestedModelForProfile(profile)
+      || evidence.observedProviderRequests.measured
+      || profile.requestAccounting !== "opaque"
+    ) {
+      return runtimeFail("external CLI identity, invocation, or accounting evidence is inconsistent");
+    }
+    const currentPolicy = adapter.currentExternalCliInvocationPolicy?.(profile);
+    if (!currentPolicy || !isDeepStrictEqual(evidence.invocationPolicy, currentPolicy)) {
+      return runtimeFail("external CLI invocation policy differs from the current adapter policy");
+    }
+    const expectedIds = ["valid-structured-response", "semantically-incomplete"].sort();
+    if (
+      evidence.transportInvocations !== evidence.invocations.length
+      || !isDeepStrictEqual(evidence.invocations.map((item) => item.id).sort(), expectedIds)
+      || evidence.invocations.some((item) => (
+        item.transportInvocations !== 1
+        || !item.processCompleted
+        || !item.treeQuiescent
+        || !item.treeVerified
+        || item.observedModelIds.length === 0
+        || item.observedModelIds.some((model) => model !== requestedModelForProfile(profile))
+        || item.toolEventsObserved !== 0
+      ))
+    ) {
+      return runtimeFail("external CLI process completion or observed model evidence is inconsistent");
+    }
+    for (const invocation of evidence.invocations) {
+      const raw = record.rawResponses[invocation.recordingKey]?.response;
+      const observation = raw === undefined ? undefined : adapter.observeRuntime?.(raw);
+      if (!observation || !observation.streamComplete || !observation.treeQuiescent || !observation.treeVerified) {
+        return runtimeFail(`external CLI raw observation '${invocation.recordingKey}' cannot be replayed`);
+      }
+      if (!isDeepStrictEqual(observation.modelIds, invocation.observedModelIds)) {
+        return runtimeFail(`external CLI model observation '${invocation.recordingKey}' changed during replay`);
+      }
+      if (observation.toolEventsObserved !== invocation.toolEventsObserved) {
+        return runtimeFail(`external CLI tool observation '${invocation.recordingKey}' changed during replay`);
+      }
+    }
+    return runtimePass();
+  }
+
   const evidence = record.runtimeEvidence;
   if (!evidence) return runtimeFail("external runtime evidence is missing");
   if (evidence.format !== "rb-external-runtime-evidence/v3") return runtimeFail("external runtime evidence format is stale or missing");
@@ -336,8 +387,8 @@ export function replayConformance(input: {
     if (test.expect.kind === "live-smoke") {
       const smoke = record.liveSmoke[test.expect.errorKind === "cancelled" ? "cancellation" : "timeout"];
       const invocations = smoke?.transportInvocations ?? smoke?.providerRequests;
-      const externalV3 = record.runtimeEvidence?.format === "rb-external-runtime-evidence/v3";
-      const passed = externalV3
+      const externalEvidence = profile.transport !== "direct-api";
+      const passed = externalEvidence
         ? smoke?.errorKind === test.expect.errorKind
           && invocations === 1
           && smoke.promptAbort
@@ -425,20 +476,43 @@ export function validateConformanceRecord(input: {
     if (record.providerFamily !== profile.family) throw new Error(`conformance record provider family '${String(record.providerFamily)}' does not match profile family '${profile.family}'`);
     if (record.modelId !== profile.modelId) throw new Error(`conformance record model '${String(record.modelId)}' does not match profile model '${profile.modelId}'`);
     if (!record.transportVersion?.trim()) throw new Error("external transport conformance record is missing transportVersion");
-    if (!record.runtimeEvidence) throw new Error("external transport conformance record is missing runtime evidence");
-    if (record.runtimeEvidence.format !== "rb-external-runtime-evidence/v3") {
-      throw new Error(`external transport runtime evidence format '${String(record.runtimeEvidence.format)}' is stale or invalid`);
-    }
-    const currentConfiguration = input.adapter.invocationConfigurationEvidence?.(profile);
-    if (!currentConfiguration) throw new Error(`external transport ${profile.transport} does not expose current invocation policy evidence`);
-    if (!isDeepStrictEqual(record.runtimeEvidence.invocationConfiguration, currentConfiguration)) {
-      throw new Error("external transport invocation policy differs from the conformance record");
+    if (profile.transport === "claude-code-cli") {
+      if (!record.runtimeEvidence || record.externalCliEvidence) {
+        throw new Error("this transport requires only rb-external-runtime-evidence/v3");
+      }
+      if (record.runtimeEvidence.format !== "rb-external-runtime-evidence/v3") {
+        throw new Error(`external transport runtime evidence format '${String(record.runtimeEvidence.format)}' is stale or invalid`);
+      }
+      const currentConfiguration = input.adapter.invocationConfigurationEvidence?.(profile);
+      if (!currentConfiguration) throw new Error(`external transport ${profile.transport} does not expose current invocation policy evidence`);
+      if (!isDeepStrictEqual(record.runtimeEvidence.invocationConfiguration, currentConfiguration)) {
+        throw new Error("external transport invocation policy differs from the conformance record");
+      }
+    } else if (profile.transport === "opencode-cli") {
+      if (!record.externalCliEvidence || record.runtimeEvidence) {
+        throw new Error("this transport requires only rb-external-cli-evidence/v1");
+      }
+      if (record.externalCliEvidence.format !== "rb-external-cli-evidence/v1") {
+        throw new Error("external CLI conformance record has invalid provider-neutral evidence");
+      }
+      const currentPolicy = input.adapter.currentExternalCliInvocationPolicy?.(profile);
+      if (!currentPolicy) throw new Error("external CLI transport does not expose current invocation policy evidence");
+      if (!isDeepStrictEqual(record.externalCliEvidence.invocationPolicy, currentPolicy)) {
+        throw new Error("external CLI invocation policy differs from the conformance record");
+      }
+    } else {
+      throw new Error(`external transport ${profile.transport} has no evidence validator`);
     }
     if (record.requestAccounting !== profile.requestAccounting) {
       throw new Error(`conformance record request accounting '${String(record.requestAccounting)}' does not match profile request accounting '${profile.requestAccounting}'`);
     }
-  } else if (record.requestAccounting !== undefined && record.requestAccounting !== profile.requestAccounting) {
-    throw new Error(`conformance record request accounting '${record.requestAccounting}' does not match profile request accounting '${profile.requestAccounting}'`);
+  } else {
+    if (record.runtimeEvidence || record.externalCliEvidence) {
+      throw new Error(`direct transport ${profile.transport} may not use external CLI evidence`);
+    }
+    if (record.requestAccounting !== undefined && record.requestAccounting !== profile.requestAccounting) {
+      throw new Error(`conformance record request accounting '${record.requestAccounting}' does not match profile request accounting '${profile.requestAccounting}'`);
+    }
   }
   if (record.profileId !== profile.id) throw new Error(`conformance record belongs to ${record.profileId}, not ${profile.id}`);
   if (record.suiteVersion !== CONFORMANCE_SUITE_VERSION) {

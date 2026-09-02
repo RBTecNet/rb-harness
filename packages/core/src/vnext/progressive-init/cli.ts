@@ -20,6 +20,7 @@ import {
   type ClaudeCodeCompatibilityInspection,
 } from "../providers/anthropic/claude-code/runtime-compatibility.js";
 import { CLAUDE_CODE_TRANSPORT_PROFILE_ID } from "../providers/anthropic/claude-code/runtime-model.js";
+import { openCodeProfileConfiguration } from "../providers/opencode/profiles.js";
 import {
   assertProgressiveInitPrerequisites,
   formatProgressiveStagePresentation,
@@ -92,8 +93,8 @@ function semanticExecutionStage(
   return status === "incomplete" || status === "complete-stale" ? stage : undefined;
 }
 
-async function supportedDirectProfiles(runtime: ProgressiveInitCliRuntime): Promise<readonly ModelProfile[]> {
-  const profiles = await Promise.all(runtime.listProfiles().filter((declared) => declared.transport === "direct-api").map(async (declared) => {
+async function supportedSelectableProfiles(runtime: ProgressiveInitCliRuntime): Promise<readonly ModelProfile[]> {
+  const profiles = await Promise.all(runtime.listProfiles().filter((declared) => declared.transport === "direct-api" || declared.transport === "opencode-cli").map(async (declared) => {
     try {
       const verified = await runtime.loadProfile(declared.id);
       return verified.conformance.tier === "SUPPORTED" ? verified : undefined;
@@ -116,16 +117,21 @@ async function choose(runtime: ProgressiveInitCliRuntime, prompt: string, values
 }
 
 async function selectTransport(runtime: ProgressiveInitCliRuntime): Promise<"claude-code-cli" | ModelProfile> {
-  const direct = await supportedDirectProfiles(runtime);
-  const values = [CLAUDE_CODE_TRANSPORT_PROFILE_ID, ...direct.map((profile) => profile.id)];
+  const profiles = await supportedSelectableProfiles(runtime);
+  const values = [CLAUDE_CODE_TRANSPORT_PROFILE_ID, ...profiles.map((profile) => profile.id)];
   runtime.write("\nSelect AI transport:\n\n");
   runtime.write("1. Claude Code CLI\n   transport: claude-code-cli\n   request accounting: opaque\n\n");
-  direct.forEach((profile, index) => {
-    const provider = profile.family === "anthropic" ? "Anthropic" : profile.family === "deepseek" ? "DeepSeek" : profile.family;
-    runtime.write(`${index + 2}. ${provider} API\n   ${profile.id}\n   request accounting: ${profile.requestAccounting}\n\n`);
+  profiles.forEach((profile, index) => {
+    const config = openCodeProfileConfiguration(profile);
+    const provider = profile.family === "anthropic" ? "Anthropic API"
+      : profile.family === "deepseek" ? "DeepSeek API"
+        : config?.mode === "cli" ? "OpenCode CLI"
+          : config?.service === "go" ? "OpenCode Go API"
+            : config?.service === "zen" ? "OpenCode Zen API" : `${profile.family} API`;
+    runtime.write(`${index + 2}. ${provider}\n   ${profile.id}\n   request accounting: ${profile.requestAccounting}\n\n`);
   });
   const selected = await choose(runtime, "Choice: ", values);
-  return selected === CLAUDE_CODE_TRANSPORT_PROFILE_ID ? "claude-code-cli" : direct.find((profile) => profile.id === selected)!;
+  return selected === CLAUDE_CODE_TRANSPORT_PROFILE_ID ? "claude-code-cli" : profiles.find((profile) => profile.id === selected)!;
 }
 
 async function selectClaudeCodeModel(runtime: ProgressiveInitCliRuntime): Promise<string> {

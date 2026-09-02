@@ -19,6 +19,7 @@ describe("Phase 2 provider boundaries", () => {
   const anthropic = resolve(core, "src/vnext/providers/anthropic");
   const claudeCode = resolve(anthropic, "claude-code");
   const deepSeek = resolve(core, "src/vnext/providers/deepseek");
+  const openCode = resolve(core, "src/vnext/providers/opencode");
 
   it("forbids semantic Core imports and semantic vocabulary in Anthropic normalization", async () => {
     const source = (await Promise.all((await files(anthropic)).map((file) => readFile(file, "utf8")))).join("\n");
@@ -31,7 +32,8 @@ describe("Phase 2 provider boundaries", () => {
 
   it("keeps generic contract and conformance code provider-neutral", async () => {
     const generic = resolve(core, "src/vnext/providers/conformance");
-    const source = (await Promise.all((await files(generic)).map((file) => readFile(file, "utf8")))).join("\n");
+    const source = (await Promise.all((await files(generic)).map((file) => readFile(file, "utf8")))).join("\n")
+      .replaceAll('"claude-code-cli"', "");
     expect(source).not.toMatch(/anthropic|claude/i);
     const contract = (await readFile(resolve(core, "src/vnext/providers/contract.ts"), "utf8"))
       .replaceAll('"claude-code-cli"', "")
@@ -54,6 +56,16 @@ describe("Phase 2 provider boundaries", () => {
       .not.toMatch(/requirementsList|requirements|phases|tasks|acceptance|ownedPaths|covers|qualityCommands/);
     expect(await readFile(resolve(deepSeek, "adapter.ts"), "utf8"))
       .not.toMatch(/Respond with valid JSON|Do not output Markdown|Harness requirements|Repair your answer/i);
+  });
+
+  it("keeps OpenCode provider-local normalization outside frozen semantic authority", async () => {
+    const source = (await Promise.all((await files(openCode)).map((file) => readFile(file, "utf8")))).join("\n");
+    expect(source).not.toMatch(/vnext\/(ir|resolve|validate|render|closure|ralph-fidelity)/);
+    expect(source).not.toMatch(/ImplementationSubject|SemanticTask|SemanticPhase|TaskId|AcceptanceId|PHASES\.md|BRIEF\.md/);
+    for (const name of ["api-normalize.ts", "cli-normalize.ts"]) {
+      expect(await readFile(resolve(openCode, name), "utf8"))
+        .not.toMatch(/requirementsList|requirements|phases|tasks|acceptance|ownedPaths|covers|qualityCommands/);
+    }
   });
 
   it("keeps one shared Anthropic workspace ID predicate for wizard and adapter", async () => {

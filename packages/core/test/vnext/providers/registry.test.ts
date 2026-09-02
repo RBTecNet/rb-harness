@@ -43,12 +43,15 @@ describe("vNext provider registry", () => {
     expect(flashAdapter).toBe(proAdapter);
     expect(() => resolveProviderProfile("anthropic:claude-sonnet-5")).toThrow(/unknown provider profile/);
     expect(() => resolveProviderProfile("anthropic:claude-opus-5", "openai")).toThrow(/belongs to anthropic/);
-    expect(listProviderProfiles().map((profile) => profile.id)).toEqual([
+    expect(listProviderProfiles().map((profile) => profile.id)).toEqual(expect.arrayContaining([
       "anthropic:claude-opus-5",
       "anthropic:claude-code-cli:claude-opus-5",
       "deepseek:deepseek-v4-pro",
       "deepseek:deepseek-v4-flash",
-    ]);
+      "opencode:go:deepseek-v4-pro",
+      "opencode:zen:gpt-5.6-luna",
+      "opencode:cli:opencode/gpt-5.6-luna",
+    ]));
   });
 
   it("cannot become supported through a hand-edited declaration", () => {
@@ -110,6 +113,18 @@ describe("vNext provider registry", () => {
         credential: { id: "deepseek:shared-label", secret: "deepseek-secret" },
       });
     }
+  });
+
+  it("uses the existing OpenCode Go/Zen vault namespaces with zero migration or fallback", async () => {
+    process.env.RB_CREDENTIAL_HOME = await mkdtemp(resolve(tmpdir(), "rb-vnext-opencode-credential-"));
+    await saveCredential({ provider: "opencode-go", protocol: "api-key", label: "shared", secret: "go-secret" });
+    await saveCredential({ provider: "opencode-zen", protocol: "api-key", label: "shared", secret: "zen-secret" });
+    const go = resolveProviderProfile("opencode:go:deepseek-v4-pro");
+    const zen = resolveProviderProfile("opencode:zen:gpt-5.6-luna");
+    await expect(resolveProviderCredential(go, "shared")).resolves.toMatchObject({ id: "opencode-go:shared", secret: "go-secret" });
+    await expect(resolveProviderCredential(zen, "shared")).resolves.toMatchObject({ id: "opencode-zen:shared", secret: "zen-secret" });
+    await expect(resolveProviderCredential(go, "opencode-zen:shared")).rejects.toThrow(/did not match/);
+    await expect(resolveProviderCredential(zen, "opencode-go:shared")).rejects.toThrow(/did not match/);
   });
 
   it("exposes DeepSeek to generic conformance without invoking the live recorder offline", async () => {

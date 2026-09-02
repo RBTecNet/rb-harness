@@ -10,6 +10,9 @@ import type { InterviewQuestionEvidence } from "../src/vnext/interview.js";
 const CLI_ID = "anthropic:claude-code-cli:claude-opus-5";
 const API_ID = "anthropic:claude-opus-5";
 const DEEPSEEK_API_ID = "deepseek:deepseek-v4-pro";
+const OPENCODE_GO_ID = "opencode:go:deepseek-v4-pro";
+const OPENCODE_ZEN_ID = "opencode:zen:gpt-5.6-luna";
+const OPENCODE_CLI_ID = "opencode:cli:opencode/gpt-5.6-luna";
 
 function supported(id: string): ModelProfile {
   return {
@@ -38,6 +41,9 @@ const cliProfile: ModelProfile = {
 };
 const apiProfile = supported(API_ID);
 const deepSeekApiProfile = supported(DEEPSEEK_API_ID);
+const openCodeGoProfile = supported(OPENCODE_GO_ID);
+const openCodeZenProfile = supported(OPENCODE_ZEN_ID);
+const openCodeCliProfile = supported(OPENCODE_CLI_ID);
 const incomplete: readonly ProgressiveStageSnapshot[] = [
   { stage: "project-description", status: "incomplete" },
   { stage: "user-stories", status: "incomplete" },
@@ -164,6 +170,19 @@ describe("Progressive focused AI profile selection", () => {
     expect(output).toContain(`Anthropic API\n   ${API_ID}`);
     expect(output).toContain(`DeepSeek API\n   ${DEEPSEEK_API_ID}`);
     expect(output).not.toContain(`Anthropic API\n   ${DEEPSEEK_API_ID}`);
+  });
+
+  it("labels OpenCode CLI, Go API, and Zen API as distinct execution modes", async () => {
+    const profiles = [openCodeZenProfile, openCodeCliProfile, openCodeGoProfile, cliProfile];
+    const state = fixture({ listProfiles: () => profiles, loadProfile: async (id) => profiles.find((profile) => profile.id === id)! });
+    state.answers.push("2");
+    await executeProgressiveInitCommand(options, state.runtime);
+    const output = state.writes.join("");
+    expect(output).toContain(`OpenCode CLI\n   ${OPENCODE_CLI_ID}`);
+    expect(output).toContain(`OpenCode Go API\n   ${OPENCODE_GO_ID}`);
+    expect(output).toContain(`OpenCode Zen API\n   ${OPENCODE_ZEN_ID}`);
+    expect(output).not.toContain(`Anthropic API\n   ${OPENCODE_GO_ID}`);
+    expect(output).not.toContain(`DeepSeek API\n   ${OPENCODE_ZEN_ID}`);
   });
 
   it("prints the Progressive interview heading without duplicating the question rendered by the answer prompt", async () => {
@@ -400,5 +419,31 @@ describe("Progressive focused AI profile selection", () => {
     expect(forbidden).toEqual([]);
     expect(state.adapters).toEqual([]);
     expect(state.selectedProfiles).toEqual([]);
+  });
+
+  it("does no OpenCode profile, conformance, credential, CLI preflight, discovery, adapter, process, or HTTP work for complete-fresh", async () => {
+    const fresh: readonly ProgressiveStageSnapshot[] = [
+      { stage: "project-description", status: "complete-fresh" },
+      { stage: "user-stories", status: "incomplete" },
+      { stage: "database-schema", status: "incomplete" },
+      { stage: "project-phases", status: "incomplete" },
+    ];
+    const forbidden: string[] = [];
+    const state = fixture({
+      inspect: async () => fresh,
+      listProfiles: () => { forbidden.push("profile/catalog"); throw new Error("OpenCode discovery must remain lazy"); },
+      loadProfile: async () => { forbidden.push("conformance/version"); throw new Error("OpenCode runtime must remain lazy"); },
+      adapterFor: () => { forbidden.push("adapter/process/http"); throw new Error("OpenCode transport must remain lazy"); },
+      authFor: async () => { forbidden.push("credential/auth"); throw new Error("OpenCode auth must remain lazy"); },
+      execute: async (execution) => {
+        expect(execution).not.toHaveProperty("profile");
+        expect(execution).not.toHaveProperty("adapter");
+        expect(execution).not.toHaveProperty("auth");
+        return { mode: "focused", selectedStage: "project-description", completedStage: "project-description", completionDisposition: "existing-fresh", semanticOperations: 0, correctiveRegenerations: 0 };
+      },
+    });
+    await executeProgressiveInitCommand({ ...options, profileId: OPENCODE_GO_ID, credential: "existing-go" }, state.runtime);
+    expect(forbidden).toEqual([]);
+    expect(state.executeCalls()).toBe(0);
   });
 });

@@ -1,0 +1,361 @@
+{
+  "format": "rb-adapter-conformance-record/v1",
+  "producer": "rb-harness-conformance-runner",
+  "profileId": "opencode:zen:muse-spark-1.2-contributor-free",
+  "providerFamily": "opencode",
+  "modelId": "muse-spark-1.2-contributor-free",
+  "transport": "direct-api",
+  "requestAccounting": "exact",
+  "suiteVersion": "rb-adapter-conformance/v1",
+  "runId": "c86fdebb-8e20-4742-bbaf-a4120940e7e3",
+  "recordedAt": "2026-09-01T23:06:08.332Z",
+  "rawResponses": {
+    "representation-comprehensive": {
+      "origin": "live-recorded",
+      "canonicalPayload": {
+        "arrays": [
+          [],
+          [
+            "one"
+          ],
+          [
+            "one",
+            "two"
+          ]
+        ],
+        "mode": "alpha",
+        "nested": {
+          "level1": {
+            "level2": {
+              "value": "kept"
+            }
+          }
+        },
+        "optional": null,
+        "title": "transport-probe"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "text/event-stream"
+        },
+        "body": "event: response.created\ndata: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp_6a975a5b00620a46aad2498a\",\"object\":\"response\",\"created_at\":1788303963,\"status\":\"in_progress\",\"parallel_tool_calls\":true,\"temperature\":1,\"top_p\":1,\"max_output_tokens\":1024,\"background\":false,\"truncation\":\"disabled\",\"top_logprobs\":0,\"model\":\"muse-spark-1.2-contributor-free\",\"error\":null,\"incomplete_details\":null,\"output\":[],\"instructions\":\"Copy the supplied JSON value into the available structured output.\",\"tool_choice\":\"auto\",\"tools\":[],\"reasoning\":{\"effort\":\"low\"},\"text\":{\"format\":{\"type\":\"json_schema\",\"name\":\"record_representation\",\"schema\":{\"additionalProperties\":false,\"properties\":{\"arrays\":{\"items\":{\"items\":{\"type\":\"string\"},\"type\":\"array\"},\"type\":\"array\"},\"mode\":{\"enum\":[\"alpha\",\"beta\"],\"type\":\"string\"},\"nested\":{\"properties\":{\"level1\":{\"properties\":{\"level2\":{\"properties\":{\"value\":{\"type\":\"string\"}},\"required\":[\"value\"],\"type\":\"object\"}},\"required\":[\"level2\"],\"type\":\"object\"}},\"required\":[\"level1\"],\"type\":\"object\"},\"optional\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]},\"title\":{\"type\":\"string\"}},\"required\":[\"title\",\"mode\",\"nested\",\"arrays\",\"optional\"],\"type\":\"object\"}}}}}\n\nevent: response.in_progress\ndata: {\"type\":\"response.in_progress\",\"sequence_number\":1,\"response\":{\"id\":\"resp_6a975a5b00620a46aad2498a\",\"object\":\"response\",\"created_at\":1788303963,\"status\":\"in_progress\",\"parallel_tool_calls\":true,\"temperature\":1,\"top_p\":1,\"max_output_tokens\":1024,\"background\":false,\"truncation\":\"disabled\",\"top_logprobs\":0,\"model\":\"muse-spark-1.2-contributor-free\",\"error\":null,\"incomplete_details\":null,\"output\":[],\"instructions\":\"Copy the supplied JSON value into the available structured output.\",\"tool_choice\":\"auto\",\"tools\":[],\"reasoning\":{\"effort\":\"low\"},\"text\":{\"format\":{\"type\":\"json_schema\",\"name\":\"record_representation\",\"schema\":{\"additionalProperties\":false,\"properties\":{\"arrays\":{\"items\":{\"items\":{\"type\":\"string\"},\"type\":\"array\"},\"type\":\"array\"},\"mode\":{\"enum\":[\"alpha\",\"beta\"],\"type\":\"string\"},\"nested\":{\"properties\":{\"level1\":{\"properties\":{\"level2\":{\"properties\":{\"value\":{\"type\":\"string\"}},\"required\":[\"value\"],\"type\":\"object\"}},\"required\":[\"level2\"],\"type\":\"object\"}},\"required\":[\"level1\"],\"type\":\"object\"},\"optional\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]},\"title\":{\"type\":\"string\"}},\"required\":[\"title\",\"mode\",\"nested\",\"arrays\",\"optional\"],\"type\":\"object\"}}}}}\n\nevent: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"sequence_number\":2,\"output_index\":0}\n\nevent: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"sequence_number\":3,\"output_index\":0}\n\nevent: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"sequence_number\":4,\"output_index\":1,\"item\":{\"id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"type\":\"message\",\"status\":\"in_progress\",\"role\":\"assistant\",\"content\":[]}}\n\nevent: response.content_part.added\ndata: {\"type\":\"response.content_part.added\",\"sequence_number\":5,\"output_index\":1,\"content_index\":0,\"item_id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"part\":{\"type\":\"output_text\",\"text\":\"\",\"annotations\":[],\"logprobs\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":6,\"output_index\":1,\"content_index\":0,\"item_id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"delta\":\"{\\\"arrays\",\"logprobs\":[]}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":7,\"output_index\":1,\"content_index\":0,\"item_id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"delta\":\"\\\": [[],\",\"logprobs\":[]}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":8,\"output_index\":1,\"content_index\":0,\"item_id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"delta\":\" [\\\"one\\\"], [\\\"one\\\", \\\"two\\\"]],\",\"logprobs\":[]}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":9,\"output_index\":1,\"content_index\":0,\"item_id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"delta\":\" \\\"mode\\\": \\\"alpha\\\", \\\"nested\\\": {\\\"level\",\"logprobs\":[]}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":10,\"output_index\":1,\"content_index\":0,\"item_id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"delta\":\"1\\\": {\\\"level2\\\": {\\\"value\\\": \\\"kept\\\"}}}, \\\"optional\",\"logprobs\":[]}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":11,\"output_index\":1,\"content_index\":0,\"item_id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"delta\":\"\\\": null, \\\"title\\\": \\\"transport-probe\\\"}\",\"logprobs\":[]}\n\nevent: response.content_part.done\ndata: {\"type\":\"response.content_part.done\",\"sequence_number\":12,\"output_index\":1,\"content_index\":0,\"item_id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"part\":{\"type\":\"output_text\",\"text\":\"{\\\"arrays\\\": [[], [\\\"one\\\"], [\\\"one\\\", \\\"two\\\"]], \\\"mode\\\": \\\"alpha\\\", \\\"nested\\\": {\\\"level1\\\": {\\\"level2\\\": {\\\"value\\\": \\\"kept\\\"}}}, \\\"optional\\\": null, \\\"title\\\": \\\"transport-probe\\\"}\",\"annotations\":[],\"logprobs\":[]}}\n\nevent: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"sequence_number\":13,\"output_index\":1,\"item\":{\"id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"type\":\"message\",\"status\":\"completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"{\\\"arrays\\\": [[], [\\\"one\\\"], [\\\"one\\\", \\\"two\\\"]], \\\"mode\\\": \\\"alpha\\\", \\\"nested\\\": {\\\"level1\\\": {\\\"level2\\\": {\\\"value\\\": \\\"kept\\\"}}}, \\\"optional\\\": null, \\\"title\\\": \\\"transport-probe\\\"}\",\"annotations\":[],\"logprobs\":[]}]}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"sequence_number\":14,\"response\":{\"id\":\"resp_6a975a5b00620a46aad2498a\",\"object\":\"response\",\"created_at\":1788303963,\"completed_at\":1788303964,\"status\":\"completed\",\"parallel_tool_calls\":true,\"temperature\":1,\"top_p\":1,\"max_output_tokens\":1024,\"background\":false,\"truncation\":\"disabled\",\"top_logprobs\":0,\"model\":\"muse-spark-1.2-contributor-free\",\"error\":null,\"incomplete_details\":null,\"output\":[{\"id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"type\":\"message\",\"status\":\"completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"{\\\"arrays\\\": [[], [\\\"one\\\"], [\\\"one\\\", \\\"two\\\"]], \\\"mode\\\": \\\"alpha\\\", \\\"nested\\\": {\\\"level1\\\": {\\\"level2\\\": {\\\"value\\\": \\\"kept\\\"}}}, \\\"optional\\\": null, \\\"title\\\": \\\"transport-probe\\\"}\",\"annotations\":[],\"logprobs\":[]}]}],\"usage\":{\"input_tokens\":62,\"output_tokens\":351,\"total_tokens\":413,\"input_tokens_details\":{\"cached_tokens\":0},\"output_tokens_details\":{\"reasoning_tokens\":288}},\"instructions\":\"Copy the supplied JSON value into the available structured output.\",\"tool_choice\":\"auto\",\"tools\":[],\"reasoning\":{\"effort\":\"low\"},\"text\":{\"format\":{\"type\":\"json_schema\",\"name\":\"record_representation\",\"schema\":{\"additionalProperties\":false,\"properties\":{\"arrays\":{\"items\":{\"items\":{\"type\":\"string\"},\"type\":\"array\"},\"type\":\"array\"},\"mode\":{\"enum\":[\"alpha\",\"beta\"],\"type\":\"string\"},\"nested\":{\"properties\":{\"level1\":{\"properties\":{\"level2\":{\"properties\":{\"value\":{\"type\":\"string\"}},\"required\":[\"value\"],\"type\":\"object\"}},\"required\":[\"level2\"],\"type\":\"object\"}},\"required\":[\"level1\"],\"type\":\"object\"},\"optional\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]},\"title\":{\"type\":\"string\"}},\"required\":[\"title\",\"mode\",\"nested\",\"arrays\",\"optional\"],\"type\":\"object\"}}}}}\n\nevent: ping\ndata: {\"type\":\"ping\",\"cost\":\"0\"}\n\n",
+        "startedAt": "2026-09-01T23:06:02.285Z",
+        "completedAt": "2026-09-01T23:06:05.057Z",
+        "firstOutputMs": 2607,
+        "streamComplete": true
+      },
+      "sanitizedRequestBody": {
+        "model": "muse-spark-1.2-contributor-free",
+        "instructions": "Copy the supplied JSON value into the available structured output.",
+        "input": "{\"title\":\"transport-probe\",\"mode\":\"alpha\",\"nested\":{\"level1\":{\"level2\":{\"value\":\"kept\"}}},\"arrays\":[[],[\"one\"],[\"one\",\"two\"]],\"optional\":null}",
+        "max_output_tokens": 1024,
+        "stream": true,
+        "text": {
+          "format": {
+            "type": "json_schema",
+            "name": "record_representation",
+            "schema": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "title",
+                "mode",
+                "nested",
+                "arrays",
+                "optional"
+              ],
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "alpha",
+                    "beta"
+                  ]
+                },
+                "nested": {
+                  "type": "object",
+                  "required": [
+                    "level1"
+                  ],
+                  "properties": {
+                    "level1": {
+                      "type": "object",
+                      "required": [
+                        "level2"
+                      ],
+                      "properties": {
+                        "level2": {
+                          "type": "object",
+                          "required": [
+                            "value"
+                          ],
+                          "properties": {
+                            "value": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "arrays": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "optional": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "reasoning": {
+          "effort": "low"
+        }
+      }
+    },
+    "semantic-incomplete": {
+      "origin": "live-recorded",
+      "canonicalPayload": {
+        "items": []
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "text/event-stream"
+        },
+        "body": "event: response.created\ndata: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp_6a975a5df7952b01e5294c0c\",\"object\":\"response\",\"created_at\":1788303965,\"status\":\"in_progress\",\"parallel_tool_calls\":true,\"temperature\":1,\"top_p\":1,\"max_output_tokens\":1024,\"background\":false,\"truncation\":\"disabled\",\"top_logprobs\":0,\"model\":\"muse-spark-1.2-contributor-free\",\"error\":null,\"incomplete_details\":null,\"output\":[],\"instructions\":\"Copy the supplied JSON value into the available structured output.\",\"tool_choice\":\"auto\",\"tools\":[],\"reasoning\":{\"effort\":\"high\"},\"text\":{\"format\":{\"type\":\"json_schema\",\"name\":\"record_incomplete\",\"schema\":{\"additionalProperties\":true,\"properties\":{\"items\":{\"items\":{},\"type\":\"array\"}},\"required\":[\"items\"],\"type\":\"object\"}}}}}\n\nevent: response.in_progress\ndata: {\"type\":\"response.in_progress\",\"sequence_number\":1,\"response\":{\"id\":\"resp_6a975a5df7952b01e5294c0c\",\"object\":\"response\",\"created_at\":1788303965,\"status\":\"in_progress\",\"parallel_tool_calls\":true,\"temperature\":1,\"top_p\":1,\"max_output_tokens\":1024,\"background\":false,\"truncation\":\"disabled\",\"top_logprobs\":0,\"model\":\"muse-spark-1.2-contributor-free\",\"error\":null,\"incomplete_details\":null,\"output\":[],\"instructions\":\"Copy the supplied JSON value into the available structured output.\",\"tool_choice\":\"auto\",\"tools\":[],\"reasoning\":{\"effort\":\"high\"},\"text\":{\"format\":{\"type\":\"json_schema\",\"name\":\"record_incomplete\",\"schema\":{\"additionalProperties\":true,\"properties\":{\"items\":{\"items\":{},\"type\":\"array\"}},\"required\":[\"items\"],\"type\":\"object\"}}}}}\n\nevent: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"sequence_number\":2,\"output_index\":0}\n\nevent: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"sequence_number\":3,\"output_index\":0}\n\nevent: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"sequence_number\":4,\"output_index\":1,\"item\":{\"id\":\"msg_01a05f39071a72a3af4f4351674ab1d5\",\"type\":\"message\",\"status\":\"in_progress\",\"role\":\"assistant\",\"content\":[]}}\n\nevent: response.content_part.added\ndata: {\"type\":\"response.content_part.added\",\"sequence_number\":5,\"output_index\":1,\"content_index\":0,\"item_id\":\"msg_01a05f39071a72a3af4f4351674ab1d5\",\"part\":{\"type\":\"output_text\",\"text\":\"\",\"annotations\":[],\"logprobs\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":6,\"output_index\":1,\"content_index\":0,\"item_id\":\"msg_01a05f39071a72a3af4f4351674ab1d5\",\"delta\":\"{\\\"items\\\":[]}\",\"logprobs\":[]}\n\nevent: response.content_part.done\ndata: {\"type\":\"response.content_part.done\",\"sequence_number\":7,\"output_index\":1,\"content_index\":0,\"item_id\":\"msg_01a05f39071a72a3af4f4351674ab1d5\",\"part\":{\"type\":\"output_text\",\"text\":\"{\\\"items\\\":[]}\",\"annotations\":[],\"logprobs\":[]}}\n\nevent: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"sequence_number\":8,\"output_index\":1,\"item\":{\"id\":\"msg_01a05f39071a72a3af4f4351674ab1d5\",\"type\":\"message\",\"status\":\"completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"{\\\"items\\\":[]}\",\"annotations\":[],\"logprobs\":[]}]}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"sequence_number\":9,\"response\":{\"id\":\"resp_6a975a5df7952b01e5294c0c\",\"object\":\"response\",\"created_at\":1788303965,\"completed_at\":1788303968,\"status\":\"completed\",\"parallel_tool_calls\":true,\"temperature\":1,\"top_p\":1,\"max_output_tokens\":1024,\"background\":false,\"truncation\":\"disabled\",\"top_logprobs\":0,\"model\":\"muse-spark-1.2-contributor-free\",\"error\":null,\"incomplete_details\":null,\"output\":[{\"id\":\"msg_01a05f39071a72a3af4f4351674ab1d5\",\"type\":\"message\",\"status\":\"completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"{\\\"items\\\":[]}\",\"annotations\":[],\"logprobs\":[]}]}],\"usage\":{\"input_tokens\":26,\"output_tokens\":385,\"total_tokens\":411,\"input_tokens_details\":{\"cached_tokens\":0},\"output_tokens_details\":{\"reasoning_tokens\":371}},\"instructions\":\"Copy the supplied JSON value into the available structured output.\",\"tool_choice\":\"auto\",\"tools\":[],\"reasoning\":{\"effort\":\"high\"},\"text\":{\"format\":{\"type\":\"json_schema\",\"name\":\"record_incomplete\",\"schema\":{\"additionalProperties\":true,\"properties\":{\"items\":{\"items\":{},\"type\":\"array\"}},\"required\":[\"items\"],\"type\":\"object\"}}}}}\n\nevent: ping\ndata: {\"type\":\"ping\",\"cost\":\"0\"}\n\n",
+        "startedAt": "2026-09-01T23:06:05.060Z",
+        "completedAt": "2026-09-01T23:06:08.272Z",
+        "firstOutputMs": 3165,
+        "streamComplete": true
+      },
+      "sanitizedRequestBody": {
+        "model": "muse-spark-1.2-contributor-free",
+        "instructions": "Copy the supplied JSON value into the available structured output.",
+        "input": "{\"items\":[]}",
+        "max_output_tokens": 1024,
+        "stream": true,
+        "text": {
+          "format": {
+            "type": "json_schema",
+            "name": "record_incomplete",
+            "schema": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": [
+                "items"
+              ],
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "derived-truncated": {
+      "origin": "derived-from-recording",
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "text/event-stream"
+        },
+        "body": "event: response.created\ndata: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp_6a975a5b00620a46aad2498a\",\"object\":\"response\",\"created_at\":1788303963,\"status\":\"in_progress\",\"parallel_tool_calls\":true,\"temperature\":1,\"top_p\":1,\"max_output_tokens\":1024,\"background\":false,\"truncation\":\"disabled\",\"top_logprobs\":0,\"model\":\"muse-spark-1.2-contributor-free\",\"error\":null,\"incomplete_details\":null,\"output\":[],\"instructions\":\"Copy the supplied JSON value into the available structured output.\",\"tool_choice\":\"auto\",\"tools\":[],\"reasoning\":{\"effort\":\"low\"},\"text\":{\"format\":{\"type\":\"json_schema\",\"name\":\"record_representation\",\"schema\":{\"additionalProperties\":false,\"properties\":{\"arrays\":{\"items\":{\"items\":{\"type\":\"string\"},\"type\":\"array\"},\"type\":\"array\"},\"mode\":{\"enum\":[\"alpha\",\"beta\"],\"type\":\"string\"},\"nested\":{\"properties\":{\"level1\":{\"properties\":{\"level2\":{\"properties\":{\"value\":{\"type\":\"string\"}},\"required\":[\"value\"],\"type\":\"object\"}},\"required\":[\"level2\"],\"type\":\"object\"}},\"required\":[\"level1\"],\"type\":\"object\"},\"optional\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]},\"title\":{\"type\":\"string\"}},\"required\":[\"title\",\"mode\",\"nested\",\"arrays\",\"optional\"],\"type\":\"object\"}}}}}\n\nevent: response.in_progress\ndata: {\"type\":\"response.in_progress\",\"sequence_number\":1,\"response\":{\"id\":\"resp_6a975a5b00620a46aad2498a\",\"object\":\"response\",\"created_at\":1788303963,\"status\":\"in_progress\",\"parallel_tool_calls\":true,\"temperature\":1,\"top_p\":1,\"max_output_tokens\":1024,\"background\":false,\"truncation\":\"disabled\",\"top_logprobs\":0,\"model\":\"muse-spark-1.2-contributor-free\",\"error\":null,\"incomplete_details\":null,\"output\":[],\"instructions\":\"Copy the supplied JSON value into the available structured output.\",\"tool_choice\":\"auto\",\"tools\":[],\"reasoning\":{\"effort\":\"low\"},\"text\":{\"format\":{\"type\":\"json_schema\",\"name\":\"record_representation\",\"schema\":{\"additionalProperties\":false,\"properties\":{\"arrays\":{\"items\":{\"items\":{\"type\":\"string\"},\"type\":\"array\"},\"type\":\"array\"},\"mode\":{\"enum\":[\"alpha\",\"beta\"],\"type\":\"string\"},\"nested\":{\"properties\":{\"level1\":{\"properties\":{\"level2\":{\"properties\":{\"value\":{\"type\":\"string\"}},\"required\":[\"value\"],\"type\":\"object\"}},\"required\":[\"level2\"],\"type\":\"object\"}},\"required\":[\"level1\"],\"type\":\"object\"},\"optional\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]},\"title\":{\"type\":\"string\"}},\"required\":[\"title\",\"mode\",\"nested\",\"arrays\",\"optional\"],\"type\":\"object\"}}}}}\n\nevent: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"sequence_number\":2,\"output_index\":0}\n\nevent: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"sequence_number\":3,\"output_index\":0}\n\nevent: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"sequence_number\":4,\"output_index\":1,\"item\":{\"id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"type\":\"message\",\"status\":\"in_progress\",\"role\":\"assistant\",\"content\":[]}}\n\nevent: response.content_part.added\ndata: {\"type\":\"response.content_part.added\",\"sequence_number\":5,\"output_index\":1,\"content_index\":0,\"item_id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"part\":{\"type\":\"output_text\",\"text\":\"\",\"annotations\":[],\"logprobs\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":6,\"output_index\":1,\"content_index\":0,\"item_id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"delta\":\"{\\\"arrays\",\"logprobs\":[]}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":7,\"output_index\":1,\"content_index\":0,\"item_id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"delta\":\"\\\": [[],\",\"logprobs\":[]}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"s",
+        "startedAt": "2026-09-01T23:06:02.285Z",
+        "completedAt": "2026-09-01T23:06:05.057Z",
+        "firstOutputMs": 2607,
+        "streamComplete": false
+      },
+      "derivedFrom": "representation-comprehensive",
+      "derivation": "stream truncated deterministically"
+    },
+    "derived-malformed": {
+      "origin": "derived-from-recording",
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "text/event-stream"
+        },
+        "body": "event: response.created\ndata: ! {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp_6a975a5b00620a46aad2498a\",\"object\":\"response\",\"created_at\":1788303963,\"status\":\"in_progress\",\"parallel_tool_calls\":true,\"temperature\":1,\"top_p\":1,\"max_output_tokens\":1024,\"background\":false,\"truncation\":\"disabled\",\"top_logprobs\":0,\"model\":\"muse-spark-1.2-contributor-free\",\"error\":null,\"incomplete_details\":null,\"output\":[],\"instructions\":\"Copy the supplied JSON value into the available structured output.\",\"tool_choice\":\"auto\",\"tools\":[],\"reasoning\":{\"effort\":\"low\"},\"text\":{\"format\":{\"type\":\"json_schema\",\"name\":\"record_representation\",\"schema\":{\"additionalProperties\":false,\"properties\":{\"arrays\":{\"items\":{\"items\":{\"type\":\"string\"},\"type\":\"array\"},\"type\":\"array\"},\"mode\":{\"enum\":[\"alpha\",\"beta\"],\"type\":\"string\"},\"nested\":{\"properties\":{\"level1\":{\"properties\":{\"level2\":{\"properties\":{\"value\":{\"type\":\"string\"}},\"required\":[\"value\"],\"type\":\"object\"}},\"required\":[\"level2\"],\"type\":\"object\"}},\"required\":[\"level1\"],\"type\":\"object\"},\"optional\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]},\"title\":{\"type\":\"string\"}},\"required\":[\"title\",\"mode\",\"nested\",\"arrays\",\"optional\"],\"type\":\"object\"}}}}}\n\nevent: response.in_progress\ndata: {\"type\":\"response.in_progress\",\"sequence_number\":1,\"response\":{\"id\":\"resp_6a975a5b00620a46aad2498a\",\"object\":\"response\",\"created_at\":1788303963,\"status\":\"in_progress\",\"parallel_tool_calls\":true,\"temperature\":1,\"top_p\":1,\"max_output_tokens\":1024,\"background\":false,\"truncation\":\"disabled\",\"top_logprobs\":0,\"model\":\"muse-spark-1.2-contributor-free\",\"error\":null,\"incomplete_details\":null,\"output\":[],\"instructions\":\"Copy the supplied JSON value into the available structured output.\",\"tool_choice\":\"auto\",\"tools\":[],\"reasoning\":{\"effort\":\"low\"},\"text\":{\"format\":{\"type\":\"json_schema\",\"name\":\"record_representation\",\"schema\":{\"additionalProperties\":false,\"properties\":{\"arrays\":{\"items\":{\"items\":{\"type\":\"string\"},\"type\":\"array\"},\"type\":\"array\"},\"mode\":{\"enum\":[\"alpha\",\"beta\"],\"type\":\"string\"},\"nested\":{\"properties\":{\"level1\":{\"properties\":{\"level2\":{\"properties\":{\"value\":{\"type\":\"string\"}},\"required\":[\"value\"],\"type\":\"object\"}},\"required\":[\"level2\"],\"type\":\"object\"}},\"required\":[\"level1\"],\"type\":\"object\"},\"optional\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]},\"title\":{\"type\":\"string\"}},\"required\":[\"title\",\"mode\",\"nested\",\"arrays\",\"optional\"],\"type\":\"object\"}}}}}\n\nevent: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"sequence_number\":2,\"output_index\":0}\n\nevent: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"sequence_number\":3,\"output_index\":0}\n\nevent: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"sequence_number\":4,\"output_index\":1,\"item\":{\"id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"type\":\"message\",\"status\":\"in_progress\",\"role\":\"assistant\",\"content\":[]}}\n\nevent: response.content_part.added\ndata: {\"type\":\"response.content_part.added\",\"sequence_number\":5,\"output_index\":1,\"content_index\":0,\"item_id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"part\":{\"type\":\"output_text\",\"text\":\"\",\"annotations\":[],\"logprobs\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":6,\"output_index\":1,\"content_index\":0,\"item_id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"delta\":\"{\\\"arrays\",\"logprobs\":[]}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":7,\"output_index\":1,\"content_index\":0,\"item_id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"delta\":\"\\\": [[],\",\"logprobs\":[]}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":8,\"output_index\":1,\"content_index\":0,\"item_id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"delta\":\" [\\\"one\\\"], [\\\"one\\\", \\\"two\\\"]],\",\"logprobs\":[]}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":9,\"output_index\":1,\"content_index\":0,\"item_id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"delta\":\" \\\"mode\\\": \\\"alpha\\\", \\\"nested\\\": {\\\"level\",\"logprobs\":[]}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":10,\"output_index\":1,\"content_index\":0,\"item_id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"delta\":\"1\\\": {\\\"level2\\\": {\\\"value\\\": \\\"kept\\\"}}}, \\\"optional\",\"logprobs\":[]}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":11,\"output_index\":1,\"content_index\":0,\"item_id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"delta\":\"\\\": null, \\\"title\\\": \\\"transport-probe\\\"}\",\"logprobs\":[]}\n\nevent: response.content_part.done\ndata: {\"type\":\"response.content_part.done\",\"sequence_number\":12,\"output_index\":1,\"content_index\":0,\"item_id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"part\":{\"type\":\"output_text\",\"text\":\"{\\\"arrays\\\": [[], [\\\"one\\\"], [\\\"one\\\", \\\"two\\\"]], \\\"mode\\\": \\\"alpha\\\", \\\"nested\\\": {\\\"level1\\\": {\\\"level2\\\": {\\\"value\\\": \\\"kept\\\"}}}, \\\"optional\\\": null, \\\"title\\\": \\\"transport-probe\\\"}\",\"annotations\":[],\"logprobs\":[]}}\n\nevent: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"sequence_number\":13,\"output_index\":1,\"item\":{\"id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"type\":\"message\",\"status\":\"completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"{\\\"arrays\\\": [[], [\\\"one\\\"], [\\\"one\\\", \\\"two\\\"]], \\\"mode\\\": \\\"alpha\\\", \\\"nested\\\": {\\\"level1\\\": {\\\"level2\\\": {\\\"value\\\": \\\"kept\\\"}}}, \\\"optional\\\": null, \\\"title\\\": \\\"transport-probe\\\"}\",\"annotations\":[],\"logprobs\":[]}]}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"sequence_number\":14,\"response\":{\"id\":\"resp_6a975a5b00620a46aad2498a\",\"object\":\"response\",\"created_at\":1788303963,\"completed_at\":1788303964,\"status\":\"completed\",\"parallel_tool_calls\":true,\"temperature\":1,\"top_p\":1,\"max_output_tokens\":1024,\"background\":false,\"truncation\":\"disabled\",\"top_logprobs\":0,\"model\":\"muse-spark-1.2-contributor-free\",\"error\":null,\"incomplete_details\":null,\"output\":[{\"id\":\"msg_01a05f38fa0873b08a726f412cbb1556\",\"type\":\"message\",\"status\":\"completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"{\\\"arrays\\\": [[], [\\\"one\\\"], [\\\"one\\\", \\\"two\\\"]], \\\"mode\\\": \\\"alpha\\\", \\\"nested\\\": {\\\"level1\\\": {\\\"level2\\\": {\\\"value\\\": \\\"kept\\\"}}}, \\\"optional\\\": null, \\\"title\\\": \\\"transport-probe\\\"}\",\"annotations\":[],\"logprobs\":[]}]}],\"usage\":{\"input_tokens\":62,\"output_tokens\":351,\"total_tokens\":413,\"input_tokens_details\":{\"cached_tokens\":0},\"output_tokens_details\":{\"reasoning_tokens\":288}},\"instructions\":\"Copy the supplied JSON value into the available structured output.\",\"tool_choice\":\"auto\",\"tools\":[],\"reasoning\":{\"effort\":\"low\"},\"text\":{\"format\":{\"type\":\"json_schema\",\"name\":\"record_representation\",\"schema\":{\"additionalProperties\":false,\"properties\":{\"arrays\":{\"items\":{\"items\":{\"type\":\"string\"},\"type\":\"array\"},\"type\":\"array\"},\"mode\":{\"enum\":[\"alpha\",\"beta\"],\"type\":\"string\"},\"nested\":{\"properties\":{\"level1\":{\"properties\":{\"level2\":{\"properties\":{\"value\":{\"type\":\"string\"}},\"required\":[\"value\"],\"type\":\"object\"}},\"required\":[\"level2\"],\"type\":\"object\"}},\"required\":[\"level1\"],\"type\":\"object\"},\"optional\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]},\"title\":{\"type\":\"string\"}},\"required\":[\"title\",\"mode\",\"nested\",\"arrays\",\"optional\"],\"type\":\"object\"}}}}}\n\nevent: ping\ndata: {\"type\":\"ping\",\"cost\":\"0\"}\n\n",
+        "startedAt": "2026-09-01T23:06:02.285Z",
+        "completedAt": "2026-09-01T23:06:05.057Z",
+        "firstOutputMs": 2607,
+        "streamComplete": true
+      },
+      "derivedFrom": "representation-comprehensive",
+      "derivation": "first SSE data field made malformed"
+    }
+  },
+  "liveSmoke": {
+    "cancellation": {
+      "passed": true,
+      "errorKind": "cancelled",
+      "durationMs": 56,
+      "providerRequests": 1,
+      "transportInvocations": 1,
+      "promptAbort": true
+    },
+    "timeout": {
+      "passed": true,
+      "errorKind": "timeout",
+      "durationMs": 3,
+      "providerRequests": 1,
+      "transportInvocations": 1,
+      "promptAbort": true
+    }
+  },
+  "result": {
+    "profileId": "opencode:zen:muse-spark-1.2-contributor-free",
+    "suiteVersion": "rb-adapter-conformance/v1",
+    "runId": "c86fdebb-8e20-4742-bbaf-a4120940e7e3",
+    "recordedAt": "2026-09-01T23:06:08.332Z",
+    "tier": "SUPPORTED",
+    "cases": [
+      {
+        "id": "valid-structured-response",
+        "category": "valid-structured-response",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "nested-objects",
+        "category": "nested-objects",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "arrays",
+        "category": "arrays",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "enums",
+        "category": "enums",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "optional-null-fields",
+        "category": "optional-null-fields",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "unknown-provider-metadata",
+        "category": "unknown-provider-metadata",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "wrapper-envelope",
+        "category": "wrapper-envelope",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "truncated-response",
+        "category": "truncated-response",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "malformed-syntax",
+        "category": "malformed-syntax",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "semantically-incomplete",
+        "category": "semantically-incomplete",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "unsupported-structured-output",
+        "category": "unsupported-structured-output",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "reasoning-enabled",
+        "category": "reasoning-enabled",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "reasoning-disabled",
+        "category": "reasoning-disabled",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "usage-reporting",
+        "category": "usage-reporting",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "cancellation",
+        "category": "cancellation",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "timeout",
+        "category": "timeout",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      }
+    ],
+    "normalizationsOnHappyPath": [],
+    "capabilitiesActuallyTested": [
+      "cancellation",
+      "preflight:unsupported-structured-output",
+      "reasoning:disabled",
+      "reasoning:enabled:low",
+      "streaming",
+      "structured-output:json-schema",
+      "timeout",
+      "usage-reporting"
+    ]
+  },
+  "integritySha256": "bfdb385410fd686d3fc8578e68ad9673bca46834234c9311fdc93d54b527691f"
+}

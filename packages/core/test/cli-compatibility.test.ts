@@ -66,9 +66,17 @@ describe("public CLI compatibility", () => {
     expect(current["rb-harness provider list"]).toBeDefined();
     expect(current["rb-harness provider test"]).toBeDefined();
     expect(current["rb-harness contract validate"]).toEqual(expect.arrayContaining(["--project", "--json"]));
-    expect(current["rb-harness"]).toEqual(expect.arrayContaining(["--init", "--dashboard", "--login", "--splash", "--no-splash", "--ver", "--version"]));
+    expect(current["rb-harness"]).toEqual(expect.arrayContaining(["--init", "--dashboard", "--login", "--list", "--splash", "--no-splash", "--ver", "--version"]));
     expect(current["rb-harness resume"]).toEqual(expect.arrayContaining(["--dashboard", "--answers", "--questions"]));
     expect(current["rb-harness vnext conformance"]).toEqual(expect.arrayContaining(["--record", "--verify-runtime-model", "--credential"]));
+  });
+
+  it("documents the safe login metadata-list shortcut", async () => {
+    const cli = resolve(process.cwd(), "dist/cli.js");
+    const result = await run(process.execPath, [cli, "--help"]);
+    expect(result.stdout).toContain("--login");
+    expect(result.stdout).toContain("--list");
+    expect(result.stdout).toMatch(/without\s+decrypting or displaying secrets/);
   });
 
   it("fails removed semantic-manager options with explicit guidance instead of silence", async () => {

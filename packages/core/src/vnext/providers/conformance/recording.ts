@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import type { Measured, ModelInvocationConfigurationEvidence, ProviderErrorKind } from "../contract.js";
+import type { ExternalCliInvocationPolicyEvidence, Measured, ModelInvocationConfigurationEvidence, ProviderErrorKind } from "../contract.js";
 import {
   isProviderTransportId,
   isRequestAccounting,
@@ -86,6 +86,27 @@ export interface TransportRuntimeEvidence {
   }[];
 }
 
+/** Additive provider-neutral evidence for external CLIs using JSONL transport. */
+export interface ExternalCliRuntimeEvidence {
+  readonly format: "rb-external-cli-evidence/v1";
+  readonly executable: string;
+  readonly transportVersion: string;
+  readonly requestedModel: string;
+  readonly transportInvocations: number;
+  readonly observedProviderRequests: Measured<number>;
+  readonly invocationPolicy: ExternalCliInvocationPolicyEvidence;
+  readonly invocations: readonly {
+    readonly id: string;
+    readonly recordingKey: string;
+    readonly transportInvocations: 1;
+    readonly processCompleted: boolean;
+    readonly treeQuiescent: boolean;
+    readonly treeVerified: boolean;
+    readonly observedModelIds: readonly string[];
+    readonly toolEventsObserved: number;
+  }[];
+}
+
 export interface ConformanceRecordBody {
   readonly format: "rb-adapter-conformance-record/v1";
   readonly producer: "rb-harness-conformance-runner";
@@ -105,6 +126,7 @@ export interface ConformanceRecordBody {
     readonly timeout: LiveSmokeRecord;
   };
   readonly runtimeEvidence?: TransportRuntimeEvidence;
+  readonly externalCliEvidence?: ExternalCliRuntimeEvidence;
   readonly result: ConformanceResult;
 }
 

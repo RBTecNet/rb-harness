@@ -131,7 +131,8 @@ program
   .description("Provider-neutral documentation harness and deterministic artifact contracts")
   .version(HARNESS_VERSION)
   .option("--ver", "output the version number (alias for --version)")
-  .option("--login", "configure a direct API provider credential interactively")
+  .option("--login", "configure a provider credential interactively; combine with --list for safe metadata")
+  .option("--list", "with --login, list credential metadata without decrypting or displaying secrets")
   .option("--init", "select Init; selector-only use opens the interactive Init wizard")
   .option("--dashboard", "enable dashboard presentation for the selected operation")
   .option("--splash", "play the RB Harness capybara splash and exit")
@@ -691,7 +692,7 @@ program.command("wizard").description("Start the interactive RB Harness product 
 const auth = program.command("auth").description("Manage the shared RB provider credential vault");
 auth.command("login")
   .description("Configure one provider interactively; secrets are never accepted as arguments")
-  .option("--provider <name>", "direct API provider")
+  .option("--provider <name>", "provider credential namespace, including opencode-go or opencode-zen")
   .option("--protocol <name>", "api-key, oauth-pkce, or google-adc")
   .option("--label <name>", "local credential label")
   .action(async (options: { provider?: string; protocol?: string; label?: string }) => runLoginWizard(options));
@@ -932,7 +933,11 @@ export async function runHarnessCli(): Promise<void> {
     process.stdout.write(`${HARNESS_VERSION}\n`);
     return;
   }
-  if (process.argv.length === 3 && process.argv[2] === "--login") {
+  if (args.length === 2 && args[0] === "--login" && args[1] === "--list") {
+    await printCredentialList();
+    return;
+  }
+  if (args.length === 1 && args[0] === "--login") {
     await runLoginWizard();
     return;
   }

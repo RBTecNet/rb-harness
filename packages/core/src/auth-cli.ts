@@ -5,13 +5,17 @@ import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
-import { listCredentials, removeCredential, saveCredential, credentialStorePaths, type CredentialRecord } from "./credential-store.js";
+import {
+  listCredentials,
+  removeCredential,
+  saveCredential,
+  type CredentialProviderId,
+  type CredentialRecord,
+} from "./credential-store.js";
 import {
   DIRECT_PROVIDERS,
-  directProvider,
-  isDirectProvider,
   type AuthProtocol,
-  type DirectProviderId,
+  type ProviderAuthProtocol,
 } from "./provider-registry.js";
 import { isAnthropicWorkspaceId } from "./anthropic-credential.js";
 
@@ -24,6 +28,31 @@ interface LoginOptions {
 interface ApiKeyLoginPrompts {
   readonly hidden: (prompt: string) => Promise<string>;
   readonly visible: (prompt: string, defaultValue?: string) => Promise<string>;
+}
+
+export interface LoginProviderDefinition {
+  readonly id: CredentialProviderId;
+  readonly label: string;
+  readonly auth: readonly ProviderAuthProtocol[];
+}
+
+const OPENCODE_API_KEY: ProviderAuthProtocol = {
+  id: "api-key",
+  label: "API key",
+  description: "Cole uma chave; ela não aparece no terminal nem é gravada em argumentos, logs ou perfis.",
+};
+
+/** Credential UX catalog only. It does not make a namespace a legacy direct provider. */
+export const LOGIN_PROVIDERS: readonly LoginProviderDefinition[] = [
+  ...DIRECT_PROVIDERS,
+  { id: "opencode-go", label: "OpenCode Go", auth: [OPENCODE_API_KEY] },
+  { id: "opencode-zen", label: "OpenCode Zen", auth: [OPENCODE_API_KEY] },
+];
+
+export function loginProvider(value: string): LoginProviderDefinition {
+  const definition = LOGIN_PROVIDERS.find((entry) => entry.id === value);
+  if (!definition) throw new Error(`unsupported login provider: ${value}`);
+  return definition;
 }
 
 function requireInteractive(): void {
@@ -91,7 +120,7 @@ async function hiddenQuestion(prompt: string): Promise<string> {
 
 /** Provider-auth collection only; the generic credential store remains provider-neutral. */
 export async function saveApiKeyLoginCredential(input: {
-  provider: DirectProviderId;
+  provider: CredentialProviderId;
   providerLabel: string;
   label: string;
 }, prompts: ApiKeyLoginPrompts = { hidden: hiddenQuestion, visible: question }): Promise<CredentialRecord> {
@@ -215,9 +244,9 @@ async function googleAdcLogin(): Promise<Record<string, string>> {
   return { projectId };
 }
 
-function selectedProtocol(providerId: DirectProviderId, requested?: string): AuthProtocol | undefined {
+function selectedProtocol(providerId: CredentialProviderId, requested?: string): AuthProtocol | undefined {
   if (!requested) return undefined;
-  const definition = directProvider(providerId);
+  const definition = loginProvider(providerId);
   const protocol = definition.auth.find((entry) => entry.id === requested);
   if (!protocol) throw new Error(`${providerId} does not support auth protocol ${requested}`);
   return protocol.id;
@@ -227,9 +256,9 @@ export async function runLoginWizard(options: LoginOptions = {}): Promise<void> 
   requireInteractive();
   stdout.write("\nRB · credenciais de provedores\nAs chaves nunca são aceitas por argumento, variável obrigatória ou arquivo de perfil.\n");
   const providerId = options.provider
-    ? (() => { if (!isDirectProvider(options.provider!)) throw new Error(`unsupported login provider: ${options.provider}`); return options.provider!; })()
-    : (await choose("Provedor", DIRECT_PROVIDERS)).id;
-  const definition = directProvider(providerId);
+    ? loginProvider(options.provider).id
+    : (await choose("Provedor", LOGIN_PROVIDERS)).id;
+  const definition = loginProvider(providerId);
   const requested = selectedProtocol(providerId, options.protocol);
   const protocol = requested ?? (definition.auth.length === 1 ? definition.auth[0]!.id : (await choose("Protocolo de autenticação", definition.auth)).id);
   const label = options.label?.trim() || await question("Nome desta credencial", "default");
@@ -250,18 +279,56 @@ export async function runLoginWizard(options: LoginOptions = {}): Promise<void> 
   stdout.write(`Credencial ${record.id} vinculada ao Google ADC.\n`);
 }
 
-export async function printCredentialList(json = false): Promise<void> {
+export interface CredentialListMetadata {
+  readonly provider: string;
+  readonly namespace: string;
+  readonly label: string;
+  readonly id: string;
+  readonly default: boolean;
+}
+
+interface CredentialListOutput {
+  write(value: string): unknown;
+}
+
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+export function credentialProviderDisplayName(provider: string): string {
+  return LOGIN_PROVIDERS.find((entry) => entry.id === provider)?.label ?? provider;
+}
+
+/** Safe output projection: secrets, encrypted fields, attributes, and vault paths never enter it. */
+export async function credentialListMetadata(): Promise<CredentialListMetadata[]> {
   const records = await listCredentials();
+  return records
+    .map((record) => ({
+      provider: credentialProviderDisplayName(record.provider),
+      namespace: record.provider,
+      label: record.label,
+      id: record.id,
+      default: record.default,
+    }))
+    .sort((left, right) => compareText(left.provider, right.provider)
+      || compareText(left.label, right.label)
+      || compareText(left.id, right.id));
+}
+
+export async function printCredentialList(json = false, output: CredentialListOutput = stdout): Promise<void> {
+  const records = await credentialListMetadata();
   if (json) {
-    stdout.write(`${JSON.stringify({ store: credentialStorePaths().metadata, credentials: records }, null, 2)}\n`);
+    output.write(`${JSON.stringify({ credentials: records }, null, 2)}\n`);
     return;
   }
-  stdout.write(`Cofre: ${credentialStorePaths().metadata}\n`);
   if (!records.length) {
-    stdout.write("Nenhuma credencial configurada. Use rb-harness --login.\n");
+    output.write("Nenhuma credencial de provedor configurada.\n");
     return;
   }
-  for (const record of records) stdout.write(`  ${record.id}\t${record.protocol}\t${record.storage}\n`);
+  output.write("Provider\tNamespace\tLabel\tCredential ID\tDefault\n");
+  for (const record of records) {
+    output.write(`${record.provider}\t${record.namespace}\t${record.label}\t${record.id}\t${record.default ? "yes" : "no"}\n`);
+  }
 }
 
 export async function logoutCredential(selector: string): Promise<void> {

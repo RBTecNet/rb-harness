@@ -4,6 +4,9 @@ import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import type { AuthProtocol, DirectProviderId } from "./provider-registry.js";
 
+/** Vault namespaces are storage identity, not necessarily legacy transport providers. */
+export type CredentialProviderId = DirectProviderId | "opencode-go" | "opencode-zen";
+
 const CONTRACT = "rb-provider-credentials/v1" as const;
 
 interface EncryptedValue {
@@ -15,7 +18,7 @@ interface EncryptedValue {
 
 export interface CredentialRecord {
   id: string;
-  provider: DirectProviderId;
+  provider: CredentialProviderId;
   protocol: AuthProtocol;
   label: string;
   storage: "encrypted-vault" | "external-adc";
@@ -27,7 +30,7 @@ export interface CredentialRecord {
 
 interface CredentialDocument {
   contract: typeof CONTRACT;
-  defaults: Partial<Record<DirectProviderId, string>>;
+  defaults: Partial<Record<CredentialProviderId, string>>;
   credentials: CredentialRecord[];
 }
 
@@ -52,7 +55,7 @@ function emptyDocument(): CredentialDocument {
   return { contract: CONTRACT, defaults: {}, credentials: [] };
 }
 
-function credentialId(provider: DirectProviderId, label: string): string {
+function credentialId(provider: CredentialProviderId, label: string): string {
   const normalized = label.normalize("NFKC").trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
   return `${provider}:${normalized || "default"}`;
 }
@@ -128,7 +131,7 @@ async function saveDocument(document: CredentialDocument): Promise<void> {
 }
 
 export async function saveCredential(input: {
-  provider: DirectProviderId;
+  provider: CredentialProviderId;
   protocol: AuthProtocol;
   label: string;
   secret?: string;
@@ -163,7 +166,7 @@ export async function saveCredential(input: {
 }
 
 export async function listCredentials(
-  provider?: DirectProviderId,
+  provider?: CredentialProviderId,
 ): Promise<Array<Omit<CredentialRecord, "secret"> & { default: boolean }>> {
   const document = await loadDocument();
   return document.credentials
@@ -174,7 +177,7 @@ export async function listCredentials(
     }));
 }
 
-export async function resolveCredential(provider: DirectProviderId, selector?: string): Promise<ResolvedCredential> {
+export async function resolveCredential(provider: CredentialProviderId, selector?: string): Promise<ResolvedCredential> {
   const document = await loadDocument();
   const candidates = document.credentials.filter((entry) => entry.provider === provider);
   const normalizedSelectorId = selector ? credentialId(provider, selector) : undefined;

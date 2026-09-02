@@ -1,0 +1,417 @@
+{
+  "format": "rb-adapter-conformance-record/v1",
+  "producer": "rb-harness-conformance-runner",
+  "profileId": "opencode:cli:opencode-go/deepseek-v4-pro",
+  "providerFamily": "opencode",
+  "modelId": "opencode-go/deepseek-v4-pro",
+  "transport": "opencode-cli",
+  "requestAccounting": "opaque",
+  "transportVersion": "1.18.25",
+  "suiteVersion": "rb-adapter-conformance/v1",
+  "runId": "b5a8c074-b300-498e-9a56-162dfeafb56a",
+  "recordedAt": "2026-09-01T23:24:46.511Z",
+  "rawResponses": {
+    "representation-comprehensive": {
+      "origin": "live-recorded",
+      "canonicalPayload": {
+        "title": "transport-probe",
+        "mode": "alpha",
+        "nested": {
+          "level1": {
+            "level2": {
+              "value": "kept"
+            }
+          }
+        },
+        "arrays": [
+          [],
+          [
+            "one"
+          ],
+          [
+            "one",
+            "two"
+          ]
+        ],
+        "optional": null
+      },
+      "response": {
+        "exitCode": 0,
+        "startedAt": "2026-09-01T23:24:28.710Z",
+        "completedAt": "2026-09-01T23:24:35.200Z",
+        "firstOutputMs": 6381,
+        "streamComplete": true,
+        "treeQuiescent": true,
+        "treeVerified": true,
+        "assistantMessageCount": 1,
+        "observedModelIds": [
+          "opencode-go/deepseek-v4-pro"
+        ],
+        "events": [
+          {
+            "kind": "step-start",
+            "messageId": "msg_05f49de980015mC5kDeDI1izYj"
+          },
+          {
+            "kind": "text",
+            "id": "prt_05f49e9fb001cFonMRIUElZRLI",
+            "text": "{\"title\":\"transport-probe\",\"mode\":\"alpha\",\"nested\":{\"level1\":{\"level2\":{\"value\":\"kept\"}}},\"arrays\":[[],[\"one\"],[\"one\",\"two\"]],\"optional\":null}"
+          },
+          {
+            "kind": "step-finish",
+            "reason": "stop",
+            "usage": {
+              "input": 2212,
+              "output": 45,
+              "reasoning": 19,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "cost": 0.00158664
+            }
+          }
+        ],
+        "toolEventsObserved": 0
+      }
+    },
+    "semantic-incomplete": {
+      "origin": "live-recorded",
+      "canonicalPayload": {
+        "items": []
+      },
+      "response": {
+        "exitCode": 0,
+        "startedAt": "2026-09-01T23:24:37.384Z",
+        "completedAt": "2026-09-01T23:24:43.738Z",
+        "firstOutputMs": 6254,
+        "streamComplete": true,
+        "treeQuiescent": true,
+        "treeVerified": true,
+        "assistantMessageCount": 1,
+        "observedModelIds": [
+          "opencode-go/deepseek-v4-pro"
+        ],
+        "events": [
+          {
+            "kind": "step-start",
+            "messageId": "msg_05f4a00c3001QlLoxa4GPS7bQ1"
+          },
+          {
+            "kind": "text",
+            "id": "prt_05f4a0c860012YvxnMpNI0RUo7",
+            "text": "{\"items\":[]}"
+          },
+          {
+            "kind": "step-finish",
+            "reason": "stop",
+            "usage": {
+              "input": 2061,
+              "output": 6,
+              "reasoning": 20,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "cost": 0.00141174
+            }
+          }
+        ],
+        "toolEventsObserved": 0
+      }
+    },
+    "derived-truncated": {
+      "origin": "derived-from-recording",
+      "response": {
+        "exitCode": 0,
+        "startedAt": "2026-09-01T23:24:28.710Z",
+        "completedAt": "2026-09-01T23:24:35.200Z",
+        "firstOutputMs": 6381,
+        "streamComplete": false,
+        "treeQuiescent": true,
+        "treeVerified": true,
+        "assistantMessageCount": 1,
+        "observedModelIds": [
+          "opencode-go/deepseek-v4-pro"
+        ],
+        "events": [
+          {
+            "kind": "step-start",
+            "messageId": "msg_05f49de980015mC5kDeDI1izYj"
+          },
+          {
+            "kind": "text",
+            "id": "prt_05f49e9fb001cFonMRIUElZRLI",
+            "text": "{\"title\":\"transport-probe\",\"mode\":\"alpha\",\"nested\":{\"level1\":{\"level2\":{\"value\":\"kept\"}}},\"arrays\":[[],[\"one\"],[\"one\",\"two\"]],\"optional\":null}"
+          },
+          {
+            "kind": "step-finish",
+            "reason": "stop",
+            "usage": {
+              "input": 2212,
+              "output": 45,
+              "reasoning": 19,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "cost": 0.00158664
+            }
+          }
+        ],
+        "toolEventsObserved": 0
+      },
+      "derivedFrom": "representation-comprehensive",
+      "derivation": "stream completion removed"
+    },
+    "derived-malformed": {
+      "origin": "derived-from-recording",
+      "response": {
+        "exitCode": 0,
+        "startedAt": "2026-09-01T23:24:28.710Z",
+        "completedAt": "2026-09-01T23:24:35.200Z",
+        "firstOutputMs": 6381,
+        "streamComplete": true,
+        "treeQuiescent": true,
+        "treeVerified": true,
+        "assistantMessageCount": 1,
+        "observedModelIds": [
+          "opencode-go/deepseek-v4-pro"
+        ],
+        "events": [
+          {
+            "kind": "step-start",
+            "modelId": "opencode-go/deepseek-v4-pro"
+          },
+          {
+            "kind": "text",
+            "id": "visible",
+            "text": "{"
+          }
+        ],
+        "toolEventsObserved": 0
+      },
+      "derivedFrom": "representation-comprehensive",
+      "derivation": "visible JSON made malformed"
+    }
+  },
+  "liveSmoke": {
+    "cancellation": {
+      "passed": true,
+      "errorKind": "cancelled",
+      "durationMs": 119,
+      "providerRequestMeasurement": {
+        "measured": false,
+        "reason": "unsupported-by-provider"
+      },
+      "transportInvocations": 1,
+      "promptAbort": true,
+      "treeQuiescent": true,
+      "treeVerified": true
+    },
+    "timeout": {
+      "passed": true,
+      "errorKind": "timeout",
+      "durationMs": 91,
+      "providerRequestMeasurement": {
+        "measured": false,
+        "reason": "unsupported-by-provider"
+      },
+      "transportInvocations": 1,
+      "promptAbort": true,
+      "treeQuiescent": true,
+      "treeVerified": true
+    }
+  },
+  "externalCliEvidence": {
+    "format": "rb-external-cli-evidence/v1",
+    "executable": "opencode",
+    "transportVersion": "1.18.25",
+    "requestedModel": "opencode-go/deepseek-v4-pro",
+    "transportInvocations": 2,
+    "observedProviderRequests": {
+      "measured": false,
+      "reason": "unsupported-by-provider"
+    },
+    "invocationPolicy": {
+      "format": "rb-external-cli-invocation-policy/v1",
+      "outputMode": "json",
+      "transportFraming": "jsonl",
+      "inputMode": "stdin",
+      "ambientAuth": true,
+      "modelArgument": "opencode-go/deepseek-v4-pro",
+      "directoryIsolation": "isolated-temporary",
+      "stderrPolicy": "ignored-not-recorded",
+      "pluginMode": "pure",
+      "toolPolicy": "deny",
+      "externalInstructions": "disabled",
+      "legacyCompatibilityRules": "disabled",
+      "environmentPolicy": "allowlisted",
+      "modelBearingProcessesPerSemanticRequest": 1,
+      "metadataProcessesPerSemanticRequest": 1,
+      "identitySource": "session-export",
+      "transportRetryLimit": 0
+    },
+    "invocations": [
+      {
+        "id": "valid-structured-response",
+        "recordingKey": "representation-comprehensive",
+        "transportInvocations": 1,
+        "processCompleted": true,
+        "treeQuiescent": true,
+        "treeVerified": true,
+        "observedModelIds": [
+          "opencode-go/deepseek-v4-pro"
+        ],
+        "toolEventsObserved": 0
+      },
+      {
+        "id": "semantically-incomplete",
+        "recordingKey": "semantic-incomplete",
+        "transportInvocations": 1,
+        "processCompleted": true,
+        "treeQuiescent": true,
+        "treeVerified": true,
+        "observedModelIds": [
+          "opencode-go/deepseek-v4-pro"
+        ],
+        "toolEventsObserved": 0
+      }
+    ]
+  },
+  "result": {
+    "profileId": "opencode:cli:opencode-go/deepseek-v4-pro",
+    "suiteVersion": "rb-adapter-conformance/v1",
+    "runId": "b5a8c074-b300-498e-9a56-162dfeafb56a",
+    "recordedAt": "2026-09-01T23:24:46.511Z",
+    "tier": "SUPPORTED",
+    "cases": [
+      {
+        "id": "valid-structured-response",
+        "category": "valid-structured-response",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "nested-objects",
+        "category": "nested-objects",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "arrays",
+        "category": "arrays",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "enums",
+        "category": "enums",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "optional-null-fields",
+        "category": "optional-null-fields",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "unknown-provider-metadata",
+        "category": "unknown-provider-metadata",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "wrapper-envelope",
+        "category": "wrapper-envelope",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "truncated-response",
+        "category": "truncated-response",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "malformed-syntax",
+        "category": "malformed-syntax",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "semantically-incomplete",
+        "category": "semantically-incomplete",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "unsupported-structured-output",
+        "category": "unsupported-structured-output",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "reasoning-enabled",
+        "category": "reasoning-enabled",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "reasoning-disabled",
+        "category": "reasoning-disabled",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "usage-reporting",
+        "category": "usage-reporting",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "cancellation",
+        "category": "cancellation",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "timeout",
+        "category": "timeout",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "external-cli-evidence",
+        "category": "transport-version",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      }
+    ],
+    "normalizationsOnHappyPath": [],
+    "capabilitiesActuallyTested": [
+      "cancellation",
+      "preflight:unsupported-structured-output",
+      "reasoning:disabled",
+      "reasoning:enabled:low",
+      "runtime:external-cli-evidence",
+      "streaming",
+      "structured-output:json-mode",
+      "timeout",
+      "usage-reporting"
+    ]
+  },
+  "integritySha256": "31ee92a902221f188e80abf3622b35c6f097565d6b7cdaf77b88f2de6b6dc4aa"
+}
