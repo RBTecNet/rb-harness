@@ -16,13 +16,16 @@ retomáveis em vez de exigir um pacote monolítico do modelo.
 
 ## Instalação do executável
 
-O RB Harness 0.6.2 exige Node.js 20 ou superior. No clone do repositório:
+O RB Harness 1.0.7 exige Node.js 20 ou superior e npm. Instale o pacote e o
+runtime RB Codex certificado com um único comando executado em foreground:
 
 ```bash
-npm install
-npm run build
-npm install --global --prefix "$HOME/.local" ./packages/core
+npx --yes --no-audit --no-update-notifier --package @rb-harness/core@1.0.7 rb-harness-install
 ```
+
+O instalador mantém visível o progresso de download e verificação. O pacote já
+contém o build necessário; não é preciso clonar o repositório nem instalar Git,
+TypeScript ou esbuild.
 
 Se necessário, adicione o diretório de binários ao shell:
 
@@ -35,7 +38,7 @@ Confira a versão instalada:
 ```bash
 rb-harness --version
 rb-harness --ver
-# 0.6.2
+# 1.0.7
 ```
 
 Executar apenas `rb-harness` abre o assistente interativo. O splash com a

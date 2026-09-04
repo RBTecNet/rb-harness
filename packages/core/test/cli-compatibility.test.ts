@@ -79,6 +79,15 @@ describe("public CLI compatibility", () => {
     expect(result.stdout).toMatch(/without\s+decrypting or displaying secrets/);
   });
 
+  it("distinguishes the interactive Progressive --init entry from the canonical init subcommand", async () => {
+    const cli = resolve(process.cwd(), "dist/cli.js");
+    const root = await run(process.execPath, [cli, "--help"]);
+    const init = await run(process.execPath, [cli, "init", "--help"]);
+    expect(root.stdout).toContain("rb-harness --init                  Run Progressive Init P1→P4 interactively");
+    expect(root.stdout).not.toContain("rb-harness --init                  Configure canonical Init interactively");
+    expect(init.stdout).toContain("Run canonical Init, or one explicitly selected Progressive Init stage");
+  });
+
   it("fails removed semantic-manager options with explicit guidance instead of silence", async () => {
     const project = await mkdtemp(resolve(tmpdir(), "rb-harness-cli-deprecation-"));
     const cli = resolve(process.cwd(), "dist/cli.js");

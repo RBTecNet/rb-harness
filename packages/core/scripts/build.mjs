@@ -10,6 +10,9 @@ const pluginCli = resolve(pluginScripts, "rb-harness.cjs");
 const obsoletePluginCli = resolve(pluginScripts, "rb-harness.mjs");
 const resources = resolve(packageRoot, "../../resources");
 const contracts = resolve(packageRoot, "../../contracts");
+const packageInstaller = resolve(packageRoot, "scripts/install-package.mjs");
+const installerUx = resolve(packageRoot, "scripts/installer-ux.mjs");
+const nodePreflight = resolve(packageRoot, "../../scripts/node-preflight.mjs");
 const conformanceRecords = resolve(packageRoot, "src/vnext/providers/conformance/records");
 const pluginResources = resolve(packageRoot, "../../plugins/rb-harness/standalone-resources");
 const pluginContracts = resolve(packageRoot, "../../plugins/rb-harness/contracts");
@@ -19,6 +22,7 @@ await mkdir(dist, { recursive: true });
 await cp(resources, resolve(dist, "resources"), { recursive: true });
 await cp(contracts, resolve(dist, "contracts"), { recursive: true });
 await cp(conformanceRecords, resolve(dist, "records"), { recursive: true });
+await rm(resolve(dist, "records/.gitkeep"), { force: true });
 await rm(pluginResources, { recursive: true, force: true });
 await cp(resources, pluginResources, { recursive: true });
 await rm(pluginContracts, { recursive: true, force: true });
@@ -43,9 +47,26 @@ await build({
   platform: "node",
   format: "esm",
   target: "node20",
-  packages: "external",
-  banner: { js: "#!/usr/bin/env node" },
+  packages: "bundle",
+  alias: { commander: resolve(packageRoot, "../../node_modules/commander/esm.mjs") },
+  banner: {
+    js: '#!/usr/bin/env node\nimport { createRequire } from "node:module";\nconst require = createRequire(import.meta.url);',
+  },
 });
+
+await build({
+  entryPoints: [resolve(packageRoot, "src/runtime-bootstrap.ts")],
+  outfile: resolve(dist, "runtime-bootstrap.js"),
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node20",
+  packages: "external",
+});
+
+await cp(packageInstaller, resolve(dist, "install.js"));
+await cp(installerUx, resolve(dist, "installer-ux.mjs"));
+await cp(nodePreflight, resolve(dist, "node-preflight.mjs"));
 
 await build({
   entryPoints: [resolve(packageRoot, "src/cli.ts")],
@@ -60,6 +81,7 @@ await build({
 });
 
 await chmod(resolve(dist, "cli.js"), 0o755);
+await chmod(resolve(dist, "install.js"), 0o755);
 await chmod(pluginCli, 0o755);
 
 const bundle = await readFile(pluginCli);

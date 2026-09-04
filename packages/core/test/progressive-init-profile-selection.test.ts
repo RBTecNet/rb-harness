@@ -217,7 +217,7 @@ describe("Progressive focused AI profile selection", () => {
       },
     });
     await executeProgressiveInitCommand({ ...options, profileId: API_ID }, state.runtime);
-    expect(state.writes.join("")).toContain("\nProject Description interview\n");
+    expect(state.writes.join("")).toContain("RB Harness Progressive Init\nP1/4 · Project Description\nPergunta 1\n");
     expect(state.writes.join("")).not.toContain(question.question);
     expect(prompts).toHaveLength(1);
     expect(prompts[0]!.split(question.question)).toHaveLength(2);

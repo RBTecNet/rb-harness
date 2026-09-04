@@ -1,0 +1,478 @@
+{
+  "format": "rb-adapter-conformance-record/v1",
+  "producer": "rb-harness-conformance-runner",
+  "profileId": "openai:codex:gpt-5.6-sol",
+  "providerFamily": "openai",
+  "modelId": "gpt-5.6-sol",
+  "transport": "codex-app-server",
+  "requestAccounting": "opaque",
+  "transportVersion": "0.151.0-rb.1",
+  "suiteVersion": "rb-adapter-conformance/v1",
+  "runId": "69c1a44e-5148-4f18-8f74-000ab2b10b6f",
+  "recordedAt": "2026-09-04T04:11:21.593Z",
+  "rawResponses": {
+    "representation-comprehensive": {
+      "origin": "live-recorded",
+      "canonicalPayload": {
+        "title": "transport-probe",
+        "mode": "alpha",
+        "nested": {
+          "level1": {
+            "level2": {
+              "value": "kept"
+            }
+          }
+        },
+        "arrays": [
+          [],
+          [
+            "one"
+          ],
+          [
+            "one",
+            "two"
+          ]
+        ],
+        "optional": null
+      },
+      "response": {
+        "preflight": {
+          "semanticMode": true,
+          "semanticModeVersion": "v1",
+          "runtimeVersion": "rb-codex 0.151.0-rb.1 (upstream 78c290807ce710180111df227df3b7a4fe845452)",
+          "model": "gpt-5.6-sol",
+          "modelProvider": "openai",
+          "toolPolicy": "none",
+          "effectiveToolCount": 0,
+          "toolManifestDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "instructionPolicy": "isolated",
+          "outputSchemaStrict": false,
+          "authenticated": true,
+          "authMode": "chatgpt",
+          "authStoreKind": "file",
+          "sessionMode": "ephemeral",
+          "requestedCodexTurns": 1,
+          "requestAccounting": "opaque"
+        },
+        "completion": {
+          "initialModel": "gpt-5.6-sol",
+          "initialModelProvider": "openai",
+          "finalModel": "gpt-5.6-sol",
+          "finalModelProvider": "openai",
+          "rerouted": false
+        },
+        "terminalStatus": "completed",
+        "finalMessages": [
+          "{\"title\":\"transport-probe\",\"mode\":\"alpha\",\"nested\":{\"level1\":{\"level2\":{\"value\":\"kept\"}}},\"arrays\":[[],[\"one\"],[\"one\",\"two\"]],\"optional\":null}"
+        ],
+        "actionCounts": {
+          "commandExecutionEvents": 0,
+          "fileChangeEvents": 0,
+          "mcpToolEvents": 0,
+          "appToolEvents": 0,
+          "webSearchEvents": 0,
+          "otherToolEvents": 0
+        },
+        "usage": {
+          "inputTokens": 3726,
+          "cachedInputTokens": 0,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 51,
+          "reasoningOutputTokens": 0
+        },
+        "startedAt": "2026-09-04T04:11:14.313Z",
+        "completedAt": "2026-09-04T04:11:16.646Z",
+        "firstOutputMs": 313,
+        "streamComplete": true,
+        "processCompleted": true
+      }
+    },
+    "semantic-incomplete": {
+      "origin": "live-recorded",
+      "canonicalPayload": {
+        "items": []
+      },
+      "response": {
+        "preflight": {
+          "semanticMode": true,
+          "semanticModeVersion": "v1",
+          "runtimeVersion": "rb-codex 0.151.0-rb.1 (upstream 78c290807ce710180111df227df3b7a4fe845452)",
+          "model": "gpt-5.6-sol",
+          "modelProvider": "openai",
+          "toolPolicy": "none",
+          "effectiveToolCount": 0,
+          "toolManifestDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "instructionPolicy": "isolated",
+          "outputSchemaStrict": false,
+          "authenticated": true,
+          "authMode": "chatgpt",
+          "authStoreKind": "file",
+          "sessionMode": "ephemeral",
+          "requestedCodexTurns": 1,
+          "requestAccounting": "opaque"
+        },
+        "completion": {
+          "initialModel": "gpt-5.6-sol",
+          "initialModelProvider": "openai",
+          "finalModel": "gpt-5.6-sol",
+          "finalModelProvider": "openai",
+          "rerouted": false
+        },
+        "terminalStatus": "completed",
+        "finalMessages": [
+          "{\"items\":[]}"
+        ],
+        "actionCounts": {
+          "commandExecutionEvents": 0,
+          "fileChangeEvents": 0,
+          "mcpToolEvents": 0,
+          "appToolEvents": 0,
+          "webSearchEvents": 0,
+          "otherToolEvents": 0
+        },
+        "usage": {
+          "inputTokens": 3609,
+          "cachedInputTokens": 0,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 14,
+          "reasoningOutputTokens": 0
+        },
+        "startedAt": "2026-09-04T04:11:17.393Z",
+        "completedAt": "2026-09-04T04:11:19.464Z",
+        "firstOutputMs": 304,
+        "streamComplete": true,
+        "processCompleted": true
+      }
+    },
+    "derived-truncated": {
+      "origin": "derived-from-recording",
+      "response": {
+        "preflight": {
+          "semanticMode": true,
+          "semanticModeVersion": "v1",
+          "runtimeVersion": "rb-codex 0.151.0-rb.1 (upstream 78c290807ce710180111df227df3b7a4fe845452)",
+          "model": "gpt-5.6-sol",
+          "modelProvider": "openai",
+          "toolPolicy": "none",
+          "effectiveToolCount": 0,
+          "toolManifestDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "instructionPolicy": "isolated",
+          "outputSchemaStrict": false,
+          "authenticated": true,
+          "authMode": "chatgpt",
+          "authStoreKind": "file",
+          "sessionMode": "ephemeral",
+          "requestedCodexTurns": 1,
+          "requestAccounting": "opaque"
+        },
+        "finalMessages": [
+          "{\"title\":\"transport-probe\",\"mode\":\"alpha\",\"nested\":{\"level1\":{\"level2\":{\"value\":\"kept\"}}},\"arrays\":[[],[\"one\"],[\"one\",\"two\"]],\"optional\":null}"
+        ],
+        "actionCounts": {
+          "commandExecutionEvents": 0,
+          "fileChangeEvents": 0,
+          "mcpToolEvents": 0,
+          "appToolEvents": 0,
+          "webSearchEvents": 0,
+          "otherToolEvents": 0
+        },
+        "usage": {
+          "inputTokens": 3726,
+          "cachedInputTokens": 0,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 51,
+          "reasoningOutputTokens": 0
+        },
+        "startedAt": "2026-09-04T04:11:14.313Z",
+        "completedAt": "2026-09-04T04:11:16.646Z",
+        "firstOutputMs": 313,
+        "streamComplete": false,
+        "processCompleted": true
+      },
+      "derivedFrom": "representation-comprehensive",
+      "derivation": "authoritative turn completion removed"
+    },
+    "derived-malformed": {
+      "origin": "derived-from-recording",
+      "response": {
+        "preflight": {
+          "semanticMode": true,
+          "semanticModeVersion": "v1",
+          "runtimeVersion": "rb-codex 0.151.0-rb.1 (upstream 78c290807ce710180111df227df3b7a4fe845452)",
+          "model": "gpt-5.6-sol",
+          "modelProvider": "openai",
+          "toolPolicy": "none",
+          "effectiveToolCount": 0,
+          "toolManifestDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "instructionPolicy": "isolated",
+          "outputSchemaStrict": false,
+          "authenticated": true,
+          "authMode": "chatgpt",
+          "authStoreKind": "file",
+          "sessionMode": "ephemeral",
+          "requestedCodexTurns": 1,
+          "requestAccounting": "opaque"
+        },
+        "completion": {
+          "initialModel": "gpt-5.6-sol",
+          "initialModelProvider": "openai",
+          "finalModel": "gpt-5.6-sol",
+          "finalModelProvider": "openai",
+          "rerouted": false
+        },
+        "terminalStatus": "completed",
+        "finalMessages": [
+          "{not-valid-json"
+        ],
+        "actionCounts": {
+          "commandExecutionEvents": 0,
+          "fileChangeEvents": 0,
+          "mcpToolEvents": 0,
+          "appToolEvents": 0,
+          "webSearchEvents": 0,
+          "otherToolEvents": 0
+        },
+        "usage": {
+          "inputTokens": 3726,
+          "cachedInputTokens": 0,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 51,
+          "reasoningOutputTokens": 0
+        },
+        "startedAt": "2026-09-04T04:11:14.313Z",
+        "completedAt": "2026-09-04T04:11:16.646Z",
+        "firstOutputMs": 313,
+        "streamComplete": true,
+        "processCompleted": true
+      },
+      "derivedFrom": "representation-comprehensive",
+      "derivation": "canonical assistant payload replaced by malformed JSON"
+    }
+  },
+  "liveSmoke": {
+    "cancellation": {
+      "passed": true,
+      "errorKind": "cancelled",
+      "durationMs": 1059,
+      "transportInvocations": 1,
+      "providerRequestMeasurement": {
+        "measured": false,
+        "reason": "stream-incomplete"
+      },
+      "promptAbort": true,
+      "treeQuiescent": true,
+      "treeVerified": true
+    },
+    "timeout": {
+      "passed": true,
+      "errorKind": "timeout",
+      "durationMs": 1069,
+      "transportInvocations": 1,
+      "providerRequestMeasurement": {
+        "measured": false,
+        "reason": "stream-incomplete"
+      },
+      "promptAbort": true,
+      "treeQuiescent": true,
+      "treeVerified": true
+    }
+  },
+  "codexAppServerEvidence": {
+    "format": "rb-codex-app-server-evidence/v1",
+    "managedRuntimeVersion": "0.151.0-rb.1",
+    "managedRuntimeSha256": "b68d7cc25105d38cca12977164e45710ae4576a18f898269b563e743e100493d",
+    "semanticModeVersion": "v1",
+    "semanticRuntimeVersion": "rb-codex 0.151.0-rb.1 (upstream 78c290807ce710180111df227df3b7a4fe845452)",
+    "requestedModel": "gpt-5.6-sol",
+    "requestedProvider": "openai",
+    "identitySource": "app-server-semantic-preflight-and-final-completion",
+    "requestAccounting": "opaque",
+    "invocationPolicy": {
+      "modelSelection": "thread/start",
+      "turnModelOverride": false,
+      "schemaTransmission": "unchanged",
+      "outputSchemaStrict": false,
+      "toolPolicy": "none",
+      "instructionPolicy": "isolated",
+      "sessionMode": "ephemeral",
+      "internalRetryLimit": 0,
+      "fallbackModelConfigured": false,
+      "authStoreKind": "file"
+    },
+    "invocations": [
+      {
+        "id": "valid-structured-response",
+        "recordingKey": "representation-comprehensive",
+        "transportInvocations": 1,
+        "terminalStatus": "completed",
+        "initialModel": "gpt-5.6-sol",
+        "initialProvider": "openai",
+        "finalModel": "gpt-5.6-sol",
+        "finalProvider": "openai",
+        "rerouted": false,
+        "actionCounts": {
+          "commandExecutionEvents": 0,
+          "fileChangeEvents": 0,
+          "mcpToolEvents": 0,
+          "appToolEvents": 0,
+          "webSearchEvents": 0,
+          "otherToolEvents": 0
+        },
+        "authoritativeFinalMessages": 1
+      },
+      {
+        "id": "semantically-incomplete",
+        "recordingKey": "semantic-incomplete",
+        "transportInvocations": 1,
+        "terminalStatus": "completed",
+        "initialModel": "gpt-5.6-sol",
+        "initialProvider": "openai",
+        "finalModel": "gpt-5.6-sol",
+        "finalProvider": "openai",
+        "rerouted": false,
+        "actionCounts": {
+          "commandExecutionEvents": 0,
+          "fileChangeEvents": 0,
+          "mcpToolEvents": 0,
+          "appToolEvents": 0,
+          "webSearchEvents": 0,
+          "otherToolEvents": 0
+        },
+        "authoritativeFinalMessages": 1
+      }
+    ]
+  },
+  "result": {
+    "profileId": "openai:codex:gpt-5.6-sol",
+    "suiteVersion": "rb-adapter-conformance/v1",
+    "runId": "69c1a44e-5148-4f18-8f74-000ab2b10b6f",
+    "recordedAt": "2026-09-04T04:11:21.593Z",
+    "tier": "SUPPORTED",
+    "cases": [
+      {
+        "id": "valid-structured-response",
+        "category": "valid-structured-response",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "nested-objects",
+        "category": "nested-objects",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "arrays",
+        "category": "arrays",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "enums",
+        "category": "enums",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "optional-null-fields",
+        "category": "optional-null-fields",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "unknown-provider-metadata",
+        "category": "unknown-provider-metadata",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "wrapper-envelope",
+        "category": "wrapper-envelope",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "truncated-response",
+        "category": "truncated-response",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "malformed-syntax",
+        "category": "malformed-syntax",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "semantically-incomplete",
+        "category": "semantically-incomplete",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "unsupported-structured-output",
+        "category": "unsupported-structured-output",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "reasoning-disabled",
+        "category": "reasoning-disabled",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "usage-reporting",
+        "category": "usage-reporting",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "cancellation",
+        "category": "cancellation",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "timeout",
+        "category": "timeout",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      },
+      {
+        "id": "codex-app-server-evidence",
+        "category": "invocation-bounds",
+        "mandatory": true,
+        "passed": true,
+        "normalizations": []
+      }
+    ],
+    "normalizationsOnHappyPath": [],
+    "capabilitiesActuallyTested": [
+      "cancellation",
+      "preflight:unsupported-structured-output",
+      "reasoning:disabled",
+      "runtime:codex-app-server-evidence",
+      "streaming",
+      "structured-output:json-schema",
+      "timeout",
+      "usage-reporting"
+    ]
+  },
+  "integritySha256": "3bf21cc3de9ccaf2337087c4c643aae75449735c1a298a72467f7b1c40d5f2ee"
+}

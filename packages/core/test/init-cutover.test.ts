@@ -70,34 +70,42 @@ describe("canonical Init CLI routing", () => {
     expect(ROOT_OPERATIONS.map((entry) => entry.key)).toEqual(["init", "ai-context", "plan", "evolve", "review"]);
     expect(await selectRootOperation(scripted(["1"]))).toBe("init");
     expect(await selectRootOperation(scripted(["ai-context"]))).toBe("ai-context");
-    const runInit = vi.fn(async () => undefined);
+    const runProgressiveInit = vi.fn(async () => undefined);
     const runLegacy = vi.fn(async () => undefined);
-    await dispatchRootOperation("init", "0.6.2", { dashboard: true }, { runInit, runLegacy });
-    expect(runInit).toHaveBeenCalledWith({ dashboard: true, splash: false });
+    await dispatchRootOperation("init", "0.6.2", { dashboard: true }, { runProgressiveInit, runLegacy });
+    expect(runProgressiveInit).toHaveBeenCalledWith({ dashboard: true, splash: false });
     expect(runLegacy).not.toHaveBeenCalled();
-    await dispatchRootOperation("ai-context", "0.6.2", {}, { runInit, runLegacy });
+    await dispatchRootOperation("ai-context", "0.6.2", {}, { runProgressiveInit, runLegacy });
     expect(runLegacy).toHaveBeenCalledWith("0.6.2", { selectedWorkflow: "ai-context", dashboard: undefined, splash: false });
   });
 
-  it("preserves the exact request and dashboard only as presentation configuration", async () => {
+  it("preserves the exact request and keeps the Progressive wizard on textual presentation", async () => {
     const project = await mkdtemp(resolve(tmpdir(), "rb-init-wizard-"));
     const request = "Crie um sistema de compras sem reescrever este pedido.";
-    const io = scripted(["", "2", "digitar", request, ".", ""]);
+    const io = scripted(["", "", "", "digitar", request, ".", ""]);
     const configuration = await collectInitWizardConfiguration(io, {
       cwd: project,
       dashboard: true,
       profiles: [
-        { id: "anthropic:claude-opus-5", transport: "direct-api", requestAccounting: "exact" },
-        { id: "anthropic:claude-code-cli:claude-opus-5", transport: "claude-code-cli", requestAccounting: "opaque" },
+        {
+          id: "anthropic:claude-opus-5", family: "anthropic", transport: "direct-api",
+          requestAccounting: "exact", modelId: "claude-opus-5", label: "Claude Opus 5",
+        },
+        {
+          id: "anthropic:claude-code-cli:claude-opus-5", family: "anthropic", transport: "claude-code-cli",
+          requestAccounting: "opaque", modelId: "claude-opus-5", label: "Claude Opus 5 via Claude Code subscription",
+        },
       ],
     });
     expect(configuration.projectRoot).toBe(project);
     expect(configuration.profileId).toBe("anthropic:claude-code-cli:claude-opus-5");
     expect(configuration.requestParts).toEqual([request]);
-    expect(configuration.dashboard).toBe(true);
+    expect(configuration.dashboard).toBe(false);
     expect(configuration.headless).toBe(false);
     expect(configuration.execute).toBe(true);
-    expect(io.output.join("")).toContain("rb-harness init");
+    expect(io.output.join("")).toContain("P1 Project Description");
+    expect(io.output.join("")).toContain("dashboard Progressive ainda não está implementado");
+    expect(io.output.join("")).not.toContain("--dashboard");
   });
 
   it("renders dashboard from safe orchestration metadata only", () => {

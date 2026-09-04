@@ -28,12 +28,12 @@ export async function dispatchRootOperation(
   version: string,
   options: { readonly dashboard?: boolean },
   handlers: {
-    readonly runInit: (input: { readonly dashboard?: boolean; readonly splash?: boolean }) => Promise<void>;
+    readonly runProgressiveInit: (input: { readonly dashboard?: boolean; readonly splash?: boolean }) => Promise<void>;
     readonly runLegacy?: typeof runHarnessWizard;
   },
 ): Promise<void> {
   if (workflow === "init") {
-    await handlers.runInit({ dashboard: options.dashboard, splash: false });
+    await handlers.runProgressiveInit({ dashboard: options.dashboard, splash: false });
     return;
   }
   await (handlers.runLegacy ?? runHarnessWizard)(version, { selectedWorkflow: workflow, dashboard: options.dashboard, splash: false });
@@ -42,7 +42,7 @@ export async function dispatchRootOperation(
 export async function runRootWizard(version: string, options: {
   readonly dashboard?: boolean;
   readonly splash?: boolean;
-  readonly runInit: (input: { readonly dashboard?: boolean; readonly splash?: boolean }) => Promise<void>;
+  readonly runProgressiveInit: (input: { readonly dashboard?: boolean; readonly splash?: boolean }) => Promise<void>;
 }): Promise<void> {
   if (!stdin.isTTY || !stdout.isTTY) throw new Error("the root wizard requires an interactive terminal");
   if (options.splash !== false) await playHarnessSplash(version);
@@ -53,5 +53,5 @@ export async function runRootWizard(version: string, options: {
   } finally {
     terminal.close();
   }
-  await dispatchRootOperation(workflow, version, options, { runInit: options.runInit });
+  await dispatchRootOperation(workflow, version, options, { runProgressiveInit: options.runProgressiveInit });
 }

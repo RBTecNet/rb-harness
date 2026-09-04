@@ -56,7 +56,8 @@ export type RuntimeAssertionKey =
   | "no-agent-tools-or-mcp"
   | "isolated-context"
   | "no-session-persistence"
-  | "external-cli-evidence";
+  | "external-cli-evidence"
+  | "codex-app-server-evidence";
 
 export interface ConformanceCase {
   readonly id: string;

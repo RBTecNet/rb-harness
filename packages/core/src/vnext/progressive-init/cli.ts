@@ -31,6 +31,7 @@ import {
   type ProgressiveStageSnapshot,
 } from "./coordinator.js";
 import { progressiveInitStageDefinition, type ProgressiveInitStage } from "./stages.js";
+import { prepareInteractiveQuestionScreen } from "./interview-screen.js";
 
 export interface ProgressiveInitCliOptions {
   readonly requestParts: readonly string[];
@@ -47,6 +48,7 @@ export interface ProgressiveInitCliOptions {
 export interface ProgressiveInitCliRuntime {
   readonly inputIsTTY: boolean;
   readonly outputIsTTY: boolean;
+  readonly terminalOutput?: NodeJS.WritableStream;
   readonly write: (value: string) => void;
   readonly ask: (prompt: string) => Promise<string>;
   readonly inspect: (root: string, request?: string) => Promise<readonly ProgressiveStageSnapshot[]>;
@@ -60,7 +62,7 @@ export interface ProgressiveInitCliRuntime {
   readonly execute: (options: ProgressiveInitOptions) => Promise<ProgressiveInitResult>;
 }
 
-async function requestText(options: ProgressiveInitCliOptions): Promise<string | undefined> {
+export async function resolveProgressiveInitRequest(options: ProgressiveInitCliOptions): Promise<string | undefined> {
   if (options.requestFile && options.requestParts.length) throw new Error("use either request text or --file, not both");
   const value = options.requestFile ? await readFile(resolve(options.requestFile), "utf8") : options.requestParts.join(" ");
   return value.trim() || undefined;
@@ -94,7 +96,7 @@ function semanticExecutionStage(
 }
 
 async function supportedSelectableProfiles(runtime: ProgressiveInitCliRuntime): Promise<readonly ModelProfile[]> {
-  const profiles = await Promise.all(runtime.listProfiles().filter((declared) => declared.transport === "direct-api" || declared.transport === "opencode-cli").map(async (declared) => {
+  const profiles = await Promise.all(runtime.listProfiles().filter((declared) => declared.transport === "direct-api" || declared.transport === "opencode-cli" || declared.transport === "codex-app-server").map(async (declared) => {
     try {
       const verified = await runtime.loadProfile(declared.id);
       return verified.conformance.tier === "SUPPORTED" ? verified : undefined;
@@ -123,7 +125,8 @@ async function selectTransport(runtime: ProgressiveInitCliRuntime): Promise<"cla
   runtime.write("1. Claude Code CLI\n   transport: claude-code-cli\n   request accounting: opaque\n\n");
   profiles.forEach((profile, index) => {
     const config = openCodeProfileConfiguration(profile);
-    const provider = profile.family === "anthropic" ? "Anthropic API"
+    const provider = profile.transport === "codex-app-server" ? "Codex / ChatGPT Subscription"
+      : profile.family === "anthropic" ? "Anthropic API"
       : profile.family === "deepseek" ? "DeepSeek API"
         : config?.mode === "cli" ? "OpenCode CLI"
           : config?.service === "go" ? "OpenCode Go API"
@@ -214,13 +217,13 @@ async function resolveExecutionProfile(
   };
 }
 
-export async function executeProgressiveInitCommand(
+async function executeProgressiveInitCommandResult(
   options: ProgressiveInitCliOptions,
   runtime: ProgressiveInitCliRuntime,
-): Promise<void> {
+): Promise<ProgressiveInitResult> {
   if (!Number.isFinite(options.deadlineSeconds) || options.deadlineSeconds <= 0 || options.deadlineSeconds > 900) throw new Error("--timeout must be between 1 and 900 seconds");
   const projectRoot = resolve(options.projectRoot);
-  const originalRequest = await requestText(options);
+  const originalRequest = await resolveProgressiveInitRequest(options);
   const statuses = await runtime.inspect(projectRoot, originalRequest);
   const headless = options.headless || !runtime.inputIsTTY || !runtime.outputIsTTY;
   const selectedStage = options.stage ?? statuses.find((entry) => entry.status !== "complete-fresh"
@@ -237,6 +240,8 @@ export async function executeProgressiveInitCommand(
   const configuration = await resolveExecutionProfile(options, runtime, requiresSemanticExecution);
   const answer = async (question: InterviewQuestionEvidence): Promise<string> => runtime.ask(formatInteractiveQuestion(question));
   let activeStage: ProgressiveInitStage | undefined;
+  let nextQuestionIndex = 1;
+  const questionIndexes = new Map<string, number>();
   const result = await runtime.execute({
     projectRoot,
     originalRequest,
@@ -247,11 +252,26 @@ export async function executeProgressiveInitCommand(
     presentation: {
       stage: (stage, currentStatuses) => {
         activeStage = stage;
+        nextQuestionIndex = 1;
+        questionIndexes.clear();
         runtime.write(formatProgressiveStagePresentation(stage, currentStatuses));
       },
-      question: () => {
-        const label = activeStage ? progressiveInitStageDefinition(activeStage).label : "Progressive Init";
-        runtime.write(`\n${label} interview\n`);
+      question: (question) => {
+        let questionIndex = questionIndexes.get(question.key);
+        if (questionIndex === undefined) {
+          questionIndex = nextQuestionIndex;
+          nextQuestionIndex += 1;
+          questionIndexes.set(question.key, questionIndex);
+        }
+        prepareInteractiveQuestionScreen({
+          stage: activeStage,
+          questionIndex,
+          inputIsTTY: runtime.inputIsTTY,
+          outputIsTTY: runtime.outputIsTTY,
+          headless,
+          terminalOutput: runtime.terminalOutput,
+          write: runtime.write,
+        });
       },
       complete: (stage, disposition) => {
         const label = progressiveInitStageDefinition(stage).label;
@@ -264,15 +284,24 @@ export async function executeProgressiveInitCommand(
   });
   if (result.artifactPath) runtime.write(`Progressive specification: ${result.artifactPath}\n`);
   runtime.write(`Semantic operations: ${result.semanticOperations}\nCorrective regenerations: ${result.correctiveRegenerations}\n`);
+  return result;
 }
 
-export async function runProgressiveInitCommand(options: ProgressiveInitCliOptions): Promise<void> {
+export async function executeProgressiveInitCommand(
+  options: ProgressiveInitCliOptions,
+  runtime: ProgressiveInitCliRuntime,
+): Promise<void> {
+  await executeProgressiveInitCommandResult(options, runtime);
+}
+
+async function runProgressiveInitCommandResult(options: ProgressiveInitCliOptions): Promise<ProgressiveInitResult> {
   const interactive = !options.headless && Boolean(stdin.isTTY) && Boolean(stdout.isTTY);
   const terminal = interactive ? createInterface({ input: stdin, output: stdout }) : undefined;
   try {
-    await executeProgressiveInitCommand(options, {
+    return await executeProgressiveInitCommandResult(options, {
       inputIsTTY: Boolean(stdin.isTTY),
       outputIsTTY: Boolean(stdout.isTTY),
+      terminalOutput: stdout,
       write: (value) => stdout.write(value),
       ask: async (prompt) => terminal!.question(prompt),
       inspect: inspectProgressiveInit,
@@ -296,4 +325,21 @@ export async function runProgressiveInitCommand(options: ProgressiveInitCliOptio
   } finally {
     terminal?.close();
   }
+}
+
+export async function runProgressiveInitCommand(options: ProgressiveInitCliOptions): Promise<void> {
+  await runProgressiveInitCommandResult(options);
+}
+
+/** Wizard facade over the same focused-stage CLI path, retaining counters for orchestration reporting. */
+export async function runProgressiveInitWizardStageCommand(options: ProgressiveInitCliOptions): Promise<ProgressiveInitResult> {
+  return runProgressiveInitCommandResult(options);
+}
+
+/** Deterministic test seam for the Wizard facade; stage execution remains the production CLI/coordinator path. */
+export async function executeProgressiveInitWizardStage(
+  options: ProgressiveInitCliOptions,
+  runtime: ProgressiveInitCliRuntime,
+): Promise<ProgressiveInitResult> {
+  return executeProgressiveInitCommandResult(options, runtime);
 }

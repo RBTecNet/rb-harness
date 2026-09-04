@@ -49,6 +49,13 @@ export const LOGIN_PROVIDERS: readonly LoginProviderDefinition[] = [
   { id: "opencode-zen", label: "OpenCode Zen", auth: [OPENCODE_API_KEY] },
 ];
 
+export interface ExternalLoginProviderDefinition {
+  readonly id: string;
+  readonly label: string;
+  readonly aliases?: readonly string[];
+  readonly run: () => Promise<void>;
+}
+
 export function loginProvider(value: string): LoginProviderDefinition {
   const definition = LOGIN_PROVIDERS.find((entry) => entry.id === value);
   if (!definition) throw new Error(`unsupported login provider: ${value}`);
@@ -252,9 +259,24 @@ function selectedProtocol(providerId: CredentialProviderId, requested?: string):
   return protocol.id;
 }
 
-export async function runLoginWizard(options: LoginOptions = {}): Promise<void> {
+export async function runLoginWizard(options: LoginOptions = {}, external: readonly ExternalLoginProviderDefinition[] = []): Promise<void> {
   requireInteractive();
-  stdout.write("\nRB · credenciais de provedores\nAs chaves nunca são aceitas por argumento, variável obrigatória ou arquivo de perfil.\n");
+  stdout.write("\nRB · autenticação de provedores\nChaves nunca são aceitas por argumento, variável obrigatória ou arquivo de perfil; autenticação Codex permanece sob rb-codex.\n");
+  const requestedExternal = external.find((entry) => entry.id === options.provider || entry.aliases?.includes(options.provider ?? ""));
+  if (requestedExternal) {
+    if (options.protocol || options.label) throw new Error("Codex Subscription login does not create a Harness credential or accept --protocol/--label");
+    await requestedExternal.run();
+    return;
+  }
+  if (!options.provider) {
+    const selected = await choose("Provedor", [...external, ...LOGIN_PROVIDERS]);
+    const selectedExternal = external.find((entry) => entry.id === selected.id);
+    if (selectedExternal) {
+      await selectedExternal.run();
+      return;
+    }
+    options = { ...options, provider: selected.id };
+  }
   const providerId = options.provider
     ? loginProvider(options.provider).id
     : (await choose("Provedor", LOGIN_PROVIDERS)).id;

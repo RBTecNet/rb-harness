@@ -1,10 +1,19 @@
 {
   "name": "@rb-harness/core",
-  "version": "1.0.5",
+  "version": "1.0.7",
   "description": "Standalone provider-neutral documentation harness and deterministic artifact contracts",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RBTecNet/rb-harness.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "bin": {
-    "rb-harness": "dist/cli.js"
+    "rb-harness": "dist/cli.js",
+    "rb-harness-install": "dist/install.js"
   },
   "exports": {
     ".": "./dist/index.js"
@@ -19,12 +28,10 @@
     "test:coverage": "vitest run --coverage",
     "prepack": "npm run build"
   },
-  "dependencies": {
-    "commander": "^14.0.0"
-  },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "^4.1.11",
+    "commander": "^14.0.0",
     "esbuild": "^0.28.2",
     "typescript": "^5.9.2",
     "vite": "^8.2.1",

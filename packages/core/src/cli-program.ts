@@ -62,8 +62,18 @@ import { runVnextConformanceCommand } from "./vnext/providers/conformance/cli.js
 import { runClaudeCodeRuntimeConformanceCommand } from "./vnext/providers/anthropic/claude-code/runtime-conformance-cli.js";
 import { runInitCommand, type InitCliOptions, type InitCliPresentation } from "./vnext/init-cli.js";
 import { runProgressiveInitCommand, type ProgressiveInitCliOptions } from "./vnext/progressive-init/cli.js";
+import { runProgressiveInitWizardCommand } from "./vnext/progressive-init/wizard-orchestrator.js";
 import { parseProgressiveInitStage } from "./vnext/progressive-init/stages.js";
 import { listProviderProfiles } from "./vnext/providers/registry.js";
+import { verifyManagedCodexRuntime } from "./managed-codex-runtime.js";
+import { configureCodexRuntimeVerifier } from "./vnext/providers/openai/codex/managed-runtime.js";
+import { CODEX_EXTERNAL_LOGIN_PROVIDER } from "./vnext/providers/openai/codex/login.js";
+
+configureCodexRuntimeVerifier({ verify: verifyManagedCodexRuntime });
+
+function runConfiguredLoginWizard(options: { provider?: string; protocol?: string; label?: string } = {}): Promise<void> {
+  return runLoginWizard(options, [CODEX_EXTERNAL_LOGIN_PROVIDER]);
+}
 
 const program = new Command();
 
@@ -98,16 +108,18 @@ async function runCanonicalInit(options: InitCliOptions & { readonly dashboard?:
   await runInitCommand({ ...semanticOptions, ...(dashboard ? { presentation: canonicalInitPresentation(semanticOptions.projectRoot) } : {}) });
 }
 
-async function runCanonicalInitWizard(options: { readonly dashboard?: boolean; readonly splash?: boolean }): Promise<void> {
+async function runProgressiveInitWizardFrontDoor(options: { readonly dashboard?: boolean; readonly splash?: boolean }): Promise<void> {
   await runInitWizard(HARNESS_VERSION, {
     ...options,
     profiles: listProviderProfiles(),
-    execute: (configuration) => runCanonicalInit(configuration),
+    execute: async ({ dashboard: _dashboard, execute: _execute, ...configuration }) => {
+      await runProgressiveInitWizardCommand(configuration);
+    },
   });
 }
 
-async function runCanonicalRootWizard(options: { readonly dashboard?: boolean; readonly splash?: boolean } = {}): Promise<void> {
-  await runRootWizard(HARNESS_VERSION, { ...options, runInit: runCanonicalInitWizard });
+async function runProductRootWizard(options: { readonly dashboard?: boolean; readonly splash?: boolean } = {}): Promise<void> {
+  await runRootWizard(HARNESS_VERSION, { ...options, runProgressiveInit: runProgressiveInitWizardFrontDoor });
 }
 
 function printIssues(issues: ValidationIssue[], json: boolean): void {
@@ -142,7 +154,7 @@ program
     "",
     "Standalone examples:",
     "  rb-harness                         Start the interactive wizard",
-    "  rb-harness --init                  Configure canonical Init interactively",
+    "  rb-harness --init                  Run Progressive Init P1→P4 interactively",
     "  rb-harness init --profile anthropic:claude-code-cli:claude-opus-5 --project . \"Build an inventory system\"",
     "  rb-harness plan --file change.md --provider codex --model gpt-5.6-sol --effort high",
     "  rb-harness review --project . --provider claude --model opus --output .rb",
@@ -687,15 +699,15 @@ configureWorkflowCommand(review, "review")
   .option("--plan-all-confirmed", "plan every and only confirmed finding after the audit")
   .option("--findings <ids...>", "plan only the selected stable finding IDs");
 
-program.command("wizard").description("Start the interactive RB Harness product shell").action(async () => runCanonicalRootWizard());
+program.command("wizard").description("Start the interactive RB Harness product shell").action(async () => runProductRootWizard());
 
 const auth = program.command("auth").description("Manage the shared RB provider credential vault");
 auth.command("login")
   .description("Configure one provider interactively; secrets are never accepted as arguments")
-  .option("--provider <name>", "provider credential namespace, including opencode-go or opencode-zen")
+  .option("--provider <name>", "provider namespace, including codex-subscription, opencode-go, or opencode-zen")
   .option("--protocol <name>", "api-key, oauth-pkce, or google-adc")
   .option("--label <name>", "local credential label")
-  .action(async (options: { provider?: string; protocol?: string; label?: string }) => runLoginWizard(options));
+  .action(async (options: { provider?: string; protocol?: string; label?: string }) => runConfiguredLoginWizard(options));
 auth.command("list")
   .description("List credential metadata without revealing secrets")
   .option("--json", "emit JSON")
@@ -818,7 +830,7 @@ program
     if (!runId) throw new Error("no incomplete Harness run was found");
     const selectedRun = (await listRunStates(projectRoot)).find((state) => state.id === runId);
     if (selectedRun?.workflow === "init") {
-      throw new Error("legacy Init runs cannot be resumed after the canonical Init cutover; run rb-harness --init to start canonical Init");
+      throw new Error("legacy Init runs cannot be resumed after the canonical Init cutover; run rb-harness --init to start Progressive Init");
     }
     if (options.dashboard) startHarnessDashboard(HARNESS_VERSION);
     try {
@@ -938,7 +950,7 @@ export async function runHarnessCli(): Promise<void> {
     return;
   }
   if (args.length === 1 && args[0] === "--login") {
-    await runLoginWizard();
+    await runConfiguredLoginWizard();
     return;
   }
   if (process.argv.length === 3 && process.argv[2] === "--splash") {
@@ -947,11 +959,11 @@ export async function runHarnessCli(): Promise<void> {
   }
   const route = classifyRootCliArgs(args, Boolean(process.stdin.isTTY && process.stdout.isTTY));
   if (route.kind === "root-wizard") {
-    await runCanonicalRootWizard({ dashboard: route.dashboard, splash: !args.includes("--no-splash") });
+    await runProductRootWizard({ dashboard: route.dashboard, splash: !args.includes("--no-splash") });
     return;
   }
   if (route.kind === "init-wizard") {
-    await runCanonicalInitWizard({ dashboard: route.dashboard, splash: !args.includes("--no-splash") });
+    await runProgressiveInitWizardFrontDoor({ dashboard: route.dashboard, splash: !args.includes("--no-splash") });
     return;
   }
   if (route.kind === "init-direct") {

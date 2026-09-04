@@ -107,6 +107,51 @@ export interface ExternalCliRuntimeEvidence {
   }[];
 }
 
+/** Additive evidence for the certified RB-Codex semantic app-server boundary. */
+export interface CodexAppServerRuntimeEvidence {
+  readonly format: "rb-codex-app-server-evidence/v1";
+  readonly managedRuntimeVersion: string;
+  readonly managedRuntimeSha256: string;
+  readonly semanticModeVersion: string;
+  readonly semanticRuntimeVersion: string;
+  readonly requestedModel: string;
+  readonly requestedProvider: "openai";
+  readonly identitySource: "app-server-semantic-preflight-and-final-completion";
+  readonly requestAccounting: "opaque";
+  readonly invocationPolicy: {
+    readonly modelSelection: "thread/start";
+    readonly turnModelOverride: false;
+    readonly schemaTransmission: "unchanged";
+    readonly outputSchemaStrict: false;
+    readonly toolPolicy: "none";
+    readonly instructionPolicy: "isolated";
+    readonly sessionMode: "ephemeral";
+    readonly internalRetryLimit: 0;
+    readonly fallbackModelConfigured: false;
+    readonly authStoreKind: "file";
+  };
+  readonly invocations: readonly {
+    readonly id: string;
+    readonly recordingKey: string;
+    readonly transportInvocations: 1;
+    readonly terminalStatus: string;
+    readonly initialModel: string;
+    readonly initialProvider: string;
+    readonly finalModel: string;
+    readonly finalProvider: string;
+    readonly rerouted: boolean;
+    readonly actionCounts: {
+      readonly commandExecutionEvents: number;
+      readonly fileChangeEvents: number;
+      readonly mcpToolEvents: number;
+      readonly appToolEvents: number;
+      readonly webSearchEvents: number;
+      readonly otherToolEvents: number;
+    };
+    readonly authoritativeFinalMessages: number;
+  }[];
+}
+
 export interface ConformanceRecordBody {
   readonly format: "rb-adapter-conformance-record/v1";
   readonly producer: "rb-harness-conformance-runner";
@@ -127,6 +172,7 @@ export interface ConformanceRecordBody {
   };
   readonly runtimeEvidence?: TransportRuntimeEvidence;
   readonly externalCliEvidence?: ExternalCliRuntimeEvidence;
+  readonly codexAppServerEvidence?: CodexAppServerRuntimeEvidence;
   readonly result: ConformanceResult;
 }
 

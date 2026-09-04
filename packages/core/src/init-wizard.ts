@@ -4,10 +4,12 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { askRequest, type WizardPrompt } from "./harness-wizard.js";
 import { playHarnessSplash } from "./harness-splash.js";
-
-function quote(value: string): string {
-  return /^[A-Za-z0-9_./:@+-]+$/.test(value) ? value : `'${value.replace(/'/g, `'"'"'`)}'`;
-}
+import {
+  groupWizardProfiles,
+  selectWizardModel,
+  selectWizardProvider,
+  type WizardSelectableProfile,
+} from "./wizard-profile-selector.js";
 
 async function projectDirectory(value: string): Promise<string> {
   const absolute = resolve(value);
@@ -16,11 +18,7 @@ async function projectDirectory(value: string): Promise<string> {
   return absolute;
 }
 
-export interface InitWizardProfile {
-  readonly id: string;
-  readonly transport: string;
-  readonly requestAccounting: string;
-}
+export type InitWizardProfile = WizardSelectableProfile;
 
 export interface CollectedInitWizardConfiguration {
   readonly requestParts: readonly string[];
@@ -38,17 +36,18 @@ export async function collectInitWizardConfiguration(
   io: WizardPrompt,
   options: { readonly cwd: string; readonly profiles: readonly InitWizardProfile[]; readonly dashboard?: boolean },
 ): Promise<CollectedInitWizardConfiguration> {
-  io.write("RB Harness Init · configuração\n\n");
+  io.write("RB Harness Progressive Init · configuração\n\n");
   const projectAnswer = (await io.ask(`Pasta do projeto [${options.cwd}]: `)).trim();
   const projectRoot = await projectDirectory(projectAnswer || options.cwd);
   const profiles = options.profiles;
   if (!profiles.length) throw new Error("nenhum perfil Init suportado está registrado");
-  io.write("\nPerfil do modelo:\n");
-  profiles.forEach((profile, index) => io.write(`  ${index + 1}) ${profile.id} (${profile.transport}, ${profile.requestAccounting})\n`));
-  const defaultIndex = Math.max(0, profiles.findIndex((profile) => profile.transport === "claude-code-cli"));
-  const profileAnswer = (await io.ask(`Escolha [${defaultIndex + 1}]: `)).trim() || String(defaultIndex + 1);
-  const profile = profiles[Number(profileAnswer) - 1] ?? profiles.find((entry) => entry.id === profileAnswer);
-  if (!profile) throw new Error("perfil inválido");
+  const catalog = groupWizardProfiles(profiles);
+  if (catalog.unclassified.length) {
+    io.write(`\nPerfis sem canal reconhecido foram omitidos: ${catalog.unclassified.map((profile) => profile.id).join(", ")}\n`);
+  }
+  const provider = await selectWizardProvider(io, catalog.groups);
+  const profile = await selectWizardModel(io, provider);
+  io.write(`\nPerfil exato selecionado: ${profile.id}\n`);
 
   const source = (await io.ask("Pedido: digitar ou arquivo [digitar]: ")).trim().toLowerCase() || "digitar";
   let requestParts: string[] = [];
@@ -72,12 +71,18 @@ export async function collectInitWizardConfiguration(
   if (profile.transport === "direct-api") {
     credential = (await io.ask("Credencial salva (ID/rótulo; vazio usa a padrão): ")).trim() || undefined;
   }
-  const dashboard = options.dashboard ?? !/^(?:n|nao|não|no)$/i.test((await io.ask("Usar o dashboard ao vivo? [S/n]: ")).trim());
-  const command = ["init", "--project", projectRoot, "--profile", profile.id];
-  if (requestFile) command.push("--file", requestFile); else command.push(requestParts[0]!);
-  if (credential) command.push("--credential", credential);
-  if (dashboard) command.push("--dashboard");
-  io.write(`\nComando equivalente:\n  rb-harness ${command.map(quote).join(" ")}\n`);
+  const dashboard = false;
+  if (options.dashboard) {
+    io.write("\nO dashboard Progressive ainda não está implementado; o Wizard continuará com progresso textual.\n");
+  }
+  io.write([
+    "\nFluxo selecionado:\n",
+    "  P1 Project Description\n",
+    "  P2 User Stories\n",
+    "  P3 Database Schema\n",
+    "  P4 Project Phases\n",
+    "  canonical closure → Ralph READY\n",
+  ].join(""));
   const execute = !/^(?:n|nao|não|no)$/i.test((await io.ask("\nExecutar agora? [S/n]: ")).trim());
   return {
     requestParts,

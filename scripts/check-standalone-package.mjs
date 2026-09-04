@@ -22,7 +22,13 @@ try {
   assert(Array.isArray(packResult) && packResult.length === 1, "npm pack did not return exactly one package");
   const packedFiles = new Set(packResult[0].files.map((entry) => entry.path));
   for (const path of [
+    "LICENSE",
     "dist/cli.js",
+    "dist/install.js",
+    "dist/installer-ux.mjs",
+    "dist/node-preflight.mjs",
+    "dist/runtime-bootstrap.js",
+    "dist/runtime-bootstrap.d.ts",
     "dist/resources/references/interview-policy.md",
     "dist/resources/workflows/init/instructions.md",
     "dist/resources/workflows/ai-context/instructions.md",
@@ -39,19 +45,56 @@ try {
   ]) {
     assert(packedFiles.has(path), `Packed standalone package is missing ${path}`);
   }
+  for (const entry of packedFiles) {
+    assert(!/(?:^|\/)(?:test|tests|coverage|target)(?:\/|$)/.test(entry), `Unexpected build/test artifact in package: ${entry}`);
+    assert(!/(?:^|\/)\.git(?:\/|$)/.test(entry), `Git metadata leaked into package: ${entry}`);
+    assert(!/(?:^|\/)(?:rb-codex|rb-codex-linux-x86_64)$/.test(entry), `RB Codex binary leaked into package: ${entry}`);
+  }
 
   const archive = resolve(packDirectory, packResult[0].filename);
   const unpacked = resolve(temporaryRoot, "unpacked");
   await mkdir(unpacked, { recursive: true });
   execFileSync("tar", ["-xzf", archive, "-C", unpacked]);
   const extractedPackage = resolve(unpacked, "package");
+  await symlink(resolve(root, "node_modules"), resolve(extractedPackage, "node_modules"), "dir");
+  const rootMetadata = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
+  const coreMetadata = JSON.parse(await readFile(resolve(packageRoot, "package.json"), "utf8"));
+  const packedMetadata = JSON.parse(await readFile(resolve(extractedPackage, "package.json"), "utf8"));
+  const codexPlugin = JSON.parse(await readFile(resolve(root, "plugins/rb-harness/.codex-plugin/plugin.json"), "utf8"));
+  const claudePlugin = JSON.parse(await readFile(resolve(root, "plugins/rb-harness/.claude-plugin/plugin.json"), "utf8"));
+  const packedVersion = execFileSync(process.execPath, [resolve(extractedPackage, "dist/cli.js"), "--version"], {
+    encoding: "utf8",
+  }).trim();
+  assert(
+    [rootMetadata.version, coreMetadata.version, packedMetadata.version, codexPlugin.version, claudePlugin.version, packedVersion]
+      .every((version) => version === coreMetadata.version),
+    "Release version surfaces do not agree",
+  );
+  assert(packedMetadata.name === "@rb-harness/core", "Packed package has an unexpected canonical name");
+  assert(coreMetadata.license === "MIT" && packedMetadata.license === "MIT", "Packed package license metadata is not MIT");
+  assert(
+    coreMetadata.publishConfig?.access === "public" && packedMetadata.publishConfig?.access === "public",
+    "Packed scoped package does not declare public access",
+  );
+  const origin = execFileSync("git", ["config", "--get", "remote.origin.url"], { cwd: root, encoding: "utf8" }).trim();
+  const expectedRepositoryUrl = origin.startsWith("https://") ? `git+${origin}` : origin;
+  assert(
+    coreMetadata.repository?.type === "git"
+      && coreMetadata.repository?.url === expectedRepositoryUrl
+      && packedMetadata.repository?.type === "git"
+      && packedMetadata.repository?.url === expectedRepositoryUrl,
+    "Packed repository metadata differs from the Git origin authority",
+  );
+  const authoritativeLicense = await readFile(resolve(root, "LICENSE"));
+  const packedLicense = await readFile(resolve(extractedPackage, "LICENSE"));
+  assert(authoritativeLicense.equals(packedLicense), "Packed LICENSE differs from the root authority");
+  assert(packedMetadata.bin?.["rb-harness"] === "dist/cli.js", "Packed package omitted the rb-harness bin");
+  assert(packedMetadata.bin?.["rb-harness-install"] === "dist/install.js", "Packed package omitted the installer bin");
   for (const name of ["anthropic_claude-opus-5.json", "anthropic_claude-code-cli_claude-opus-5.json"]) {
     const source = await readFile(resolve(packageRoot, "src/vnext/providers/conformance/records", name));
     const packed = await readFile(resolve(extractedPackage, "dist/records", name));
     assert(createHash("sha256").update(source).digest("hex") === createHash("sha256").update(packed).digest("hex"), `Packed conformance record differs from source authority: ${name}`);
   }
-  await symlink(resolve(root, "node_modules"), resolve(extractedPackage, "node_modules"), "dir");
-
   const binDirectory = resolve(temporaryRoot, "bin");
   const launcher = resolve(binDirectory, "rb-harness");
   await mkdir(binDirectory, { recursive: true });

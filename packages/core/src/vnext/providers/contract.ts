@@ -158,7 +158,7 @@ export type StructuredOutputMechanism =
 
 export type ConformanceTier = "SUPPORTED" | "SUPPORTED_WITH_NORMALIZATION" | "UNSUPPORTED";
 
-export type ProviderTransportId = "direct-api" | "claude-code-cli" | "opencode-cli";
+export type ProviderTransportId = "direct-api" | "claude-code-cli" | "opencode-cli" | "codex-app-server";
 
 /**
  * Whether underlying provider/model requests are authoritatively observable.
@@ -171,7 +171,7 @@ export function isRequestAccounting(value: unknown): value is RequestAccounting 
 }
 
 export function isProviderTransportId(value: unknown): value is ProviderTransportId {
-  return value === "direct-api" || value === "claude-code-cli" || value === "opencode-cli";
+  return value === "direct-api" || value === "claude-code-cli" || value === "opencode-cli" || value === "codex-app-server";
 }
 
 export interface ConformanceState {
@@ -253,6 +253,13 @@ export type ResolvedProviderAuth =
   | {
       readonly kind: "ambient-session";
       readonly id: string;
+    }
+  | {
+      readonly kind: "external-auth-store";
+      readonly id: string;
+      readonly storeKind: "file";
+      /** Runtime-only location. It must never be copied into conformance evidence. */
+      readonly path: string;
     };
 
 export interface ProviderAdapter {

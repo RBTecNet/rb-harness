@@ -159,6 +159,63 @@ function deriveRuntimeAssertion(input: {
   readonly record: ConformanceRecord;
 }): DerivedRuntimeAssertion {
   const { key, adapter, profile, cases, record } = input;
+  if (key === "codex-app-server-evidence") {
+    const evidence = record.codexAppServerEvidence;
+    if (!evidence || evidence.format !== "rb-codex-app-server-evidence/v1") {
+      return runtimeFail("Codex app-server evidence is missing");
+    }
+    const expectedPolicy = {
+      modelSelection: "thread/start",
+      turnModelOverride: false,
+      schemaTransmission: "unchanged",
+      outputSchemaStrict: false,
+      toolPolicy: "none",
+      instructionPolicy: "isolated",
+      sessionMode: "ephemeral",
+      internalRetryLimit: 0,
+      fallbackModelConfigured: false,
+      authStoreKind: "file",
+    } as const;
+    if (profile.transport !== "codex-app-server"
+      || evidence.managedRuntimeVersion !== record.transportVersion
+      || !evidence.semanticRuntimeVersion.trim()
+      || evidence.requestedModel !== requestedModelForProfile(profile)
+      || evidence.requestedProvider !== profile.family
+      || evidence.identitySource !== "app-server-semantic-preflight-and-final-completion"
+      || evidence.requestAccounting !== "opaque"
+      || !isDeepStrictEqual(evidence.invocationPolicy, expectedPolicy)) {
+      return runtimeFail("Codex runtime identity or invocation policy evidence is inconsistent");
+    }
+    const expectedIds = ["valid-structured-response", "semantically-incomplete"].sort();
+    if (!isDeepStrictEqual(evidence.invocations.map((item) => item.id).sort(), expectedIds)) {
+      return runtimeFail("Codex conformance invocation set is incomplete");
+    }
+    for (const invocation of evidence.invocations) {
+      if (invocation.transportInvocations !== 1
+        || invocation.terminalStatus !== "completed"
+        || invocation.initialModel !== profile.modelId
+        || invocation.finalModel !== profile.modelId
+        || invocation.initialProvider !== "openai"
+        || invocation.finalProvider !== "openai"
+        || invocation.rerouted
+        || invocation.authoritativeFinalMessages !== 1
+        || Object.values(invocation.actionCounts).some((count) => count !== 0)) {
+        return runtimeFail(`Codex invocation '${invocation.id}' violates exact-profile semantic policy`);
+      }
+      const raw = record.rawResponses[invocation.recordingKey]?.response;
+      const observation = raw === undefined ? undefined : adapter.observeRuntime?.(raw);
+      const rawPreflight = raw && typeof raw === "object" ? (raw as { readonly preflight?: { readonly runtimeVersion?: unknown; readonly semanticModeVersion?: unknown } }).preflight : undefined;
+      if (!observation || !observation.streamComplete || !observation.treeQuiescent || !observation.treeVerified
+        || observation.toolEventsObserved !== 0
+        || !isDeepStrictEqual(observation.modelIds, [profile.modelId])
+        || observation.assistantMessageIds.length !== 1
+        || rawPreflight?.runtimeVersion !== evidence.semanticRuntimeVersion
+        || rawPreflight?.semanticModeVersion !== evidence.semanticModeVersion) {
+        return runtimeFail(`Codex raw observation '${invocation.recordingKey}' cannot be replayed safely`);
+      }
+    }
+    return runtimePass();
+  }
   if (key === "external-cli-evidence") {
     const evidence = record.externalCliEvidence;
     if (!evidence || evidence.format !== "rb-external-cli-evidence/v1") {
@@ -500,6 +557,13 @@ export function validateConformanceRecord(input: {
       if (!isDeepStrictEqual(record.externalCliEvidence.invocationPolicy, currentPolicy)) {
         throw new Error("external CLI invocation policy differs from the conformance record");
       }
+    } else if (profile.transport === "codex-app-server") {
+      if (!record.codexAppServerEvidence || record.runtimeEvidence || record.externalCliEvidence) {
+        throw new Error("this transport requires only rb-codex-app-server-evidence/v1");
+      }
+      if (record.codexAppServerEvidence.format !== "rb-codex-app-server-evidence/v1") {
+        throw new Error("Codex app-server conformance record has invalid evidence");
+      }
     } else {
       throw new Error(`external transport ${profile.transport} has no evidence validator`);
     }
@@ -507,7 +571,7 @@ export function validateConformanceRecord(input: {
       throw new Error(`conformance record request accounting '${String(record.requestAccounting)}' does not match profile request accounting '${profile.requestAccounting}'`);
     }
   } else {
-    if (record.runtimeEvidence || record.externalCliEvidence) {
+    if (record.runtimeEvidence || record.externalCliEvidence || record.codexAppServerEvidence) {
       throw new Error(`direct transport ${profile.transport} may not use external CLI evidence`);
     }
     if (record.requestAccounting !== undefined && record.requestAccounting !== profile.requestAccounting) {

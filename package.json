@@ -1,6 +1,6 @@
 {
   "name": "rb-harness",
-  "version": "1.0.5",
+  "version": "1.0.7",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -13,7 +13,7 @@
     "check:package": "node scripts/check-standalone-package.mjs",
     "test": "npm run test --workspaces --if-present",
     "test:coverage": "npm run test:coverage --workspaces --if-present",
-    "install:user": "npm install --global --prefix \"$HOME/.local\" ./packages/core"
+    "install:user": "node scripts/install-user.mjs"
   },
   "engines": {
     "node": ">=20"

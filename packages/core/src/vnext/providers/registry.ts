@@ -22,6 +22,10 @@ import { recordOpenCodeApiConformance } from "./opencode/api-record.js";
 import { recordOpenCodeCliConformance } from "./opencode/cli-record.js";
 import { openAiAdapter } from "./openai/adapter.js";
 import { recordOpenAiConformance } from "./openai/record.js";
+import { codexSubscriptionAdapter } from "./openai/codex/adapter.js";
+import { resolveCodexSubscriptionAuth } from "./openai/codex/auth.js";
+import { CODEX_SUBSCRIPTION_CONFORMANCE_CASES } from "./openai/codex/fixtures.js";
+import { recordCodexSubscriptionConformance } from "./openai/codex/record.js";
 
 export class ProviderRegistryError extends Error {
   constructor(message: string) {
@@ -36,6 +40,7 @@ const ADAPTERS: readonly ProviderAdapter[] = [
   deepSeekAdapter,
   openCodeApiAdapter,
   openCodeCliAdapter,
+  codexSubscriptionAdapter,
   openAiAdapter,
 ];
 
@@ -70,7 +75,8 @@ export function resolveProviderAdapter(profileId: string, family?: string): Prov
 export function resolveProviderConformanceCases(profileId: string): readonly ConformanceCase[] {
   const profile = resolveProviderProfile(profileId);
   return profile.transport === "claude-code-cli" ? CLAUDE_CODE_CONFORMANCE_CASES
-    : profile.transport === "opencode-cli" ? OPENCODE_CLI_CONFORMANCE_CASES : CONFORMANCE_CASES;
+    : profile.transport === "opencode-cli" ? OPENCODE_CLI_CONFORMANCE_CASES
+      : profile.transport === "codex-app-server" ? CODEX_SUBSCRIPTION_CONFORMANCE_CASES : CONFORMANCE_CASES;
 }
 
 export async function resolveProviderCredential(profile: ModelProfile, selector?: string): Promise<ResolvedProviderCredential> {
@@ -95,6 +101,10 @@ export async function resolveProviderCredential(profile: ModelProfile, selector?
 }
 
 export async function resolveProviderAuth(profile: ModelProfile, selector?: string): Promise<ResolvedProviderAuth> {
+  if (profile.transport === "codex-app-server") {
+    if (selector) throw new ProviderRegistryError(`--credential is not accepted for external auth-store profile ${profile.id}`);
+    return resolveCodexSubscriptionAuth();
+  }
   if (profile.transport === "claude-code-cli") {
     if (selector) throw new ProviderRegistryError(`--credential is not accepted for ambient-session profile ${profile.id}`);
     return { kind: "ambient-session", id: CLAUDE_CODE_AMBIENT_AUTH_ID };
@@ -124,6 +134,10 @@ export async function recordProviderConformance(
     if (auth.kind !== "credential") throw new ProviderRegistryError(`profile ${profile.id} requires a vault credential`);
     const direct = await recordOpenAiConformance(profile, auth.credential);
     return { record: direct.record, providerRequests: measured(direct.providerRequests), transportInvocations: direct.providerRequests };
+  }
+  if (profile.family === "openai" && profile.transport === "codex-app-server") {
+    if (auth.kind !== "external-auth-store") throw new ProviderRegistryError(`profile ${profile.id} requires rb-codex-owned ChatGPT authentication`);
+    return recordCodexSubscriptionConformance(profile, auth);
   }
   if (profile.family === "anthropic" && profile.transport === "claude-code-cli") {
     if (auth.kind !== "ambient-session") throw new ProviderRegistryError(`profile ${profile.id} requires an ambient Claude Code session`);
@@ -155,10 +169,22 @@ export async function loadVerifiedProviderProfile(profileId: string, recordsRoot
   const adapter = resolveProviderAdapter(profileId);
   const record = await readConformanceRecord(recordsRoot, profileId);
   const result = validateConformanceRecord({ adapter, profile, cases: resolveProviderConformanceCases(profileId), record });
-  if ((profile.transport === "claude-code-cli" || profile.transport === "opencode-cli") && result.tier !== "UNSUPPORTED") {
-    const runtime = profile.transport === "claude-code-cli" ? await claudeCodeAdapter.runtimePreflight() : await openCodeCliAdapter.runtimePreflight();
-    if (!runtime.ok) throw new ProviderRegistryError(runtime.error.message);
-    assertProviderRuntimeVersion(profile, record, runtime.value.transportVersion);
+  if ((profile.transport === "claude-code-cli" || profile.transport === "opencode-cli" || profile.transport === "codex-app-server") && result.tier !== "UNSUPPORTED") {
+    if (profile.transport === "codex-app-server") {
+      const runtime = await codexSubscriptionAdapter.runtimePreflight();
+      if (!runtime.ok) throw new ProviderRegistryError(runtime.error.message);
+      assertProviderRuntimeVersion(profile, record, runtime.value.version);
+      const evidence = record.codexAppServerEvidence;
+      if (!evidence || evidence.managedRuntimeSha256 !== runtime.value.sha256
+        || evidence.semanticModeVersion !== runtime.value.semanticModeVersion
+        || evidence.semanticRuntimeVersion !== runtime.value.semanticRuntimeVersion) {
+        throw new ProviderRegistryError("managed RB-Codex runtime does not match the verified Codex Subscription record");
+      }
+    } else {
+      const runtime = profile.transport === "claude-code-cli" ? await claudeCodeAdapter.runtimePreflight() : await openCodeCliAdapter.runtimePreflight();
+      if (!runtime.ok) throw new ProviderRegistryError(runtime.error.message);
+      assertProviderRuntimeVersion(profile, record, runtime.value.transportVersion);
+    }
   }
   return {
     ...profile,
@@ -170,7 +196,7 @@ export async function loadVerifiedProviderProfile(profileId: string, recordsRoot
       normalizationsOnHappyPath: result.normalizationsOnHappyPath,
       verifiedRecord: true,
     },
-    ...(profile.transport === "claude-code-cli" || profile.transport === "opencode-cli" ? {
+    ...(profile.transport === "claude-code-cli" || profile.transport === "opencode-cli" || profile.transport === "codex-app-server" ? {
       runtimeModel: {
         transportProfileId: profile.transport === "claude-code-cli" ? CLAUDE_CODE_TRANSPORT_PROFILE_ID : profile.id,
         transportVersion: record.transportVersion!,
