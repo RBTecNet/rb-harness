@@ -65,6 +65,7 @@ try {
   const packedVersion = execFileSync(process.execPath, [resolve(extractedPackage, "dist/cli.js"), "--version"], {
     encoding: "utf8",
   }).trim();
+  assert(coreMetadata.version === "1.1.0", "Packed standalone is not the expected 1.1.0 migration candidate");
   assert(
     [rootMetadata.version, coreMetadata.version, packedMetadata.version, codexPlugin.version, claudePlugin.version, packedVersion]
       .every((version) => version === coreMetadata.version),

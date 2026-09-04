@@ -62,6 +62,38 @@ export interface ProgressiveInitCliRuntime {
   readonly execute: (options: ProgressiveInitOptions) => Promise<ProgressiveInitResult>;
 }
 
+export interface ProgressiveInitCliIo {
+  readonly inputIsTTY: boolean;
+  readonly outputIsTTY: boolean;
+  readonly terminalOutput?: NodeJS.WritableStream;
+  readonly write: (value: string) => void;
+  readonly ask: (prompt: string) => Promise<string>;
+}
+
+/** One authoritative provider/runtime composition shared by every CLI surface. */
+export function createProgressiveInitCliRuntime(io: ProgressiveInitCliIo): ProgressiveInitCliRuntime {
+  return {
+    ...io,
+    inspect: inspectProgressiveInit,
+    listProfiles: listProviderProfiles,
+    loadProfile: (profileId) => loadVerifiedProviderProfile(profileId, defaultConformanceRecordsRoot()),
+    adapterFor: resolveProviderAdapter,
+    authFor: resolveProviderAuth,
+    listClaudeCodeModels: async () => {
+      const runtime = await claudeCodeAdapter.runtimePreflight();
+      if (!runtime.ok) throw new Error(runtime.error.message);
+      return listClaudeCodeCompatibilityChoices({ transportVersion: runtime.value.transportVersion, recordsRoot: defaultConformanceRecordsRoot(), adapter: claudeCodeAdapter });
+    },
+    inspectClaudeCodeModel: async (requestedModel) => {
+      const runtime = await claudeCodeAdapter.runtimePreflight();
+      if (!runtime.ok) throw new Error(runtime.error.message);
+      return inspectClaudeCodeCompatibility({ requestedModel, transportVersion: runtime.value.transportVersion, recordsRoot: defaultConformanceRecordsRoot(), adapter: claudeCodeAdapter });
+    },
+    verifyClaudeCodeModel: async (requestedModel) => (await verifyClaudeCodeRuntimeCompatibility({ requestedModel, recordsRoot: defaultConformanceRecordsRoot(), adapter: claudeCodeAdapter })).target,
+    execute: runProgressiveInit,
+  };
+}
+
 export async function resolveProgressiveInitRequest(options: ProgressiveInitCliOptions): Promise<string | undefined> {
   if (options.requestFile && options.requestParts.length) throw new Error("use either request text or --file, not both");
   const value = options.requestFile ? await readFile(resolve(options.requestFile), "utf8") : options.requestParts.join(" ");
@@ -298,30 +330,13 @@ async function runProgressiveInitCommandResult(options: ProgressiveInitCliOption
   const interactive = !options.headless && Boolean(stdin.isTTY) && Boolean(stdout.isTTY);
   const terminal = interactive ? createInterface({ input: stdin, output: stdout }) : undefined;
   try {
-    return await executeProgressiveInitCommandResult(options, {
+    return await executeProgressiveInitCommandResult(options, createProgressiveInitCliRuntime({
       inputIsTTY: Boolean(stdin.isTTY),
       outputIsTTY: Boolean(stdout.isTTY),
       terminalOutput: stdout,
       write: (value) => stdout.write(value),
       ask: async (prompt) => terminal!.question(prompt),
-      inspect: inspectProgressiveInit,
-      listProfiles: listProviderProfiles,
-      loadProfile: (profileId) => loadVerifiedProviderProfile(profileId, defaultConformanceRecordsRoot()),
-      adapterFor: resolveProviderAdapter,
-      authFor: resolveProviderAuth,
-      listClaudeCodeModels: async () => {
-        const runtime = await claudeCodeAdapter.runtimePreflight();
-        if (!runtime.ok) throw new Error(runtime.error.message);
-        return listClaudeCodeCompatibilityChoices({ transportVersion: runtime.value.transportVersion, recordsRoot: defaultConformanceRecordsRoot(), adapter: claudeCodeAdapter });
-      },
-      inspectClaudeCodeModel: async (requestedModel) => {
-        const runtime = await claudeCodeAdapter.runtimePreflight();
-        if (!runtime.ok) throw new Error(runtime.error.message);
-        return inspectClaudeCodeCompatibility({ requestedModel, transportVersion: runtime.value.transportVersion, recordsRoot: defaultConformanceRecordsRoot(), adapter: claudeCodeAdapter });
-      },
-      verifyClaudeCodeModel: async (requestedModel) => (await verifyClaudeCodeRuntimeCompatibility({ requestedModel, recordsRoot: defaultConformanceRecordsRoot(), adapter: claudeCodeAdapter })).target,
-      execute: runProgressiveInit,
-    });
+    }));
   } finally {
     terminal?.close();
   }

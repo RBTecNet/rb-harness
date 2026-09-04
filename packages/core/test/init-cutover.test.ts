@@ -79,11 +79,11 @@ describe("canonical Init CLI routing", () => {
     expect(runLegacy).toHaveBeenCalledWith("0.6.2", { selectedWorkflow: "ai-context", dashboard: undefined, splash: false });
   });
 
-  it("preserves the exact request and keeps the Progressive wizard on textual presentation", async () => {
+  it("preserves the exact request and selects the Progressive Dashboard on a dual TTY", async () => {
     const project = await mkdtemp(resolve(tmpdir(), "rb-init-wizard-"));
     const request = "Crie um sistema de compras sem reescrever este pedido.";
     const io = scripted(["", "", "", "digitar", request, ".", ""]);
-    const configuration = await collectInitWizardConfiguration(io, {
+    const collected = await collectInitWizardConfiguration(io, {
       cwd: project,
       dashboard: true,
       profiles: [
@@ -97,14 +97,17 @@ describe("canonical Init CLI routing", () => {
         },
       ],
     });
+    if (collected.kind !== "configured") throw new Error("expected a configured Progressive Init");
+    const configuration = collected.configuration;
     expect(configuration.projectRoot).toBe(project);
     expect(configuration.profileId).toBe("anthropic:claude-code-cli:claude-opus-5");
     expect(configuration.requestParts).toEqual([request]);
-    expect(configuration.dashboard).toBe(false);
+    // The interactive Progressive route now renders the Progressive Dashboard.
+    expect(configuration.dashboard).toBe(true);
     expect(configuration.headless).toBe(false);
     expect(configuration.execute).toBe(true);
     expect(io.output.join("")).toContain("P1 Project Description");
-    expect(io.output.join("")).toContain("dashboard Progressive ainda não está implementado");
+    expect(io.output.join("")).not.toContain("ainda não está implementado");
     expect(io.output.join("")).not.toContain("--dashboard");
   });
 

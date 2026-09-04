@@ -200,13 +200,17 @@ describe("Wizard provider → model selector", () => {
   it("routes direct credentials by the exact selected profile but never asks Codex for an API credential", async () => {
     const projectRoot = await mkdtemp(`${tmpdir()}/rb-wizard-selector-`);
     const codexIo = scripted(["", "8", "1", "", "Build a small service.", ".", "n"]);
-    const codex = await collectInitWizardConfiguration(codexIo, { cwd: projectRoot, profiles: listProviderProfiles() });
+    const codexCollected = await collectInitWizardConfiguration(codexIo, { cwd: projectRoot, profiles: listProviderProfiles() });
+    if (codexCollected.kind !== "configured") throw new Error("expected a configured Progressive Init");
+    const codex = codexCollected.configuration;
     expect(codex.profileId).toBe("openai:codex:gpt-5.6-sol");
     expect(codex.credential).toBeUndefined();
     expect(codexIo.prompts.some((prompt) => prompt.startsWith("Credencial salva"))).toBe(false);
 
     const apiIo = scripted(["", "7", "1", "", "Build a small service.", ".", "work", "n"]);
-    const api = await collectInitWizardConfiguration(apiIo, { cwd: projectRoot, profiles: listProviderProfiles() });
+    const apiCollected = await collectInitWizardConfiguration(apiIo, { cwd: projectRoot, profiles: listProviderProfiles() });
+    if (apiCollected.kind !== "configured") throw new Error("expected a configured Progressive Init");
+    const api = apiCollected.configuration;
     expect(api.profileId).toBe("openai:gpt-5.6-sol");
     expect(api.credential).toBe("work");
     expect(apiIo.prompts.some((prompt) => prompt.startsWith("Credencial salva"))).toBe(true);

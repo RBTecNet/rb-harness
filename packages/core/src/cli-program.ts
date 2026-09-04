@@ -32,7 +32,12 @@ import {
   verifyArtifacts,
 } from "./artifact-verifier.js";
 import { runRootWizard } from "./root-wizard.js";
-import { runInitWizard } from "./init-wizard.js";
+import { runInitWizard, type InitWizardPreflightDecision } from "./init-wizard.js";
+import {
+  groupWizardProfiles,
+  wizardModelChoices,
+  wizardModelLabel,
+} from "./wizard-profile-selector.js";
 import { classifyRootCliArgs, formatIncompleteInitDirectMode, missingInitDirectInputs } from "./init-routing.js";
 import {
   defaultRequestForWorkflow,
@@ -65,6 +70,19 @@ import { runProgressiveInitCommand, type ProgressiveInitCliOptions } from "./vne
 import { runProgressiveInitWizardCommand } from "./vnext/progressive-init/wizard-orchestrator.js";
 import { parseProgressiveInitStage } from "./vnext/progressive-init/stages.js";
 import { listProviderProfiles } from "./vnext/providers/registry.js";
+import type { ModelProfile } from "./vnext/providers/contract.js";
+import {
+  askProgressiveConfirmation,
+  progressiveReinitConfirmationRequest,
+} from "./vnext/progressive-init/dashboard/confirm.js";
+import type { ProgressiveProviderIdentity } from "./vnext/progressive-init/dashboard/presentation.js";
+import {
+  progressiveDashboardIsAvailable,
+  runProgressiveInitDashboard,
+} from "./vnext/progressive-init/dashboard/run.js";
+import { createProgressiveTerminal } from "./vnext/progressive-init/dashboard/terminal.js";
+import { startProgressiveInitAfterConfirmation } from "./vnext/progressive-init/reinitialize.js";
+import { inspectProgressiveRalphReadiness } from "./vnext/progressive-init/readiness.js";
 import { verifyManagedCodexRuntime } from "./managed-codex-runtime.js";
 import { configureCodexRuntimeVerifier } from "./vnext/providers/openai/codex/managed-runtime.js";
 import { CODEX_EXTERNAL_LOGIN_PROVIDER } from "./vnext/providers/openai/codex/login.js";
@@ -108,12 +126,77 @@ async function runCanonicalInit(options: InitCliOptions & { readonly dashboard?:
   await runInitCommand({ ...semanticOptions, ...(dashboard ? { presentation: canonicalInitPresentation(semanticOptions.projectRoot) } : {}) });
 }
 
+/**
+ * Exact provider identity for presentation. The provider group and model labels
+ * come from the same selector the wizard used, and the profile ID is always the
+ * registry object's own value — never rebuilt from a display label.
+ */
+export function progressiveProviderIdentity(profile: ModelProfile): ProgressiveProviderIdentity {
+  const identity: ProgressiveProviderIdentity = {
+    providerLabel: profile.family,
+    modelLabel: wizardModelLabel(profile),
+    profileId: profile.id,
+    transport: profile.transport,
+    requestAccounting: profile.requestAccounting,
+  };
+  try {
+    const group = groupWizardProfiles(listProviderProfiles())
+      .groups.find((candidate) => candidate.profiles.some((entry) => entry.id === profile.id));
+    if (!group) return identity;
+    const choice = wizardModelChoices(group).find((entry) => entry.profile.id === profile.id);
+    return {
+      ...identity,
+      providerLabel: group.label,
+      ...(choice ? { modelLabel: choice.label } : {}),
+    };
+  } catch {
+    // Presentation never fails execution; the exact profile ID still identifies it.
+    return identity;
+  }
+}
+
+/**
+ * Authoritative already-Ralph-READY preflight for the interactive Progressive
+ * route. Declining performs zero mutation, zero purge, zero provider work and
+ * zero stage work; accepting records destructive intent only. The Core purge
+ * is deferred until the later final execution confirmation.
+ */
+async function progressiveInitReinitPreflight(projectRoot: string): Promise<InitWizardPreflightDecision> {
+  const readiness = await inspectProgressiveRalphReadiness(projectRoot);
+  if (!readiness.ready) return "continue";
+  if (!progressiveDashboardIsAvailable()) {
+    throw new Error("PROGRESSIVE_INIT_ALREADY_RALPH_READY: this project is already Ralph READY; reinitialization requires interactive confirmation");
+  }
+  const terminal = createProgressiveTerminal({ input: process.stdin, output: process.stdout, env: process.env });
+  let decision: string;
+  try {
+    decision = await askProgressiveConfirmation(terminal, progressiveReinitConfirmationRequest(projectRoot));
+  } finally {
+    terminal.close();
+  }
+  if (decision !== "yes") return "already-ralph-ready";
+  return "reinitialize";
+}
+
 async function runProgressiveInitWizardFrontDoor(options: { readonly dashboard?: boolean; readonly splash?: boolean }): Promise<void> {
   await runInitWizard(HARNESS_VERSION, {
     ...options,
     profiles: listProviderProfiles(),
-    execute: async ({ dashboard: _dashboard, execute: _execute, ...configuration }) => {
-      await runProgressiveInitWizardCommand(configuration);
+    preflight: progressiveInitReinitPreflight,
+    execute: async ({ dashboard, execute: _execute, reinitialize, ...configuration }) => {
+      // Last safe moment: all non-destructive configuration is complete and
+      // the developer has answered the final execution confirmation Yes.
+      await startProgressiveInitAfterConfirmation({ projectRoot: configuration.projectRoot, reinitialize }, async () => {
+        if (dashboard && progressiveDashboardIsAvailable()) {
+          await runProgressiveInitDashboard({
+            configuration,
+            version: HARNESS_VERSION,
+            describeProvider: progressiveProviderIdentity,
+          });
+          return;
+        }
+        await runProgressiveInitWizardCommand(configuration);
+      });
     },
   });
 }

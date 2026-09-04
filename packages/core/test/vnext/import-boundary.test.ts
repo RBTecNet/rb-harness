@@ -9,6 +9,9 @@ const LEGACY_ALLOWLIST = new Set([
   "credential-store",
   "anthropic-credential",
   "process-tree",
+  // Dependency-free presentation art: the canonical RB Harness capybara, shared
+  // so the Progressive Dashboard cannot drift into a different mascot.
+  "harness-mascot",
 ]);
 
 async function typescriptFiles(root: string): Promise<string[]> {

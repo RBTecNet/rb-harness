@@ -14,6 +14,12 @@ import {
   progressiveInitStageDefinition,
   type ProgressiveInitStage,
 } from "./stages.js";
+import {
+  assertProgressiveRalphReadiness,
+  assertProgressiveStageReadiness,
+  progressiveStageNeedsReadinessWork,
+  projectProgressiveRalphReadiness,
+} from "./readiness.js";
 
 export type ProgressiveInitWizardOptions = Omit<ProgressiveInitCliOptions, "stage">;
 
@@ -26,10 +32,33 @@ export interface ProgressiveInitWizardResult {
   readonly closureStatus: "fresh";
 }
 
+/**
+ * Additive presentation observability. Orchestration performs exactly the same
+ * work whether or not an observer is attached, and an observer never influences
+ * a stage decision, a skip, or closure.
+ */
+export type ProgressiveInitWizardObservation =
+  | { readonly kind: "run-started"; readonly alreadyComplete: boolean }
+  | { readonly kind: "stage-snapshot"; readonly snapshots: readonly ProgressiveStageSnapshot[] }
+  | { readonly kind: "stage-skipped"; readonly stage: ProgressiveInitStage }
+  | { readonly kind: "stage-started"; readonly stage: ProgressiveInitStage }
+  | { readonly kind: "stage-finished"; readonly stage: ProgressiveInitStage; readonly result: ProgressiveInitResult }
+  | { readonly kind: "stage-failed"; readonly stage: ProgressiveInitStage; readonly reason: string }
+  | { readonly kind: "run-completed"; readonly result: ProgressiveInitWizardResult };
+
 export interface ProgressiveInitWizardRuntime {
   readonly inspect: (root: string, request?: string) => Promise<readonly ProgressiveStageSnapshot[]>;
   readonly runStage: (options: ProgressiveInitCliOptions) => Promise<ProgressiveInitResult>;
   readonly write: (value: string) => void;
+  readonly observe?: (observation: ProgressiveInitWizardObservation) => void;
+}
+
+function notify(
+  runtime: ProgressiveInitWizardRuntime,
+  observation: ProgressiveInitWizardObservation,
+): void {
+  // Presentation must never fail semantic execution.
+  try { runtime.observe?.(observation); } catch { /* observation is cosmetic */ }
 }
 
 function failureMessage(error: unknown): string {
@@ -45,20 +74,6 @@ function snapshotFor(
   return snapshot;
 }
 
-function needsWork(snapshot: ProgressiveStageSnapshot): boolean {
-  return snapshot.status !== "complete-fresh"
-    || snapshot.stage === "project-phases" && snapshot.closureStatus !== "fresh";
-}
-
-function requireCompleted(snapshot: ProgressiveStageSnapshot): void {
-  if (snapshot.status !== "complete-fresh") {
-    throw new Error(`PROGRESSIVE_INIT_STAGE_DID_NOT_COMPLETE: ${snapshot.stage} is ${snapshot.status}`);
-  }
-  if (snapshot.stage === "project-phases" && snapshot.closureStatus !== "fresh") {
-    throw new Error(`PROGRESSIVE_INIT_CLOSURE_DID_NOT_COMPLETE: canonical closure is ${snapshot.closureStatus ?? "missing"}`);
-  }
-}
-
 /** Wizard-only orchestration. Stage semantics, prerequisites, freshness, and closure remain coordinator-owned. */
 export async function executeProgressiveInitWizard(
   options: ProgressiveInitWizardOptions,
@@ -66,45 +81,55 @@ export async function executeProgressiveInitWizard(
 ): Promise<ProgressiveInitWizardResult> {
   const request = await resolveProgressiveInitRequest(options);
   const initial = await runtime.inspect(options.projectRoot, request);
-  const alreadyComplete = PROGRESSIVE_INIT_STAGES.every((stage) => !needsWork(snapshotFor(initial, stage)));
+  const alreadyComplete = projectProgressiveRalphReadiness(initial).ready;
   const executedStages: ProgressiveInitStage[] = [];
   const skippedStages: ProgressiveInitStage[] = [];
   let semanticOperations = 0;
   let correctiveRegenerations = 0;
 
   runtime.write("\nProgressive Init\n\n");
+  notify(runtime, { kind: "run-started", alreadyComplete });
+  notify(runtime, { kind: "stage-snapshot", snapshots: initial });
   for (const [index, stage] of PROGRESSIVE_INIT_STAGES.entries()) {
     const label = progressiveInitStageDefinition(stage).label;
     const statuses = await runtime.inspect(options.projectRoot, request);
+    notify(runtime, { kind: "stage-snapshot", snapshots: statuses });
     const before = snapshotFor(statuses, stage);
-    if (!needsWork(before)) {
+    if (!progressiveStageNeedsReadinessWork(before)) {
       skippedStages.push(stage);
+      notify(runtime, { kind: "stage-skipped", stage });
       runtime.write(`[${index + 1}/${PROGRESSIVE_INIT_STAGES.length}] ${label}\n      COMPLETE (already fresh; skipped)\n\n`);
       continue;
     }
 
     runtime.write(`[${index + 1}/${PROGRESSIVE_INIT_STAGES.length}] ${label}\n      RUNNING\n`);
+    notify(runtime, { kind: "stage-started", stage });
     try {
       const result = await runtime.runStage({ ...options, stage });
       semanticOperations += result.semanticOperations;
       correctiveRegenerations += result.correctiveRegenerations;
-      const after = snapshotFor(await runtime.inspect(options.projectRoot, request), stage);
-      requireCompleted(after);
+      const afterStatuses = await runtime.inspect(options.projectRoot, request);
+      notify(runtime, { kind: "stage-snapshot", snapshots: afterStatuses });
+      const after = snapshotFor(afterStatuses, stage);
+      assertProgressiveStageReadiness(after);
       executedStages.push(stage);
+      notify(runtime, { kind: "stage-finished", stage, result });
       runtime.write("      COMPLETE\n\n");
     } catch (error) {
+      notify(runtime, { kind: "stage-failed", stage, reason: failureMessage(error) });
       runtime.write(`\nProgressive Init stopped at:\n${stage}\n\nReason:\n${failureMessage(error)}\n`);
       throw error;
     }
   }
 
   const finalStatuses = await runtime.inspect(options.projectRoot, request);
-  for (const stage of PROGRESSIVE_INIT_STAGES) requireCompleted(snapshotFor(finalStatuses, stage));
+  notify(runtime, { kind: "stage-snapshot", snapshots: finalStatuses });
+  assertProgressiveRalphReadiness(finalStatuses);
   runtime.write(alreadyComplete
     ? "Progressive Init already complete and fresh.\nCanonical closure: COMPLETE\nRalph: READY\n"
     : "Progressive Init complete.\nCanonical closure: COMPLETE\nRalph: READY\n");
   runtime.write(`Semantic operations: ${semanticOperations}\nCorrective regenerations: ${correctiveRegenerations}\n`);
-  return {
+  const result: ProgressiveInitWizardResult = {
     executedStages,
     skippedStages,
     semanticOperations,
@@ -112,6 +137,8 @@ export async function executeProgressiveInitWizard(
     alreadyComplete,
     closureStatus: "fresh",
   };
+  notify(runtime, { kind: "run-completed", result });
+  return result;
 }
 
 export async function runProgressiveInitWizardCommand(
