@@ -24,6 +24,7 @@ import {
   progressiveTextInputView,
 } from "../src/vnext/progressive-init/dashboard/text-input.js";
 import { character, fakeProgressiveTerminal, fakeStreams, key } from "./support/progressive-dashboard.js";
+import { HARNESS_VERSION } from "../src/version.js";
 
 const flush = (): Promise<void> => new Promise<void>((resolve) => void setTimeout(resolve, 0));
 
@@ -76,7 +77,7 @@ function controllerFor(terminal = fakeProgressiveTerminal()) {
     terminal,
     controller: createProgressiveDashboardController({
       terminal,
-      version: "1.0.7",
+      version: HARNESS_VERSION,
       projectRoot: "/project",
       runId: "run-a",
     }),
@@ -324,7 +325,7 @@ describe("Progressive Dashboard lifecycle safety", () => {
     const terminal = fakeProgressiveTerminal();
     let cancelled = 0;
     const controller = createProgressiveDashboardController({
-      terminal, version: "1.0.7", projectRoot: "/project", runId: "run-a",
+      terminal, version: HARNESS_VERSION, projectRoot: "/project", runId: "run-a",
       onCancel: () => { cancelled += 1; },
     });
     controller.presentQuestion(openEvidence(), "project-description");

@@ -20,6 +20,7 @@ import { createProgressiveSelectionState } from "../src/vnext/progressive-init/d
 import { visibleWidth } from "../src/vnext/progressive-init/dashboard/text.js";
 import type { ProgressiveTerminalCapabilities } from "../src/vnext/progressive-init/dashboard/terminal.js";
 import type { InterviewQuestionEvidence } from "../src/vnext/interview.js";
+import { HARNESS_VERSION } from "../src/version.js";
 
 const CAPABILITIES: ProgressiveTerminalCapabilities = { width: 100, height: 40, color: false, unicode: true };
 
@@ -43,7 +44,7 @@ function complete(closure: "fresh" | "stale" | undefined = "fresh"): Progressive
 }
 
 function render(state: ProgressivePresentationState, capabilities = CAPABILITIES, extra: Record<string, unknown> = {}): string {
-  return renderProgressiveDashboard({ state, capabilities, version: "1.0.7", ...extra } as never);
+  return renderProgressiveDashboard({ state, capabilities, version: HARNESS_VERSION, ...extra } as never);
 }
 
 function longOptions(count: number): ProgressiveInterviewOption[] {
@@ -107,8 +108,8 @@ describe("Progressive Dashboard renderer", () => {
     expect(large).toContain("▀");
     expect(small).not.toContain("▀");
     expect(small).toContain("P4");
-    expect(small).toMatch(/Sem ops 0/);
-    expect(small).not.toMatch(/Sem(?:antic)?(?: operations)? 0\//);
+    expect(small).toMatch(/semânticas 0/);
+    expect(small).not.toMatch(/semânticas 0\//);
   });
 
   it("renders the canonical capybara and never another rodent", () => {
@@ -137,8 +138,8 @@ describe("Progressive Dashboard renderer", () => {
       { kind: "stage-started", stage: "database-schema" },
     ]);
     const frame = render(state);
-    expect(frame).toMatch(/P3 . stale RUNNING/);
-    expect(frame).toMatch(/P1 . fresh/);
+    expect(frame).toMatch(/P3 . Database Schema · stale · running/);
+    expect(frame).toMatch(/P1 . Project Description · fresh/);
   });
 
   it("shows provider, model and the exact registry profile ID verbatim", () => {
@@ -176,13 +177,18 @@ describe("Progressive Dashboard renderer", () => {
       },
     ]);
     const frame = render(state, { ...CAPABILITIES, width: 180 });
-    expect(frame).toContain("Semantic operations 6");
-    expect(frame).toContain("Transport invocations 6");
-    expect(frame).toContain("Corrective run 1");
-    expect(frame).toContain("Corrective slice 1");
-    expect(frame).not.toMatch(/Semantic(?: operations)? 6\/5|Transport(?: invocations)? 6\/7/);
+    expect(frame).toContain("OPERAÇÕES SEMÂNTICAS");
+    expect(frame).toContain("INVOCAÇÕES");
+    expect(frame).toContain("CORREÇÕES · RUN");
+    expect(frame).toContain("CORREÇÕES · SLICE");
+    expect(frame).toMatch(/◇ 6/);
+    expect(frame).toMatch(/↯ 6/);
+    expect(frame).toMatch(/↺ 1/);
+    // A Progressive ceiling does not exist, so no cell ever prints a denominator.
+    expect(frame).not.toMatch(/[◇↯↺] \d+\s*\/\s*\d+/);
     // Unmeasured stays unmeasured; a retry counter is never fabricated from events.
-    expect(frame).toContain("Transport retry —");
+    expect(frame).toContain("RETENTATIVAS");
+    expect(frame).toMatch(/◌ —/);
     expect(frame).not.toMatch(/\bRetry \d+\/\d+\b/);
   });
 
@@ -266,6 +272,37 @@ describe("Progressive Dashboard renderer", () => {
     expect(frame).toContain("Which persistence disposition");
     expect(frame).toContain("Not persisted");
     expect(frame).not.toContain("▀");
+  });
+
+  it("fills the viewport exactly so the frame never scrolls the wordmark away", () => {
+    const state = initialProgressivePresentationState("run", "/project");
+    for (const [width, height] of [[80, 24], [100, 30], [120, 40]] as const) {
+      const frame = render(state, { width, height, color: false, unicode: true });
+      // A trailing newline on the last row costs the terminal one line of scroll,
+      // and the row it eats is the top of the header.
+      expect(frame.endsWith("\n"), `${width}x${height} must not end with a newline`).toBe(false);
+      expect(frame.split("\n"), `${width}x${height} must fill exactly ${height} rows`).toHaveLength(height);
+    }
+  });
+
+  it("keeps the wordmark to two rows and the header to a short block", () => {
+    const state = initialProgressivePresentationState("run", "/project");
+    const rows = render(
+      state,
+      { width: 100, height: 30, color: false, unicode: true },
+      { version: "9.9.9" },
+    ).split("\n");
+    expect(rows[0]).toContain("█▀█ █▄▄");
+    expect(rows[1]).toContain("█▀▄ █▄█");
+    // Subtitle and version share the third row, so the header costs three rows.
+    expect(rows[2]).toContain("INIT · PROGRESSIVO · HARNESS CONTROL PLANE");
+    expect(rows[2]).toContain("v9.9.9");
+  });
+
+  it("stacks the summary instead of cutting a column heading into a fragment", () => {
+    const state = initialProgressivePresentationState("run", "/project");
+    const frame = render(state, { width: 80, height: 24, color: false, unicode: true });
+    expect(frame).not.toMatch(/EXECU[ÇC]…|PROGRE…|ETAPA A…/);
   });
 
   it("falls back to ASCII glyphs on a terminal without Unicode", () => {

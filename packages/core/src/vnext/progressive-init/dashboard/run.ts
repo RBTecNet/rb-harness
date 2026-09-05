@@ -224,7 +224,10 @@ export async function runProgressiveInitDashboard(
             if (observation.stage === "project-phases") controller.emit({ kind: "closure-completed" });
             return;
           case "stage-failed":
-            controller.rejectPendingAnswer(sanitizeProgressiveFailure(observation.reason));
+            // The stage failure is the authoritative outcome and is reported as
+            // itself. The pending prompt is only released, never rewritten into
+            // an answer rejection Core did not issue.
+            controller.abandonPendingInput();
             controller.emit({ kind: "stage-failed", stage: observation.stage, reason: observation.reason });
             return;
           default:
@@ -249,6 +252,8 @@ export async function runProgressiveInitDashboard(
     // dashboard is started from this path.
     return { wizard, ralphReady: readiness.ready, ralphExecutions: 0 };
   } catch (error) {
+    // Same rule at run scope: release the prompt, report the failure as itself.
+    controller.abandonPendingInput();
     controller.emit({
       kind: "run-failed",
       reason: error instanceof ProgressiveDashboardCancelled

@@ -33,6 +33,8 @@ export interface ProgressiveTerminalCapabilities {
   readonly height: number;
   readonly color: boolean;
   readonly unicode: boolean;
+  /** 24-bit paint. Absent means the renderer keeps the basic ANSI palette. */
+  readonly trueColor?: boolean;
 }
 
 export type ProgressiveKeyName =
@@ -225,6 +227,7 @@ export function createProgressiveTerminal(options: ProgressiveTerminalOptions): 
         height: Math.max(8, Math.floor(output.rows || options.defaultHeight || 32)),
         color: !("NO_COLOR" in env) && env.TERM !== "dumb",
         unicode: env.TERM !== "dumb",
+        trueColor: !("NO_COLOR" in env) && /truecolor|24bit/i.test(env.COLORTERM ?? ""),
       };
     },
     frame(content: string): void {

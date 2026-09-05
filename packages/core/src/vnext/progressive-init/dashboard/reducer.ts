@@ -145,7 +145,14 @@ export function reduceProgressivePresentation(
         stages: advanced.stages.map((entry) => (entry.activity === "failed" ? entry : { ...entry, activity: "done" })),
       };
     case "run-failed":
-      return { ...advanced, phase: "failed", failure: sanitizeProgressiveText(event.reason) };
+      return {
+        ...advanced,
+        phase: "failed",
+        failure: sanitizeProgressiveText(event.reason),
+        // A terminal failure ends the interview surface: Core is no longer waiting
+        // for an answer, so a retained question would offer a retry that cannot reach it.
+        interview: undefined,
+      };
     case "stage-snapshot":
       return { ...advanced, stages: applySnapshots(advanced, event.snapshots) };
     case "stage-started":
@@ -178,6 +185,9 @@ export function reduceProgressivePresentation(
         phase: "failed",
         failure: sanitizeProgressiveText(event.reason),
         stages: activity(advanced, event.stage, "failed"),
+        // A terminal failure ends the interview surface: Core is no longer waiting
+        // for an answer, so a retained question would offer a retry that cannot reach it.
+        interview: undefined,
       };
     case "interview-question-presented": {
       const question = sanitizeQuestion(event.question);
@@ -240,6 +250,7 @@ export function reduceProgressivePresentation(
         phase: "failed",
         stages: activity(advanced, event.stage, "failed"),
         failure: advanced.failure ?? "corrective regeneration exhausted",
+        interview: undefined,
       };
     case "provider-selected":
       return {
@@ -269,6 +280,7 @@ export function reduceProgressivePresentation(
         ...advanced,
         phase: "failed",
         closure: { started: true, completed: false, failureReason: sanitizeProgressiveText(event.reason, 400) },
+        interview: undefined,
       };
     case "readiness":
       return {

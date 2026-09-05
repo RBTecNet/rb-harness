@@ -229,7 +229,7 @@ describe("Progressive Dashboard presentation state", () => {
     expect(state.failure).not.toContain("abcdef0123456789");
     expect(state.failure).not.toContain("sk-livesecretvalue0");
     expect(state.failure).toContain("[redacted-credential]");
-    expect(sanitizeProgressiveText("line one\nline two")).toBe("line one line two");
+    expect(sanitizeProgressiveText("line\u0000one\nline two")).toBe("line one line two");
   });
 
   it("projects Core choices as logical options with the recommendation marked", () => {

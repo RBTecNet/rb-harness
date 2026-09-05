@@ -35,6 +35,7 @@ import {
   supportedFixtureProfile,
   type FakeProgressiveTerminal,
 } from "./support/progressive-dashboard.js";
+import { HARNESS_VERSION } from "../src/version.js";
 
 const PROFILE_ID = "deepseek:deepseek-v4-pro";
 const TEXT_ANSWER = "Hello, <name>!";
@@ -153,7 +154,7 @@ describe("Progressive Dashboard full lifecycle", () => {
     const harness = dashboardHarness();
     const result = await runProgressiveInitDashboard({
       configuration: wizardOptions(projectRoot),
-      version: "1.0.7",
+      version: HARNESS_VERSION,
       terminal: harness.terminal,
       runId: "run-a",
       cliRuntime: harness.cliRuntime,
@@ -210,7 +211,7 @@ describe("Progressive Dashboard full lifecycle", () => {
     const first = dashboardHarness();
     await runProgressiveInitDashboard({
       configuration: wizardOptions(projectRoot),
-      version: "1.0.7",
+      version: HARNESS_VERSION,
       terminal: first.terminal,
       runId: "run-a",
       cliRuntime: first.cliRuntime,
@@ -219,7 +220,7 @@ describe("Progressive Dashboard full lifecycle", () => {
     const second = dashboardHarness();
     const rerun = await runProgressiveInitDashboard({
       configuration: wizardOptions(projectRoot),
-      version: "1.0.7",
+      version: HARNESS_VERSION,
       terminal: second.terminal,
       runId: "run-b",
       cliRuntime: second.cliRuntime,
@@ -239,7 +240,7 @@ describe("Progressive Dashboard full lifecycle", () => {
     const first = dashboardHarness();
     await runProgressiveInitDashboard({
       configuration: wizardOptions(projectRoot),
-      version: "1.0.7",
+      version: HARNESS_VERSION,
       terminal: first.terminal,
       runId: "run-a",
       cliRuntime: first.cliRuntime,
@@ -254,7 +255,7 @@ describe("Progressive Dashboard full lifecycle", () => {
     const second = dashboardHarness();
     const resumed = await runProgressiveInitDashboard({
       configuration: wizardOptions(projectRoot),
-      version: "1.0.7",
+      version: HARNESS_VERSION,
       terminal: second.terminal,
       runId: "run-b",
       cliRuntime: second.cliRuntime,
@@ -276,7 +277,7 @@ describe("Progressive Dashboard full lifecycle", () => {
     let captured: ProgressiveDashboardController | undefined;
     await expect(runProgressiveInitDashboard({
       configuration: wizardOptions(projectRoot),
-      version: "1.0.7",
+      version: HARNESS_VERSION,
       terminal: harness.terminal,
       runId: "run-a",
       cliRuntime: (bindings) => {
@@ -304,7 +305,7 @@ describe("Progressive Dashboard full lifecycle", () => {
     const harness = dashboardHarness({ terminal });
     await expect(runProgressiveInitDashboard({
       configuration: wizardOptions(projectRoot),
-      version: "1.0.7",
+      version: HARNESS_VERSION,
       terminal,
       runId: "run-a",
       cliRuntime: (bindings) => {
@@ -330,7 +331,7 @@ describe("Progressive Dashboard full lifecycle", () => {
     let capturedA: ProgressiveDashboardController | undefined;
     await runProgressiveInitDashboard({
       configuration: wizardOptions(projectRoot),
-      version: "1.0.7",
+      version: HARNESS_VERSION,
       terminal: runA.terminal,
       runId: "run-a",
       cliRuntime: (bindings) => {
@@ -348,7 +349,7 @@ describe("Progressive Dashboard full lifecycle", () => {
     let capturedB: ProgressiveDashboardController | undefined;
     const resultB = await runProgressiveInitDashboard({
       configuration: wizardOptions(projectRoot),
-      version: "1.0.7",
+      version: HARNESS_VERSION,
       terminal: runB.terminal,
       runId: "run-b",
       cliRuntime: (bindings) => {
@@ -380,7 +381,7 @@ describe("Progressive Dashboard reinitialization end to end", () => {
     const harness = dashboardHarness();
     await runProgressiveInitDashboard({
       configuration: wizardOptions(projectRoot),
-      version: "1.0.7",
+      version: HARNESS_VERSION,
       terminal: harness.terminal,
       runId: "run-a",
       cliRuntime: harness.cliRuntime,
@@ -422,7 +423,7 @@ describe("Progressive Dashboard reinitialization end to end", () => {
     const first = dashboardHarness();
     await runProgressiveInitDashboard({
       configuration: wizardOptions(projectRoot),
-      version: "1.0.7",
+      version: HARNESS_VERSION,
       terminal: first.terminal,
       runId: "run-a",
       cliRuntime: first.cliRuntime,
@@ -440,7 +441,7 @@ describe("Progressive Dashboard reinitialization end to end", () => {
       purgedBeforeExecution = true;
       return runProgressiveInitDashboard({
         configuration: wizardOptions(projectRoot),
-        version: "1.0.7",
+        version: HARNESS_VERSION,
         terminal: second.terminal,
         runId: "run-b",
         cliRuntime: second.cliRuntime,

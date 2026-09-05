@@ -16,6 +16,7 @@ import {
   PROGRESSIVE_FIXTURE_REQUEST,
   ProgressiveFixtureAdapter,
 } from "./support/progressive-dashboard.js";
+import { HARNESS_VERSION } from "../src/version.js";
 
 const originalCredentialHome = process.env.RB_CREDENTIAL_HOME;
 const originalHome = process.env.HOME;
@@ -100,7 +101,7 @@ describe.sequential("Progressive Dashboard production provider runtime", () => {
           headless: false,
           deadlineSeconds: 120,
         },
-        version: "1.0.7",
+        version: HARNESS_VERSION,
         terminal: autoDrivenTerminal(),
         describeProvider: (profile) => {
           identities.push(profile.id);
