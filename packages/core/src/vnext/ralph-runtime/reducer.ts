@@ -1,10 +1,11 @@
 import type { AttemptState, Finding, PhaseState, RalphRuntimeState, TaskState } from "./contracts.js";
-import type { RalphEvent } from "./events.js";
+import { RALPH_EVENT_SCHEMA, type RalphEvent } from "./events.js";
 import { deriveAllPhases, assertRunCombination, assertTaskState, canCompleteRun, runHasEligibleWork, runHasKnownBlockingCondition } from "./state.js";
 import { transitionFinding } from "./findings.js";
 import { assertAttemptBaseFingerprint } from "./checkpoints.js";
 
 export function reduceRalphEvent(state: RalphRuntimeState, event: RalphEvent): RalphRuntimeState {
+  if (event.schemaVersion !== RALPH_EVENT_SCHEMA) throw new Error("RALPH_EVENT_UNSUPPORTED_SCHEMA");
   if (event.runId !== state.runId) throw new Error("RALPH_REDUCER_FOREIGN_RUN");
   if (event.sequence !== state.lastSequence + 1) throw new Error("RALPH_REDUCER_SEQUENCE_MISMATCH");
   if (event.previousEventHash !== state.lastEventHash) throw new Error("RALPH_REDUCER_HASH_CHAIN_MISMATCH");
