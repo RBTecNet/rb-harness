@@ -129,6 +129,8 @@ export interface ProjectDescriptionFinding {
   readonly message: string;
 }
 
+export type ProjectDescriptionCapabilityWorkflowInput = Pick<ProjectDescription, "capabilities" | "workflows">;
+
 export type ProjectDescriptionOutcome<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly findings: readonly ProjectDescriptionFinding[] };
@@ -312,6 +314,18 @@ export function progressiveRequestBackedStatement(evidence: string): string {
 
 function add(findings: ProjectDescriptionFinding[], code: ProjectDescriptionFinding["code"], pointer: string, message: string): void {
   findings.push({ code, pointer, message });
+}
+
+/** Candidate/P2 policy boundary; intentionally not part of legacy document parsing. */
+export function validateProjectDescriptionCapabilityWorkflowConsistency(
+  value: ProjectDescriptionCapabilityWorkflowInput,
+): readonly ProjectDescriptionFinding[] {
+  const covered = new Set(value.workflows.flatMap((workflow) => workflow.capabilityKeys));
+  return value.capabilities.flatMap((capability, index) => covered.has(capability.key) ? [] : [{
+    code: "semantic" as const,
+    pointer: `/capabilities/${index}`,
+    message: `approved capability '${capability.key}' is not referenced by any approved workflow; project-description must be corrected`,
+  }]);
 }
 
 function validateKeys(values: readonly { readonly key: string }[], pointer: string, findings: ProjectDescriptionFinding[]): void {

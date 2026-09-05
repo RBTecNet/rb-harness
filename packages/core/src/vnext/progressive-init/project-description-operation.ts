@@ -6,6 +6,7 @@ import {
   PROJECT_DESCRIPTION_SCHEMA,
   decodeProjectDescriptionWire,
   resolveProjectDescriptionWire,
+  validateProjectDescriptionCapabilityWorkflowConsistency,
   validateProjectDescriptionPreservation,
   type ProjectDescription,
   type ProjectDescriptionFinding,
@@ -20,6 +21,7 @@ export const PROJECT_DESCRIPTION_INSTRUCTIONS = [
   "Every material ambiguity must be a stage-specific question with one concrete recommendation, rationale, and alternatives.",
   "Core materializes every resolved question as an authority-bearing determination. Do not restate interview-backed determinations in determinations.",
   "Provider-authored determinations may use only request or model-default authority.",
+  "Every approved capability must be referenced by at least one approved workflow.",
   "A RIGID product or architecture determination cannot use silent model-default authority.",
   "For source.kind=request, omit statement and select the smallest useful complete contiguous request clause or span that expresses the fact to preserve; Core derives the authority-bearing statement from verified evidence.",
   "Do not present interpretations beyond the literal request span as request authority; use model-default where permitted or a material question where stronger authority is required.",
@@ -94,7 +96,12 @@ export async function runProjectDescriptionOperation(options: ProjectDescription
     if (!decoded.ok) findings = decoded.findings;
     else {
       const resolved = resolveProjectDescriptionWire(decoded.value, await resolveQuestions(decoded.value, options), options.existing);
-      findings = resolved.ok ? validateProjectDescriptionPreservation(options.existing, resolved.value) : resolved.findings;
+      if (!resolved.ok) findings = resolved.findings;
+      else {
+        const consistency = validateProjectDescriptionCapabilityWorkflowConsistency(resolved.value);
+        const preservation = validateProjectDescriptionPreservation(options.existing, resolved.value);
+        findings = [...consistency, ...preservation];
+      }
       if (resolved.ok && !findings.length) {
         return { value: resolved.value, semanticOperations: ordinal + 1, correctiveRegenerations: ordinal, findingsByAttempt };
       }

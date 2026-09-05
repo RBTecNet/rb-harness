@@ -5,7 +5,10 @@ import { describe, expect, it, vi } from "vitest";
 import { inspectProgressiveInit, runProgressiveInit } from "../../src/vnext/progressive-init/coordinator.js";
 import { executeProgressiveInitCommand, runProgressiveInitCommand, type ProgressiveInitCliRuntime } from "../../src/vnext/progressive-init/cli.js";
 import { parseProjectDescriptionDocument, renderProjectDescriptionDocument } from "../../src/vnext/progressive-init/project-description-document.js";
-import type { ProjectDescription } from "../../src/vnext/progressive-init/project-description-ir.js";
+import {
+  validateProjectDescriptionCapabilityWorkflowConsistency,
+  type ProjectDescription,
+} from "../../src/vnext/progressive-init/project-description-ir.js";
 import { formatProgressiveStagePresentation } from "../../src/vnext/progressive-init/coordinator.js";
 import { formatInteractiveQuestion, pendingQuestionEvidence, selectInterviewAnswer, type InterviewQuestionEvidence, type ProposedQuestion } from "../../src/vnext/interview.js";
 import {
@@ -266,6 +269,18 @@ const common = (projectRoot: string, adapter: Adapter) => ({
 
 async function seedProject(projectRoot: string, payload: ReturnType<typeof projectPayload> = projectPayload()): Promise<void> {
   await runProgressiveInit({ ...common(projectRoot, new Adapter([payload])), selectedStage: "project-description" });
+}
+
+async function seedLegacyOrphanProject(projectRoot: string): Promise<string> {
+  await seedProject(projectRoot);
+  const path = resolve(projectRoot, ".spec", "init", "project-description.md");
+  const source = await readFile(path, "utf8");
+  const legacy = source.replace(
+    "## Workflows\n",
+    "### Capability `orphan-capability`\n\nStatement: \"An approved capability without a workflow.\"\n\n## Workflows\n",
+  );
+  await writeFile(path, legacy);
+  return legacy;
 }
 
 async function projectionFor(projectRoot: string): Promise<UserStoriesUpstreamProjection> {
@@ -881,11 +896,32 @@ describe("Progressive Init Phase 2 user-stories", () => {
     expect(JSON.stringify(projection)).not.toContain("model-default");
   });
 
-  it("blocks orphan capabilities before any user-stories provider call", async () => {
+  it("keeps a legacy orphan artifact parseable and P1-fresh while P2 blocks it before any provider call", async () => {
     const projectRoot = await root();
-    const payload = projectPayload();
-    payload.capabilities.push({ key: "orphan-capability", statement: "An approved capability without a workflow." });
-    await seedProject(projectRoot, payload);
+    const legacy = await seedLegacyOrphanProject(projectRoot);
+    const path = resolve(projectRoot, ".spec", "init", "project-description.md");
+    const parsed = parseProjectDescriptionDocument(legacy);
+    expect(parsed.value.capabilities.map((capability) => capability.key)).toContain("orphan-capability");
+    expect((await inspectProgressiveInit(projectRoot, REQUEST))[0]).toMatchObject({
+      stage: "project-description",
+      status: "complete-fresh",
+    });
+
+    const p1Adapter = new Adapter([]);
+    let p1Writes = 0;
+    expect(await runProgressiveInit({
+      ...common(projectRoot, p1Adapter),
+      selectedStage: "project-description",
+      beforeWrite: () => { p1Writes += 1; },
+    })).toMatchObject({ semanticOperations: 0, correctiveRegenerations: 0 });
+    expect(p1Adapter.requests).toHaveLength(0);
+    expect(p1Writes).toBe(0);
+    expect(await readFile(path, "utf8")).toBe(legacy);
+
+    const projection = userStoriesUpstreamProjection(parsed.value);
+    const shared = validateProjectDescriptionCapabilityWorkflowConsistency(projection);
+    const upstream = validateUserStoriesUpstreamReadiness(projection);
+    expect(upstream).toEqual(shared.map(({ pointer, message }) => ({ code: "upstream", pointer, message })));
     const adapter = new Adapter([emptyQuestions(), candidate()]);
     await expect(runProgressiveInit({ ...common(projectRoot, adapter), selectedStage: "user-stories" }))
       .rejects.toThrow(/USER_STORIES_UPSTREAM_NOT_READY.*orphan-capability/);

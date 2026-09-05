@@ -15,6 +15,8 @@ import {
   projectDescriptionForPersistence,
   projectDescriptionSemanticSha256,
   resolveProjectDescriptionWire,
+  validateProjectDescription,
+  validateProjectDescriptionCapabilityWorkflowConsistency,
   type ProjectDescription,
 } from "../../src/vnext/progressive-init/project-description-ir.js";
 import { runProjectDescriptionOperation } from "../../src/vnext/progressive-init/project-description-operation.js";
@@ -52,6 +54,33 @@ const questionPayload = () => ({
     alternatives: ["Include all future capabilities"],
   }],
 });
+
+const orphanCapabilityPayload = (covered = false) => {
+  const candidate = structuredClone(payload());
+  candidate.capabilities.push({
+    key: "reference-design-fidelity",
+    statement: "Preserve fidelity to the approved reference design.",
+  });
+  if (covered) candidate.workflows[0]!.capabilityKeys.push("reference-design-fidelity");
+  return candidate;
+};
+
+const combinedConsistencyAndPreservationViolationPayload = () => {
+  const candidate = orphanCapabilityPayload();
+  candidate.project.objective = "Replace the developer-owned project objective with a provider-authored objective.";
+  return candidate;
+};
+
+const combinedViolationCorrectedPayload = () => {
+  const candidate = orphanCapabilityPayload();
+  candidate.workflows.push({
+    key: "reference-design-review",
+    statement: "A developer reviews implementation fidelity against the approved reference design.",
+    actorKeys: ["developer"],
+    capabilityKeys: ["reference-design-fidelity"],
+  });
+  return candidate;
+};
 
 const manualDogfoodQuestionPayload = () => ({
   ...payload(),
@@ -587,5 +616,156 @@ describe("Progressive Init Phase 1", () => {
     const result = await runProgressiveInit({ ...common(projectRoot, adapter), selectedStage: "project-description" });
     expect(result).toMatchObject({ semanticOperations: 2, correctiveRegenerations: 1 }); expect(adapter.requests[1]?.input).toContain("Regenerate the COMPLETE"); expect(adapter.requests[1]?.input).toContain("/actors");
     expect(CANONICAL_INIT_RECOVERY_BUDGET).toEqual({ maxCorrectiveRegenerationsPerSlice: 2, maxCorrectiveRegenerationsPerRun: 3, maxSemanticOperationsPerRun: 5, maxTransportInvocationsPerRun: 7, maxTransportRetriesPerSemanticOperation: 1, maxTransportRetriesPerRun: 2 });
+  });
+
+  it("rejects an orphan capability candidate, requests bounded correction, and persists only the covered candidate", async () => {
+    const projectRoot = await root();
+    const adapter = new Adapter([orphanCapabilityPayload(), orphanCapabilityPayload(true)]);
+    let beforeWriteCalls = 0;
+    const result = await runProgressiveInit({
+      ...common(projectRoot, adapter),
+      selectedStage: "project-description",
+      beforeWrite: () => { beforeWriteCalls += 1; },
+    });
+
+    expect(result).toMatchObject({ semanticOperations: 2, correctiveRegenerations: 1 });
+    expect(beforeWriteCalls).toBe(1);
+    const recovery = JSON.parse(adapter.requests[1]!.input).recovery.previousFindings;
+    expect(recovery).toContainEqual({
+      pointer: "/capabilities/1",
+      message: "approved capability 'reference-design-fidelity' is not referenced by any approved workflow; project-description must be corrected",
+    });
+    const persisted = parseProjectDescriptionDocument(await readFile(result.artifactPath!, "utf8")).value;
+    expect(persisted.workflows.some((workflow) => workflow.capabilityKeys.includes(semanticKey("reference-design-fidelity")!))).toBe(true);
+  });
+
+  it("keeps a covered candidate on the single-operation path", async () => {
+    const projectRoot = await root();
+    const adapter = new Adapter([payload()]);
+
+    const result = await runProgressiveInit({ ...common(projectRoot, adapter), selectedStage: "project-description" });
+
+    expect(result).toMatchObject({ semanticOperations: 1, correctiveRegenerations: 0 });
+    expect(adapter.requests).toHaveLength(1);
+  });
+
+  it("fails after orphan capability recovery exhaustion without persistence or downstream execution", async () => {
+    const projectRoot = await root();
+    const adapter = new Adapter([orphanCapabilityPayload(), orphanCapabilityPayload()]);
+    let beforeWriteCalls = 0;
+
+    await expect(runProgressiveInit({
+      ...common(projectRoot, adapter),
+      beforeWrite: () => { beforeWriteCalls += 1; },
+    })).rejects.toThrow(/PROJECT_DESCRIPTION_INVALID_AFTER_RECOVERY.*reference-design-fidelity/);
+
+    expect(adapter.requests).toHaveLength(2);
+    expect(adapter.requests.every((request) => request.slice === "project-description")).toBe(true);
+    expect(beforeWriteCalls).toBe(0);
+    await expect(readFile(resolve(projectRoot, ".spec", "init", "project-description.md"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(resolve(projectRoot, ".spec", "init", "user-stories.md"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("keeps an unreferenced actor valid because consistency is capability-to-workflow only", async () => {
+    const projectRoot = await root();
+    const candidate = structuredClone(payload());
+    candidate.actors.push({ key: "observer", name: "Observer", responsibility: "Observes project outcomes." });
+    const adapter = new Adapter([candidate]);
+
+    const result = await runProgressiveInit({ ...common(projectRoot, adapter), selectedStage: "project-description" });
+
+    expect(result).toMatchObject({ semanticOperations: 1, correctiveRegenerations: 0 });
+    expect(parseProjectDescriptionDocument(await readFile(result.artifactPath!, "utf8")).value.actors.map((actor) => actor.key))
+      .toContain("observer");
+  });
+
+  it("reports deterministic shared findings without making them part of default validation", () => {
+    const raw = orphanCapabilityPayload();
+    const candidate = {
+      ...raw,
+      determinations: raw.determinations.map((determination) => ({
+        ...determination,
+        statement: "include automated tests",
+        source: { kind: "developer" as const },
+      })),
+    } as unknown as ProjectDescription;
+    expect(validateProjectDescriptionCapabilityWorkflowConsistency(candidate)).toEqual([{
+      code: "semantic",
+      pointer: "/capabilities/1",
+      message: "approved capability 'reference-design-fidelity' is not referenced by any approved workflow; project-description must be corrected",
+    }]);
+    expect(validateProjectDescription(candidate).ok).toBe(true);
+  });
+
+  it("never reaches beforeWrite and preserves prior bytes when orphan recovery is exhausted", async () => {
+    const projectRoot = await root();
+    const first = await runProgressiveInit({ ...common(projectRoot, new Adapter([payload()])), selectedStage: "project-description" });
+    await invalidateStoredProjectDescriptionAuthority(projectRoot);
+    const before = await readFile(first.artifactPath!, "utf8");
+    const adapter = new Adapter([orphanCapabilityPayload(), orphanCapabilityPayload()]);
+    let beforeWriteCalls = 0;
+
+    await expect(runProgressiveInit({
+      ...common(projectRoot, adapter),
+      selectedStage: "project-description",
+      beforeWrite: () => { beforeWriteCalls += 1; },
+    })).rejects.toThrow(/PROJECT_DESCRIPTION_INVALID_AFTER_RECOVERY.*reference-design-fidelity/);
+
+    expect(beforeWriteCalls).toBe(0);
+    expect(await readFile(first.artifactPath!, "utf8")).toBe(before);
+  });
+
+  it("reports consistency and preservation findings together and corrects both in one regeneration", async () => {
+    const projectRoot = await root();
+    const first = await runProgressiveInit({ ...common(projectRoot, new Adapter([payload()])), selectedStage: "project-description" });
+    const developerAuthority = parseProjectDescriptionDocument(await readFile(first.artifactPath!, "utf8")).value;
+    await invalidateStoredProjectDescriptionAuthority(projectRoot);
+    const adapter = new Adapter([combinedConsistencyAndPreservationViolationPayload(), combinedViolationCorrectedPayload()]);
+    let beforeWriteCalls = 0;
+
+    const result = await runProgressiveInit({
+      ...common(projectRoot, adapter),
+      selectedStage: "project-description",
+      beforeWrite: () => { beforeWriteCalls += 1; },
+    });
+
+    expect(result).toMatchObject({ semanticOperations: 2, correctiveRegenerations: 1 });
+    expect(beforeWriteCalls).toBe(1);
+    expect(JSON.parse(adapter.requests[1]!.input).recovery.previousFindings).toEqual([
+      {
+        pointer: "/capabilities/1",
+        message: "approved capability 'reference-design-fidelity' is not referenced by any approved workflow; project-description must be corrected",
+      },
+      {
+        pointer: "/project",
+        message: "candidate changed developer-owned project identity or purpose",
+      },
+    ]);
+    const persisted = parseProjectDescriptionDocument(await readFile(result.artifactPath!, "utf8")).value;
+    expect(persisted.project).toEqual(developerAuthority.project);
+    expect(persisted.determinations).toEqual(developerAuthority.determinations);
+    expect(persisted.workflows.some((workflow) => workflow.capabilityKeys.includes(semanticKey("reference-design-fidelity")!))).toBe(true);
+  });
+
+  it("fails closed with prior bytes intact when combined consistency and preservation recovery is exhausted", async () => {
+    const projectRoot = await root();
+    const first = await runProgressiveInit({ ...common(projectRoot, new Adapter([payload()])), selectedStage: "project-description" });
+    await invalidateStoredProjectDescriptionAuthority(projectRoot);
+    const before = await readFile(first.artifactPath!, "utf8");
+    const adapter = new Adapter([
+      combinedConsistencyAndPreservationViolationPayload(),
+      combinedConsistencyAndPreservationViolationPayload(),
+    ]);
+    let beforeWriteCalls = 0;
+
+    await expect(runProgressiveInit({
+      ...common(projectRoot, adapter),
+      selectedStage: "project-description",
+      beforeWrite: () => { beforeWriteCalls += 1; },
+    })).rejects.toThrow(/PROJECT_DESCRIPTION_INVALID_AFTER_RECOVERY.*reference-design-fidelity.*candidate changed developer-owned project/);
+
+    expect(adapter.requests).toHaveLength(2);
+    expect(beforeWriteCalls).toBe(0);
+    expect(await readFile(first.artifactPath!, "utf8")).toBe(before);
   });
 });

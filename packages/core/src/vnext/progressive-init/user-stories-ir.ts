@@ -10,7 +10,10 @@ import type { Materiality, Rigidity } from "../ir.js";
 import type { JsonSchemaDocument } from "../providers/contract.js";
 import { semanticSingleLineIsValid } from "../validate.js";
 import { progressiveCanonicalJson } from "./canonical-json.js";
-import type { ProjectDescription } from "./project-description-ir.js";
+import {
+  validateProjectDescriptionCapabilityWorkflowConsistency,
+  type ProjectDescription,
+} from "./project-description-ir.js";
 
 export const USER_STORIES_CONTRACT = "rb-user-stories/v1" as const;
 export const USER_STORIES_QUESTIONS_CONTRACT = "rb-user-stories-questions/v1" as const;
@@ -344,12 +347,8 @@ export function userStoriesUpstreamProjectionSha256(projection: UserStoriesUpstr
 export function validateUserStoriesUpstreamReadiness(
   projection: UserStoriesUpstreamProjection,
 ): readonly UserStoriesFinding[] {
-  const covered = new Set(projection.workflows.flatMap((workflow) => workflow.capabilityKeys));
-  return projection.capabilities.flatMap((capability, index) => covered.has(capability.key) ? [] : [{
-    code: "upstream" as const,
-    pointer: `/capabilities/${index}`,
-    message: `approved capability '${capability.key}' is not referenced by any approved workflow; project-description must be corrected`,
-  }]);
+  return validateProjectDescriptionCapabilityWorkflowConsistency(projection)
+    .map(({ pointer, message }) => ({ code: "upstream" as const, pointer, message }));
 }
 
 const PARTICIPATION_ESCAPE_KEY = semanticKey("another-participant-combination")!;
