@@ -4,7 +4,7 @@ import type { Stats } from "node:fs";
 import type { RalphRuntimeFileSystem } from "../event-store.js";
 import { validateRalphRunId } from "../event-store.js";
 import { canonicalJson } from "../canonical-json.js";
-import { isSha256Digest, sha256 } from "../hashing.js";
+import { isSha256Digest, sha256, sha256Canonical } from "../hashing.js";
 import type { RalphRuntimeStateV2, AttemptStateV2 } from "../operational-v2/contracts.js";
 import { assertV2RuntimeState } from "../operational-v2/state.js";
 import {
@@ -22,6 +22,23 @@ import {
   type ProcessIdentityProvider,
 } from "./process-identity.js";
 import type { WorkspaceFingerprintFileSystem } from "../fingerprint.js";
+import {
+  assertNotInvokedProofV2,
+  assertTrustedExecutorObservationV2,
+  isNotInvokedProofV2,
+} from "../operational-b4/execution.js";
+import { readInvocationResultV2, type InvocationResultV2 } from "../operational-b4/invocation-result.js";
+import {
+  EXECUTOR_BOUNDARY_STATES,
+  EXECUTOR_OBSERVATION_STATES,
+  type ExecutorObservationStateV2,
+  type NotInvokedProofV2,
+  type TrustedExecutorObservationV2,
+  type LeaseReleaseProofV2 as LeaseReleaseProofContractV2,
+  type LeaseReleaseProofRecordV2,
+} from "../operational-b4/execution-observation.js";
+
+export type { LeaseReleaseProofRecordV2 } from "../operational-b4/execution-observation.js";
 
 export const RALPH_RUN_LEASE_SCHEMA_V2 = "rb-ralph-run-lease/v1" as const;
 export const RALPH_RECOVERY_CLAIM_SCHEMA_V2 = "rb-ralph-recovery-claim/v1" as const;
@@ -33,6 +50,8 @@ export const RUN_LEASE_ERROR_CODES = [
   "LEASE_DURABILITY_UNKNOWN_REQUIRES_INSPECTION",
   "LEASE_RELEASE_DURABILITY_UNKNOWN_REQUIRES_INSPECTION",
   "LEASE_RELEASE_EXTERNAL_INVOCATION_UNKNOWN",
+  "LEASE_RELEASE_PROOF_REQUIRED",
+  "LEASE_RELEASE_PROOF_INVALID",
   "LEASE_HANDLE_REQUIRED",
   "LEASE_LOST",
   "LEASE_RECONCILIATION_REQUIRED",
@@ -57,6 +76,59 @@ export class RalphRunLeaseError extends Error {
     super(message);
     this.name = "RalphRunLeaseError";
   }
+}
+
+const leaseReleaseProofInternals = new WeakMap<LeaseReleaseProofV2, LeaseReleaseProofRecordV2>();
+const LEASE_RELEASE_PROOF_SEAL = Symbol("LeaseReleaseProofV2");
+
+/**
+ * Runtime-opaque release authority.  The constructor and seal are kept in
+ * this Core lease module; callers can only carry a proof returned by one of
+ * the Core derivations below.
+ */
+export class LeaseReleaseProofV2 implements LeaseReleaseProofContractV2 {
+  readonly kind = "CORE_LEASE_RELEASE_PROOF" as const;
+
+  constructor(record: LeaseReleaseProofRecordV2, seal: symbol) {
+    if (seal !== LEASE_RELEASE_PROOF_SEAL) throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID");
+    leaseReleaseProofInternals.set(this, freezeDeep(record));
+    Object.freeze(this);
+  }
+
+  get record(): LeaseReleaseProofRecordV2 { return requireLeaseReleaseProof(this); }
+  get proofId(): string { return requireLeaseReleaseProof(this).proofId; }
+  get runId(): string { return requireLeaseReleaseProof(this).runId; }
+  get leaseId(): string { return requireLeaseReleaseProof(this).leaseId; }
+  get phaseId(): string | undefined { return requireLeaseReleaseProof(this).phaseId; }
+  get taskId(): string | undefined { return requireLeaseReleaseProof(this).taskId; }
+  get attemptId(): string | undefined { return requireLeaseReleaseProof(this).attemptId; }
+  get invocationId(): string | undefined { return requireLeaseReleaseProof(this).invocationId; }
+  get runtimeIdentity(): string | undefined { return requireLeaseReleaseProof(this).runtimeIdentity; }
+  get observationId(): string | undefined { return requireLeaseReleaseProof(this).observationId; }
+  get observationDigest(): string | undefined { return requireLeaseReleaseProof(this).observationDigest; }
+  get externalInvocationState(): ExecutorObservationStateV2 { return requireLeaseReleaseProof(this).externalInvocationState; }
+  get semanticEventsDurable(): "DURABLE" { return requireLeaseReleaseProof(this).semanticEventsDurable; }
+  get artifactWritesDurable(): "DURABLE" { return requireLeaseReleaseProof(this).artifactWritesDurable; }
+  get leaseOwnership(): "VERIFIED_CURRENT_OWNER" { return requireLeaseReleaseProof(this).leaseOwnership; }
+  get executorBoundaryState(): "NOT_CROSSED" | "CROSSED" { return requireLeaseReleaseProof(this).executorBoundaryState; }
+  get artifactRefs(): readonly string[] { return requireLeaseReleaseProof(this).artifactRefs; }
+
+  toJSON(): LeaseReleaseProofRecordV2 { return this.record; }
+}
+Object.freeze(LeaseReleaseProofV2.prototype);
+
+export function isLeaseReleaseProofV2(value: unknown): value is LeaseReleaseProofV2 {
+  return typeof value === "object" && value !== null && leaseReleaseProofInternals.has(value as LeaseReleaseProofV2);
+}
+
+export function assertLeaseReleaseProofV2(value: unknown): asserts value is LeaseReleaseProofV2 {
+  if (!isLeaseReleaseProofV2(value)) throw new Error("RALPH_LEASE_RELEASE_PROOF_TRUST_REQUIRED");
+}
+
+function requireLeaseReleaseProof(value: LeaseReleaseProofV2): LeaseReleaseProofRecordV2 {
+  const record = leaseReleaseProofInternals.get(value);
+  if (!record) throw new Error("RALPH_LEASE_RELEASE_PROOF_TRUST_REQUIRED");
+  return record;
 }
 
 export interface RunLeaseRecordV2 {
@@ -110,6 +182,8 @@ export interface LeaseRuntimeInputV2 {
   readonly fs?: EventStoreV2Options["fs"];
   readonly externalFacts?: OperationalRunV2ExternalFacts;
   readonly workspaceFingerprintFileSystem?: WorkspaceFingerprintFileSystem;
+  /** Explicit continuation mode for a lease reacquired after execution. */
+  readonly workspaceComparison?: "REQUIRE_INITIAL" | "ALLOW_POST_EXECUTOR_DRIFT";
   readonly processIdentityProvider?: ProcessIdentityProvider;
   readonly clock?: () => string;
   /** Injectable only for deterministic tests; the default is CSPRNG-backed. */
@@ -120,14 +194,6 @@ export interface LeaseRuntimeInputV2 {
   readonly nonceFactory?: () => string;
 }
 
-export interface NotInvokedProofV2 {
-  readonly kind: "NOT_INVOKED";
-  readonly proofId: string;
-  readonly runId: string;
-  readonly attemptId: string;
-  readonly invocationId: string;
-}
-
 export interface RecoveryLeaseInputV2 extends LeaseRuntimeInputV2 {
   readonly notInvokedProof?: NotInvokedProofV2;
   readonly recoveryIdFactory?: () => string;
@@ -135,7 +201,12 @@ export interface RecoveryLeaseInputV2 extends LeaseRuntimeInputV2 {
 }
 
 export interface LeaseReleaseOptionsV2 {
-  /** Required for a post-authorization release because absence is otherwise ambiguous. */
+  /** A sealed Core observation proof; plain objects are not accepted. */
+  readonly proof?: LeaseReleaseProofV2;
+  /**
+   * Retained as a deliberately rejected compatibility surface for callers
+   * compiled against the deferred M1 API.  These values are never authority.
+   */
   readonly noActiveExternalInvocation?: true;
   readonly semanticWritesDurable?: true;
   readonly artifactWritesDurable?: true;
@@ -269,10 +340,13 @@ export async function revalidateLeaseOwnershipV2(leasedRun: LeasedRunV2): Promis
 export const verifyLeasedRunV2 = revalidateLeaseOwnershipV2;
 
 /** Refresh the post-lease B1 view and replace the handle's verified checkpoint. */
-export async function refreshLeasedRunV2(leasedRun: LeasedRunV2): Promise<LeasedRunV2> {
+export async function refreshLeasedRunV2(
+  leasedRun: LeasedRunV2,
+  options: { readonly workspaceComparison?: "REQUIRE_INITIAL" | "ALLOW_POST_EXECUTOR_DRIFT" } = {},
+): Promise<LeasedRunV2> {
   const internal = requireActiveLease(leasedRun);
   await verifyLeaseOwnership(internal);
-  const inspected = await inspectOperationalRunV2(openInput(internal));
+  const inspected = await inspectOperationalRunV2({ ...openInput(internal), workspaceComparison: options.workspaceComparison ?? inferredWorkspaceComparison(internal.state) });
   assertReadyForLease(inspected);
   updateFromInspection(internal, inspected);
   await verifyLeaseOwnership(internal);
@@ -288,11 +362,15 @@ export const revalidateLeasedRunV2 = refreshLeasedRunV2;
  */
 export async function repairStateSnapshotWhileLeasedV2(
   leasedRun: LeasedRunV2,
-  options: { readonly writtenAt?: string; readonly nonce?: string } = {},
+  options: {
+    readonly writtenAt?: string;
+    readonly nonce?: string;
+    readonly workspaceComparison?: "REQUIRE_INITIAL" | "ALLOW_POST_EXECUTOR_DRIFT";
+  } = {},
 ): Promise<SnapshotRepairResultV2> {
   const internal = requireActiveLease(leasedRun);
   await verifyLeaseOwnership(internal);
-  const inspected = await inspectOperationalRunV2(openInput(internal));
+  const inspected = await inspectOperationalRunV2({ ...openInput(internal), workspaceComparison: options.workspaceComparison ?? inferredWorkspaceComparison(internal.state) });
   assertReadyForLease(inspected);
   if (!inspected.state || !inspected.ledger) throw new RalphRunLeaseError("LEASE_RECONCILIATION_REQUIRED", "LEASE_RECONCILIATION_REQUIRED: verified replay is unavailable");
   updateFromInspection(internal, inspected);
@@ -304,7 +382,7 @@ export async function repairStateSnapshotWhileLeasedV2(
   await verifyLeaseOwnership(internal);
   const stableLedger = await internal.store.inspect();
   if (stableLedger.lastSequence !== internal.ledger.lastSequence || stableLedger.lastEventHash !== internal.ledger.lastEventHash) {
-    const refreshed = await inspectOperationalRunV2(openInput(internal));
+    const refreshed = await inspectOperationalRunV2({ ...openInput(internal), workspaceComparison: options.workspaceComparison ?? inferredWorkspaceComparison(internal.state) });
     assertReadyForLease(refreshed);
     if (!refreshed.state || !refreshed.ledger) throw new RalphRunLeaseError("LEASE_RECONCILIATION_REQUIRED");
     updateFromInspection(internal, refreshed);
@@ -340,17 +418,24 @@ export async function releaseLeasedRunV2(
 ): Promise<void> {
   const internal = requireActiveLease(leasedRun);
   await verifyLeaseOwnership(internal);
-  const inspected = await inspectOperationalRunV2(openInput(internal));
+  if (hasLegacyReleaseClaims(options)) {
+    throw new RalphRunLeaseError("LEASE_RELEASE_REJECTED", "LEASE_RELEASE_REJECTED: caller booleans are not release authority");
+  }
+  let releaseProof: LeaseReleaseProofV2 | undefined;
+  if (options.proof !== undefined) {
+    if (!isLeaseReleaseProofV2(options.proof)) throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID");
+    releaseProof = options.proof;
+  }
+  const proofRecord = releaseProof?.record;
+  const inspected = await inspectOperationalRunV2({
+    ...openInput(internal),
+    workspaceComparison: proofRecord?.externalInvocationState === "TERMINATED_QUIESCENT" ? "ALLOW_POST_EXECUTOR_DRIFT" : "REQUIRE_INITIAL",
+  });
   assertReadyForLease(inspected);
   updateFromInspection(internal, inspected);
   const openAttempt = Object.values(internal.state.attempts).find((attempt) => attempt.disposition === "OPEN");
-  if (openAttempt?.invocation && options.noActiveExternalInvocation !== true) {
-    throw new RalphRunLeaseError("LEASE_RELEASE_EXTERNAL_INVOCATION_UNKNOWN");
-  }
-  if (options.noActiveExternalInvocation === true
-    && (options.semanticWritesDurable !== true || options.artifactWritesDurable !== true || options.noExecutorCapability !== true)) {
-    throw new RalphRunLeaseError("LEASE_RELEASE_REJECTED", "LEASE_RELEASE_REJECTED: release proof is incomplete");
-  }
+  if (openAttempt?.invocation) assertReleaseProof(internal, openAttempt, releaseProof);
+  else if (releaseProof !== undefined) assertReleaseProof(internal, undefined, releaseProof);
 
   await verifyLeaseOwnership(internal);
   const paths = leasePathsForStore(internal.store);
@@ -380,6 +465,90 @@ export async function releaseLeasedRunV2(
 export const releaseRunLeaseV2 = releaseLeasedRunV2;
 
 /**
+ * Derive the only safe B3 release proof.  The facts are observed from the
+ * leased Core handle and immutable authorization artifacts; no caller claim
+ * can substitute for them.
+ */
+export async function derivePreExecutorReleaseProofV2(
+  leasedRun: LeasedRunV2,
+  input: { readonly attemptId: string; readonly invocationId: string; readonly artifactRefs: readonly string[] },
+): Promise<LeaseReleaseProofV2> {
+  const internal = requireActiveLease(leasedRun);
+  await verifyLeaseOwnership(internal);
+  const inspected = await inspectOperationalRunV2({ ...openInput(internal), workspaceComparison: "REQUIRE_INITIAL" });
+  assertReadyForLease(inspected);
+  updateFromInspection(internal, inspected);
+  const attempt = internal.state.attempts[input.attemptId];
+  if (!attempt || attempt.disposition !== "OPEN" || attempt.stage !== "EXECUTOR_DISPATCH_AUTHORIZED" || attempt.invocation?.invocationId !== input.invocationId || attempt.executorFinished !== undefined) {
+    throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID", "LEASE_RELEASE_PROOF_INVALID: B3 boundary is not AUTHORIZED_NOT_INVOKED");
+  }
+  await assertDurableArtifactRefs(internal, input.artifactRefs, input.attemptId);
+  await verifyLeaseOwnership(internal);
+  return mintLeaseReleaseProof({
+    runId: internal.runId,
+    leaseId: internal.lease.leaseId,
+    phaseId: attempt.phaseId,
+    taskId: attempt.taskId,
+    attemptId: input.attemptId,
+    invocationId: input.invocationId,
+    externalInvocationState: "NOT_INVOKED",
+    semanticEventsDurable: "DURABLE",
+    artifactWritesDurable: "DURABLE",
+    leaseOwnership: "VERIFIED_CURRENT_OWNER",
+    executorBoundaryState: "NOT_CROSSED",
+    artifactRefs: [...input.artifactRefs],
+  });
+}
+
+/** Derive a post-executor proof from a sealed runtime observation. */
+export async function deriveExecutorReleaseProofV2(
+  leasedRun: LeasedRunV2,
+  observation: TrustedExecutorObservationV2,
+  artifactRefs: readonly string[],
+): Promise<LeaseReleaseProofV2> {
+  const internal = requireActiveLease(leasedRun);
+  assertTrustedExecutorObservationV2(observation);
+  if (!observation || observation.state !== "TERMINATED_QUIESCENT") throw new RalphRunLeaseError("LEASE_RELEASE_EXTERNAL_INVOCATION_UNKNOWN");
+  const inspected = await inspectOperationalRunV2({ ...openInput(internal), workspaceComparison: "ALLOW_POST_EXECUTOR_DRIFT" });
+  assertReadyForLease(inspected);
+  updateFromInspection(internal, inspected);
+  const attempt = Object.values(internal.state.attempts).find((candidate) => candidate.disposition === "OPEN" && candidate.invocation?.invocationId === observation.invocationId);
+  const matchingClosed = Object.values(internal.state.attempts).find((candidate) => candidate.disposition === "CLOSED" && candidate.invocation?.invocationId === observation.invocationId);
+  const boundAttempt = attempt ?? matchingClosed;
+  if (!boundAttempt || !boundAttempt.invocation || boundAttempt.invocation.invocationId !== observation.invocationId) {
+    throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID", "LEASE_RELEASE_PROOF_INVALID: observation is not bound to this Run");
+  }
+  assertObservationBindingForAttempt(observation, internal.runId, boundAttempt);
+  if (!observation.startedAt || !boundAttempt.executorFinished || boundAttempt.executorFinished.invocationId !== observation.invocationId
+    || boundAttempt.executorFinished.status !== observation.status
+    || boundAttempt.executorFinished.termination !== observation.termination
+    || boundAttempt.executorFinished.finishedAt !== observation.finishedAt
+    || !hasDurableExecutorFinishedEvent(internal, boundAttempt, observation)) {
+    throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID", "LEASE_RELEASE_PROOF_INVALID: executor termination is not a durable Core fact");
+  }
+  await assertDurableArtifactRefs(internal, artifactRefs, boundAttempt.attemptId);
+  await assertDurableInvocationResult(internal, boundAttempt, observation, artifactRefs);
+  await verifyLeaseOwnership(internal);
+  return mintLeaseReleaseProof({
+    runId: internal.runId,
+    leaseId: internal.lease.leaseId,
+    phaseId: boundAttempt.phaseId,
+    taskId: boundAttempt.taskId,
+    attemptId: boundAttempt.attemptId,
+    invocationId: observation.invocationId,
+    runtimeIdentity: observation.runtimeIdentity,
+    observationId: observation.observationId,
+    observationDigest: observation.observationDigest,
+    externalInvocationState: "TERMINATED_QUIESCENT",
+    semanticEventsDurable: "DURABLE",
+    artifactWritesDurable: "DURABLE",
+    leaseOwnership: "VERIFIED_CURRENT_OWNER",
+    executorBoundaryState: "CROSSED",
+    artifactRefs: [...artifactRefs],
+  });
+}
+
+/**
  * Conservative stale recovery.  It claims recovery exclusively, reopens the
  * ledger/state after the claim, proves owner staleness and only removes the
  * lease for the two safe pre-dispatch stages (or a trusted non-invocation
@@ -388,12 +557,18 @@ export const releaseRunLeaseV2 = releaseLeasedRunV2;
 export async function recoverStaleRunLeaseV2(input: RecoveryLeaseInputV2): Promise<{ readonly kind: "RECOVERED"; readonly leasedRun: LeasedRunV2; readonly targetLeaseId: string }> {
   assertV2RuntimeState(input.genesisState);
   const provider = input.processIdentityProvider ?? defaultProcessIdentityProvider;
-  const pre = await inspectOperationalRunV2(toInspectInput(input));
+  const initialInspectInput = toInspectInput(input);
+  const initialPre = await inspectOperationalRunV2(initialInspectInput);
+  const workspaceComparison = input.workspaceComparison ?? inferredWorkspaceComparison(initialPre.state);
+  const pre = workspaceComparison === input.workspaceComparison
+    ? initialPre
+    : await inspectOperationalRunV2({ ...initialInspectInput, workspaceComparison });
   assertReadyForLease(pre);
   const store = pre.store;
   const paths = await ensureLocksDirectory(store);
   const target = await readLeaseRecord(store.fileSystem, paths.leasePath, input.runId);
-  if (!target) return { kind: "RECOVERED", leasedRun: await acquireLeasedRunV2(input), targetLeaseId: "NONE" };
+  const effectiveInput = { ...input, workspaceComparison };
+  if (!target) return { kind: "RECOVERED", leasedRun: await acquireLeasedRunV2(effectiveInput), targetLeaseId: "NONE" };
 
   const recoverer = await provider.current();
   const recoveryId = nonEmptyFactory(input.recoveryIdFactory ?? randomUUID, "RECOVERY_ID_INVALID");
@@ -426,7 +601,7 @@ export async function recoverStaleRunLeaseV2(input: RecoveryLeaseInputV2): Promi
     }
     await proveOwnerStale(provider, currentTarget);
 
-    const authoritative = await inspectOperationalRunV2(toAuthoritativeInspectInput(input));
+    const authoritative = await inspectOperationalRunV2(toAuthoritativeInspectInput(effectiveInput));
     assertReadyForLease(authoritative);
     const attempt = authoritative.state ? Object.values(authoritative.state.attempts).find((candidate) => candidate.disposition === "OPEN") : undefined;
     assertSafeRecoveryStage(attempt, input.notInvokedProof, input.runId);
@@ -449,7 +624,7 @@ export async function recoverStaleRunLeaseV2(input: RecoveryLeaseInputV2): Promi
       throw new RalphRunLeaseError("LEASE_DURABILITY_UNKNOWN_REQUIRES_INSPECTION", "LEASE_DURABILITY_UNKNOWN_REQUIRES_INSPECTION", error);
     }
 
-    fresh = await acquireLeasedRunInternal(input, { ownedRecoveryClaim: claim });
+    fresh = await acquireLeasedRunInternal(effectiveInput, { ownedRecoveryClaim: claim });
     await releaseRecoveryClaim(store.fileSystem, paths, claim, recoveryToken, provider);
     return { kind: "RECOVERED", leasedRun: fresh, targetLeaseId: target.leaseId };
   } catch (error) {
@@ -475,7 +650,12 @@ async function acquireLeasedRunInternal(
   assertV2RuntimeState(input.genesisState);
   validateRalphRunId(input.runId);
   const provider = input.processIdentityProvider ?? defaultProcessIdentityProvider;
-  const pre = await inspectOperationalRunV2(toInspectInput(input));
+  const initialInspectInput = toInspectInput(input);
+  const initialPre = await inspectOperationalRunV2(initialInspectInput);
+  const workspaceComparison = input.workspaceComparison ?? inferredWorkspaceComparison(initialPre.state);
+  const pre = workspaceComparison === input.workspaceComparison
+    ? initialPre
+    : await inspectOperationalRunV2({ ...initialInspectInput, workspaceComparison });
   assertReadyForLease(pre);
   const store = pre.store;
   const paths = await ensureLocksDirectory(store);
@@ -506,7 +686,7 @@ async function acquireLeasedRunInternal(
 
   let post: InspectOperationalRunV2Result;
   try {
-    post = await inspectOperationalRunV2(toAuthoritativeInspectInput(input));
+    post = await inspectOperationalRunV2(toAuthoritativeInspectInput({ ...input, workspaceComparison }));
     assertReadyForLease(post);
     if (!post.runSnapshot || !post.ledger || !post.state) throw new RalphRunLeaseError("LEASE_RECONCILIATION_REQUIRED");
     const actual = await readLeaseRecord(store.fileSystem, paths.leasePath, input.runId);
@@ -550,7 +730,14 @@ function toInspectInput(input: LeaseRuntimeInputV2): InspectOperationalRunV2Inpu
     ...(input.fs === undefined ? {} : { fs: input.fs }),
     ...(input.externalFacts === undefined ? {} : { externalFacts: input.externalFacts }),
     ...(input.workspaceFingerprintFileSystem === undefined ? {} : { workspaceFingerprintFileSystem: input.workspaceFingerprintFileSystem }),
+    ...(input.workspaceComparison === undefined ? {} : { workspaceComparison: input.workspaceComparison }),
   };
+}
+
+function inferredWorkspaceComparison(state: RalphRuntimeStateV2 | undefined): "REQUIRE_INITIAL" | "ALLOW_POST_EXECUTOR_DRIFT" {
+  const postExecutorStages = new Set(["EXECUTOR_RUNNING", "POST_EXECUTOR_CAPTURE", "EVIDENCE_CAPTURING", "RECONCILING"]);
+  const hasPostExecutorAttempt = state !== undefined && Object.values(state.attempts).some((attempt) => attempt.disposition === "OPEN" && postExecutorStages.has(attempt.stage));
+  return hasPostExecutorAttempt ? "ALLOW_POST_EXECUTOR_DRIFT" : "REQUIRE_INITIAL";
 }
 
 function openInput(internal: LeaseInternals): InspectOperationalRunV2Input {
@@ -814,16 +1001,197 @@ async function proveOwnerStale(provider: ProcessIdentityProvider, lease: RunLeas
   if (status !== "ABSENT" && status !== "START_MISMATCH") throw new RalphRunLeaseError("LEASE_RECONCILIATION_REQUIRED");
 }
 
+function mintLeaseReleaseProof(input: Omit<LeaseReleaseProofRecordV2, "kind" | "proofId">): LeaseReleaseProofV2 {
+  validateLeaseReleaseProofInput(input);
+  const proofBase = { kind: "CORE_LEASE_RELEASE_PROOF" as const, ...input, artifactRefs: [...input.artifactRefs] };
+  const record: LeaseReleaseProofRecordV2 = {
+    ...proofBase,
+    proofId: `lrp-${sha256Canonical(proofBase).slice("sha256:".length)}`,
+  };
+  return new LeaseReleaseProofV2(record, LEASE_RELEASE_PROOF_SEAL);
+}
+
+function validateLeaseReleaseProofInput(input: Omit<LeaseReleaseProofRecordV2, "kind" | "proofId">): void {
+  assertSafeLeaseIdentity(input.runId);
+  assertSafeLeaseIdentity(input.leaseId);
+  for (const value of [input.phaseId, input.taskId, input.attemptId, input.invocationId, input.runtimeIdentity, input.observationId]) {
+    if (value !== undefined) assertSafeLeaseIdentity(value);
+  }
+  if (input.observationDigest !== undefined && !isSha256Digest(input.observationDigest)) throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID");
+  if (!EXECUTOR_OBSERVATION_STATES.includes(input.externalInvocationState)) throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID");
+  if (input.semanticEventsDurable !== "DURABLE" || input.artifactWritesDurable !== "DURABLE" || input.leaseOwnership !== "VERIFIED_CURRENT_OWNER") {
+    throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID");
+  }
+  if (!EXECUTOR_BOUNDARY_STATES.includes(input.executorBoundaryState)) throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID");
+  for (const ref of input.artifactRefs) assertSafeArtifactRef(ref);
+  if (input.attemptId !== undefined && input.artifactRefs.some((ref) => ref.split("/")[1] !== input.attemptId)) throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID");
+  if (input.externalInvocationState !== "NOT_INVOKED"
+    && (!input.phaseId || !input.taskId || !input.attemptId || !input.invocationId || !input.runtimeIdentity || !input.observationId || !input.observationDigest)) {
+    throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID");
+  }
+  if (input.externalInvocationState === "NOT_INVOKED" && (!input.phaseId || !input.taskId || !input.attemptId || !input.invocationId)) {
+    throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID");
+  }
+  if (input.externalInvocationState === "NOT_INVOKED" && input.executorBoundaryState !== "NOT_CROSSED") throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID");
+  if (input.externalInvocationState === "TERMINATED_QUIESCENT" && input.executorBoundaryState !== "CROSSED") throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID");
+  if ((input.externalInvocationState === "RUNNING" || input.externalInvocationState === "UNKNOWN") && input.executorBoundaryState !== "CROSSED") throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID");
+}
+
+function assertObservationBindingForAttempt(observation: TrustedExecutorObservationV2, runId: string, attempt: AttemptStateV2): void {
+  if (!attempt.invocation || observation.record.runId !== runId || observation.record.phaseId !== attempt.phaseId || observation.record.taskId !== attempt.taskId || observation.record.attemptId !== attempt.attemptId || observation.record.invocationId !== attempt.invocation.invocationId) {
+    throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID", "LEASE_RELEASE_PROOF_INVALID: observation binding mismatch");
+  }
+}
+
+function hasDurableExecutorFinishedEvent(internal: LeaseInternals, attempt: AttemptStateV2, observation: TrustedExecutorObservationV2): boolean {
+  return internal.ledger.events.some((event) => event.eventType === "executor.finished"
+    && event.attemptId === attempt.attemptId
+    && event.phaseId === attempt.phaseId
+    && event.taskId === attempt.taskId
+    && event.payload.invocationId === observation.invocationId
+    && event.payload.status === observation.status
+    && event.payload.termination === observation.termination
+    && event.payload.finishedAt === observation.finishedAt);
+}
+
+async function assertDurableInvocationResult(
+  internal: LeaseInternals,
+  attempt: AttemptStateV2,
+  observation: TrustedExecutorObservationV2,
+  artifactRefs: readonly string[],
+): Promise<void> {
+  const resultRef = `attempts/${attempt.attemptId}/invocation-result.json`;
+  if (!artifactRefs.includes(resultRef)) {
+    throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID", "LEASE_RELEASE_PROOF_INVALID: invocation-result durability fact is missing");
+  }
+  let result: InvocationResultV2 | undefined;
+  try {
+    result = await readInvocationResultV2(internal.store, attempt.attemptId);
+  } catch (error) {
+    throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID", "LEASE_RELEASE_PROOF_INVALID: invocation-result cannot be verified", error);
+  }
+  if (!result
+    || result.runId !== internal.runId
+    || result.phaseId !== attempt.phaseId
+    || result.taskId !== attempt.taskId
+    || result.attemptId !== attempt.attemptId
+    || result.invocationId !== observation.invocationId
+    || result.resultEnvelopeStatus !== observation.resultEnvelopeStatus
+    || result.status !== observation.status
+    || result.termination !== observation.termination
+    || result.exitCode !== (observation.exitCode ?? null)
+    || result.signal !== (observation.signal ?? null)
+    || result.startedAt !== observation.startedAt
+    || result.finishedAt !== observation.finishedAt) {
+    throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID", "LEASE_RELEASE_PROOF_INVALID: invocation-result is not consistent with durable termination facts");
+  }
+}
+
+function assertSafeLeaseIdentity(value: unknown): asserts value is string {
+  if (typeof value !== "string" || value.length === 0 || value.length > 512 || value.includes("\0") || value.includes("/")) {
+    throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID");
+  }
+}
+
+function assertSafeArtifactRef(value: unknown): asserts value is string {
+  if (typeof value !== "string" || !/^attempts\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)) {
+    throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID");
+  }
+}
+
 function assertSafeRecoveryStage(attempt: AttemptStateV2 | undefined, proof: NotInvokedProofV2 | undefined, runId: string): void {
   if (!attempt) return;
   if (attempt.stage === "ADMITTED") return;
   if (attempt.stage === "EXECUTOR_DISPATCH_AUTHORIZED") {
-    if (!proof || typeof proof !== "object" || proof.kind !== "NOT_INVOKED" || typeof proof.proofId !== "string" || proof.proofId.length === 0 || proof.attemptId !== attempt.attemptId || proof.runId !== runId || proof.invocationId !== attempt.invocation?.invocationId) {
+    if (!proof || !isNotInvokedProofV2(proof)) {
       throw new RalphRunLeaseError("LEASE_RECONCILIATION_REQUIRED", "LEASE_RECONCILIATION_REQUIRED: NOT_INVOKED proof is required");
+    }
+    try { assertNotInvokedProofV2(proof); } catch (error) { throw new RalphRunLeaseError("LEASE_RECONCILIATION_REQUIRED", "LEASE_RECONCILIATION_REQUIRED: NOT_INVOKED proof is not Core-owned", error); }
+    const record = proof.record;
+    if (record.attemptId !== attempt.attemptId || record.runId !== runId || record.phaseId !== attempt.phaseId || record.taskId !== attempt.taskId || record.invocationId !== attempt.invocation?.invocationId) {
+      throw new RalphRunLeaseError("LEASE_RECONCILIATION_REQUIRED", "LEASE_RECONCILIATION_REQUIRED: NOT_INVOKED proof binding mismatch");
     }
     return;
   }
   throw new RalphRunLeaseError("LEASE_RECONCILIATION_REQUIRED", "LEASE_RECONCILIATION_REQUIRED: recovery stage is unsafe");
+}
+
+function assertReleaseProof(
+  internal: LeaseInternals,
+  attempt: AttemptStateV2 | undefined,
+  proof: LeaseReleaseProofV2 | undefined,
+): void {
+  if (!proof || !isLeaseReleaseProofV2(proof)) throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_REQUIRED", "LEASE_RELEASE_PROOF_REQUIRED: a sealed Core proof is required");
+  try { assertLeaseReleaseProofV2(proof); }
+  catch (error) { throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID", "LEASE_RELEASE_PROOF_INVALID", error); }
+  const record = proof.record;
+  if (record.runId !== internal.runId || record.leaseId !== internal.lease.leaseId || record.leaseOwnership !== "VERIFIED_CURRENT_OWNER") {
+    throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID", "LEASE_RELEASE_PROOF_INVALID: proof owner binding mismatch");
+  }
+  if (record.semanticEventsDurable !== "DURABLE" || record.artifactWritesDurable !== "DURABLE") {
+    throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID", "LEASE_RELEASE_PROOF_INVALID: durability is unresolved");
+  }
+  if (record.externalInvocationState === "RUNNING" || record.externalInvocationState === "UNKNOWN") {
+    throw new RalphRunLeaseError("LEASE_RELEASE_EXTERNAL_INVOCATION_UNKNOWN");
+  }
+  if (record.attemptId !== undefined && record.artifactRefs.some((ref) => ref.split("/")[1] !== record.attemptId)) {
+    throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID", "LEASE_RELEASE_PROOF_INVALID: artifact binding mismatch");
+  }
+  if (!attempt) {
+    if (record.externalInvocationState !== "TERMINATED_QUIESCENT" || record.attemptId === undefined) {
+      throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID", "LEASE_RELEASE_PROOF_INVALID: Attempt binding is missing");
+    }
+    return;
+  }
+  if (record.attemptId !== attempt.attemptId || record.invocationId !== attempt.invocation?.invocationId) {
+    throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID", "LEASE_RELEASE_PROOF_INVALID: Attempt/invocation binding mismatch");
+  }
+  if (record.phaseId !== undefined && record.phaseId !== attempt.phaseId || record.taskId !== undefined && record.taskId !== attempt.taskId) {
+    throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID", "LEASE_RELEASE_PROOF_INVALID: phase/task binding mismatch");
+  }
+  if (record.externalInvocationState === "NOT_INVOKED") {
+    if (attempt.stage !== "EXECUTOR_DISPATCH_AUTHORIZED" || attempt.executorFinished !== undefined || record.executorBoundaryState !== "NOT_CROSSED") {
+      throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID", "LEASE_RELEASE_PROOF_INVALID: NOT_INVOKED proof does not match the dispatch boundary");
+    }
+    return;
+  }
+  if (record.externalInvocationState === "TERMINATED_QUIESCENT" && record.executorBoundaryState !== "CROSSED") {
+    throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID", "LEASE_RELEASE_PROOF_INVALID: terminated proof has not crossed the executor boundary");
+  }
+}
+
+async function assertDurableArtifactRefs(internal: LeaseInternals, refs: readonly string[], expectedAttemptId?: string): Promise<void> {
+  if (refs.length === 0) throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID", "LEASE_RELEASE_PROOF_INVALID: no artifact durability facts");
+  for (const ref of refs) {
+    if (!/^attempts\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(ref)) {
+      throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID", "LEASE_RELEASE_PROOF_INVALID: artifact reference is unsafe");
+    }
+    const attemptId = ref.split("/")[1];
+    if (!attemptId) throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID", "LEASE_RELEASE_PROOF_INVALID: artifact reference is unsafe");
+    if (expectedAttemptId !== undefined && attemptId !== expectedAttemptId) throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID", "LEASE_RELEASE_PROOF_INVALID: artifact does not belong to the proved Attempt");
+    for (const directory of [join(internal.store.runDirectory, "attempts"), join(internal.store.runDirectory, "attempts", attemptId)]) {
+      let directoryStats: Stats;
+      try { directoryStats = await internal.store.fileSystem.lstat(directory); }
+      catch (error) { throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID", "LEASE_RELEASE_PROOF_INVALID: artifact directory is not durable", error); }
+      if (directoryStats.isSymbolicLink() || !directoryStats.isDirectory() || modeOf(directoryStats) !== 0o700) {
+        throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID", "LEASE_RELEASE_PROOF_INVALID: artifact directory path is unsafe");
+      }
+    }
+    const path = join(internal.store.runDirectory, ref);
+    let stats: Stats;
+    try { stats = await internal.store.fileSystem.lstat(path); }
+    catch (error) { throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID", "LEASE_RELEASE_PROOF_INVALID: artifact is not durable", error); }
+    if (stats.isSymbolicLink() || !stats.isFile() || modeOf(stats) !== 0o600) {
+      throw new RalphRunLeaseError("LEASE_RELEASE_PROOF_INVALID", "LEASE_RELEASE_PROOF_INVALID: artifact path is unsafe");
+    }
+  }
+}
+
+function hasLegacyReleaseClaims(options: LeaseReleaseOptionsV2): boolean {
+  return options.noActiveExternalInvocation === true
+    || options.semanticWritesDurable === true
+    || options.artifactWritesDurable === true
+    || options.noExecutorCapability === true;
 }
 
 async function releaseRecoveryClaim(

@@ -40,6 +40,13 @@ export interface InspectOperationalRunV2Input {
   readonly fs?: EventStoreV2Options["fs"];
   readonly externalFacts?: OperationalRunV2ExternalFacts;
   readonly workspaceFingerprintFileSystem?: WorkspaceFingerprintFileSystem;
+  /**
+   * Post-executor Core continuations must still replay the authoritative
+   * ledger, but the product workspace is expected to differ from the frozen
+   * pre-execution fingerprint.  The default remains the frozen initial-state
+   * comparison used by B1/B2 admission.
+   */
+  readonly workspaceComparison?: "REQUIRE_INITIAL" | "ALLOW_POST_EXECUTOR_DRIFT";
 }
 
 export interface InspectOperationalRunV2Result {
@@ -177,7 +184,9 @@ async function compareExternalFacts(
       undefined,
       input.workspaceFingerprintFileSystem,
     );
-    compareFingerprint(observed, snapshot.initialWorkspaceFingerprint, issues);
+    if (input.workspaceComparison === "ALLOW_POST_EXECUTOR_DRIFT") {
+      if (observed.policyDigest !== snapshot.workspacePolicy.policyDigest) issues.push("workspace-policy-mismatch");
+    } else compareFingerprint(observed, snapshot.initialWorkspaceFingerprint, issues);
     return issues;
   }
   if (facts.projectIdentity !== undefined && canonicalJson(facts.projectIdentity) !== canonicalJson(snapshot.projectIdentity)) issues.push("project-identity-mismatch");
@@ -193,7 +202,10 @@ async function compareExternalFacts(
   compareFact(facts.workspacePolicyDigest, snapshot.workspacePolicy.policyDigest, "workspace-policy-mismatch", issues);
   compareFact(facts.runtimeIdentityDigest, snapshot.runtimeIdentity.descriptorDigest, "runtime-identity-mismatch", issues);
   compareFact(facts.leasePolicyDigest, snapshot.leasePolicy.descriptorDigest, "lease-policy-mismatch", issues);
-  if (facts.workspaceFingerprint !== undefined) compareFingerprint(facts.workspaceFingerprint, snapshot.initialWorkspaceFingerprint, issues);
+  if (input.workspaceComparison === "ALLOW_POST_EXECUTOR_DRIFT") {
+    const observed = await fingerprintWorkspace(input.projectRoot, snapshot.workspacePolicy, undefined, input.workspaceFingerprintFileSystem);
+    if (observed.policyDigest !== snapshot.workspacePolicy.policyDigest) issues.push("workspace-policy-mismatch");
+  } else if (facts.workspaceFingerprint !== undefined) compareFingerprint(facts.workspaceFingerprint, snapshot.initialWorkspaceFingerprint, issues);
   else {
     const observed = await fingerprintWorkspace(input.projectRoot, snapshot.workspacePolicy, undefined, input.workspaceFingerprintFileSystem);
     compareFingerprint(observed, snapshot.initialWorkspaceFingerprint, issues);

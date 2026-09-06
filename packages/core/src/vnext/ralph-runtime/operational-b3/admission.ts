@@ -17,7 +17,7 @@ import {
   repairStateSnapshotWhileLeasedV2,
   releaseLeasedRunV2,
   type LeasedRunV2,
-  type LeaseReleaseOptionsV2,
+  derivePreExecutorReleaseProofV2,
 } from "../operational-b2/index.js";
 import {
   createInvocationDescriptorV2,
@@ -94,7 +94,10 @@ export class AuthorizedInvocationV2 {
     seal: symbol,
   ) {
     if (seal !== AUTHORIZED_INVOCATION_CONSTRUCTION_SEAL) throw new RalphAdmissionError("B3_AUTHORIZED_INVOCATION_REQUIRED");
-    authorizedInvocationInternals.set(this, { descriptor, workUnit });
+    // The sealed M1 capability must remain immutable after it is rehydrated.
+    // Otherwise a caller could mutate the visible descriptor/work-unit object
+    // and change the binding used by a later executor observation.
+    authorizedInvocationInternals.set(this, { descriptor: freezeDeep(descriptor), workUnit: freezeDeep(workUnit) });
   }
 
   get descriptor(): InvocationDescriptorV2 { return requireAuthorizedInvocationInternals(this).descriptor; }
@@ -103,6 +106,14 @@ export class AuthorizedInvocationV2 {
   toJSON(): Readonly<Record<string, unknown>> {
     return { kind: this.kind, descriptor: this.descriptor, workUnit: this.workUnit };
   }
+}
+
+export function isAuthorizedInvocationV2(value: unknown): value is AuthorizedInvocationV2 {
+  return typeof value === "object" && value !== null && authorizedInvocationInternals.has(value as AuthorizedInvocationV2);
+}
+
+export function assertAuthorizedInvocationV2(value: unknown): asserts value is AuthorizedInvocationV2 {
+  if (!isAuthorizedInvocationV2(value)) throw new RalphAdmissionError("B3_AUTHORIZED_INVOCATION_REQUIRED");
 }
 
 export type PrepareNextAuthorizedInvocationV2Result =
@@ -334,7 +345,12 @@ async function authorizeAttempt(
     assertDispatchFacts(input.leasedRun, refreshedAttempt, refreshedBinding, verified.workUnit, verified.invocation, refreshedFingerprint);
     const authorizedInvocation = createAuthorizedInvocation(verified.invocation, verified.workUnit);
     await revalidateLeaseOwnershipV2(input.leasedRun);
-    await releaseLeasedRunV2(input.leasedRun, releaseProof());
+    const releaseProof = await derivePreExecutorReleaseProofV2(input.leasedRun, {
+      attemptId: refreshedAttempt.attemptId,
+      invocationId: verified.invocation.invocationId,
+      artifactRefs: artifactRefsForAttempt(refreshedAttempt.attemptId, ["work-unit.json", "invocation.json"]),
+    });
+    await releaseLeasedRunV2(input.leasedRun, { proof: releaseProof });
     return {
       kind: "ALREADY_AUTHORIZED",
       outcome: "ALREADY_AUTHORIZED",
@@ -415,7 +431,12 @@ async function authorizeAttempt(
   assertDispatchFacts(input.leasedRun, authorizedAttempt, authorizedBinding, authorizedArtifacts.workUnit, authorizedArtifacts.invocation, postDispatchFingerprint);
   await revalidateLeaseOwnershipV2(input.leasedRun);
   assertRunSnapshotUnchanged(input.leasedRun, runSnapshotDigest);
-  await releaseLeasedRunV2(input.leasedRun, releaseProof());
+  const releaseProof = await derivePreExecutorReleaseProofV2(input.leasedRun, {
+    attemptId: authorizedAttempt.attemptId,
+    invocationId: authorizedArtifacts.invocation.invocationId,
+    artifactRefs: artifactRefsForAttempt(authorizedAttempt.attemptId, ["work-unit.json", "invocation.json"]),
+  });
+  await releaseLeasedRunV2(input.leasedRun, { proof: releaseProof });
   const admitted = admittedCapability(input.leasedRun, authorizedAttempt);
   const authorizedInvocation = createAuthorizedInvocation(authorizedArtifacts.invocation, authorizedArtifacts.workUnit);
   return {
@@ -427,6 +448,77 @@ async function authorizeAttempt(
     invocation: authorizedArtifacts.invocation,
     authorizedInvocation,
     leaseReleased: true,
+  };
+}
+
+export interface ReopenAuthorizedInvocationV2Input {
+  readonly leasedRun: LeasedRunV2;
+  readonly plan: ExecutionDocument;
+  readonly attemptId?: string;
+  readonly planIdentity?: string;
+  readonly planDigest?: string;
+  /** Defaults to true for the pre-executor dispatch boundary. */
+  readonly requireBaseFingerprint?: boolean;
+}
+
+export interface ReopenedAuthorizedInvocationV2 {
+  readonly kind: "REOPENED_AUTHORIZED_INVOCATION";
+  readonly attempt: AttemptStateV2;
+  readonly workUnit: WorkUnitV2;
+  readonly invocation: InvocationDescriptorV2;
+  readonly authorizedInvocation: AuthorizedInvocationV2;
+}
+
+/**
+ * Rehydrates a durable B3 authorization without re-running scheduling and
+ * without releasing the caller's lease.  B4 uses this to cross the executor
+ * boundary only after replay and artifact binding have been revalidated.
+ */
+export async function reopenAuthorizedInvocationV2(input: ReopenAuthorizedInvocationV2Input): Promise<ReopenedAuthorizedInvocationV2> {
+  assertLeasedRunV2(input.leasedRun);
+  if (!input.plan) throw new RalphAdmissionError("B3_PLAN_IDENTITY_MISMATCH", "B3_PLAN_IDENTITY_MISMATCH: plan is required");
+  const initialAttempt = input.attemptId === undefined ? onlyOpenAttempt(input.leasedRun.state) : input.leasedRun.state.attempts[input.attemptId];
+  const allowWorkspaceDrift = input.requireBaseFingerprint === false
+    || (initialAttempt !== undefined && initialAttempt.stage !== "EXECUTOR_DISPATCH_AUTHORIZED");
+  await refreshLeasedRunV2(input.leasedRun, { workspaceComparison: allowWorkspaceDrift ? "ALLOW_POST_EXECUTOR_DRIFT" : "REQUIRE_INITIAL" });
+  const attempt = input.attemptId === undefined ? onlyOpenAttempt(input.leasedRun.state) : input.leasedRun.state.attempts[input.attemptId];
+  if (!attempt || attempt.disposition !== "OPEN" || !["EXECUTOR_DISPATCH_AUTHORIZED", "EXECUTOR_RUNNING", "POST_EXECUTOR_CAPTURE", "EVIDENCE_CAPTURING", "RECONCILING"].includes(attempt.stage)) {
+    throw new RalphAdmissionError("B3_AUTHORIZED_INVOCATION_REQUIRED", "B3_AUTHORIZED_INVOCATION_REQUIRED: durable dispatch authorization is required");
+  }
+  const phase = input.plan.phases.find((candidate) => candidate.id === attempt.phaseId);
+  const task = phase?.tasks.find((candidate) => candidate.id === attempt.taskId);
+  if (!phase || !task) throw new RalphAdmissionError("B3_ATTEMPT_RECONCILIATION_REQUIRED");
+  const planIdentity = input.planIdentity ?? input.plan.artifactId;
+  const planDigest = sha256Canonical(input.plan);
+  if (input.planDigest !== undefined && input.planDigest !== planDigest) throw new RalphAdmissionError("B3_PLAN_IDENTITY_MISMATCH");
+  assertPlanIdentity(input.leasedRun, input.plan, planIdentity, planDigest);
+  const binding: ArtifactBindingInputV2 = {
+    runId: input.leasedRun.runId,
+    phase,
+    task,
+    attempt,
+    planIdentity,
+    planDigest,
+    snapshot: input.leasedRun.snapshot,
+  };
+  const expectedWorkUnit = createWorkUnitV2(binding);
+  const artifacts = await loadAndValidateAuthorizedArtifacts(input.leasedRun, binding, expectedWorkUnit);
+  if (input.requireBaseFingerprint !== false && attempt.stage === "EXECUTOR_DISPATCH_AUTHORIZED") {
+    const currentFingerprint = await fingerprintWorkspace(
+      input.leasedRun.projectRoot,
+      input.leasedRun.snapshot.workspacePolicy,
+      undefined,
+      input.leasedRun.workspaceFingerprintFileSystem,
+    );
+    if (currentFingerprint.fingerprintDigest !== attempt.attemptBaseFingerprint) throw new RalphAdmissionError("B3_WORKSPACE_RECONCILIATION_REQUIRED");
+  }
+  await revalidateLeaseOwnershipV2(input.leasedRun);
+  return {
+    kind: "REOPENED_AUTHORIZED_INVOCATION",
+    attempt,
+    workUnit: artifacts.workUnit,
+    invocation: artifacts.invocation,
+    authorizedInvocation: createAuthorizedInvocation(artifacts.invocation, artifacts.workUnit),
   };
 }
 
@@ -650,15 +742,6 @@ async function finishDecision(
   };
 }
 
-function releaseProof(): LeaseReleaseOptionsV2 {
-  return {
-    noActiveExternalInvocation: true,
-    semanticWritesDurable: true,
-    artifactWritesDurable: true,
-    noExecutorCapability: true,
-  };
-}
-
 function coreEvent<TType extends RalphEventTypeV2>(
   state: RalphRuntimeStateV2,
   eventType: TType,
@@ -711,6 +794,13 @@ function requireAuthorizedInvocationInternals(value: AuthorizedInvocationV2): {
 
 function createAuthorizedInvocation(descriptor: InvocationDescriptorV2, workUnit: WorkUnitV2): AuthorizedInvocationV2 {
   return new AuthorizedInvocationV2(descriptor, workUnit, AUTHORIZED_INVOCATION_CONSTRUCTION_SEAL);
+}
+
+function artifactRefsForAttempt(attemptId: string, names: readonly string[]): readonly string[] {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(attemptId) || names.some((name) => !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name))) {
+    throw new RalphAdmissionError("B3_ARTIFACT_RECONCILIATION_REQUIRED", "B3_ARTIFACT_RECONCILIATION_REQUIRED: unsafe artifact reference");
+  }
+  return names.map((name) => `attempts/${attemptId}/${name}`);
 }
 
 function freezeJsonClone<T>(value: T): T {

@@ -16,3 +16,5 @@ export * from "./audit-binding.js";
 export * from "./resume.js";
 export * from "./phase-projection.js";
 export * from "./task-projection.js";
+export * from "./operational-b4/index.js";
+export * from "./operational-c/index.js";
