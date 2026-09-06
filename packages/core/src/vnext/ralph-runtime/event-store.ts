@@ -2,8 +2,8 @@ import { dirname, join, parse, resolve } from "node:path";
 import { mkdir, open, readdir, readFile, rename, writeFile, lstat, readlink, link, unlink } from "node:fs/promises";
 import type { Dirent, Stats } from "node:fs";
 import { canonicalEventBytes, type RalphEvent } from "./events.js";
-import { canonicalJson } from "./canonical-json.js";
 import { validateRalphEvent } from "./events.js";
+import { DurableLedgerDurabilityUnknownError, DurableOneEventPerFileLedger, type DurableLedgerCursor } from "./durable-ledger.js";
 
 export const RALPH_EVENT_MAX = 100_000;
 export const RALPH_EVENT_DIGITS = 12;
@@ -74,11 +74,7 @@ export interface LedgerInspection {
   readonly lastEventHash: string | null;
 }
 
-interface VerifiedLedgerCursor {
-  readonly runId: string;
-  readonly lastSequence: number;
-  readonly lastEventHash: string | null;
-}
+type VerifiedLedgerCursor = DurableLedgerCursor;
 
 export class RalphEventStoreError extends Error {
   constructor(readonly code: string, message = code) {
@@ -104,6 +100,27 @@ export function resolveRalphRunDirectory(projectRoot: string, runId: string): st
   return join(resolve(projectRoot), ".rb-harness", "ralph", "runs", runId);
 }
 
+export async function ensureRalphRuntimeLayout(
+  fs: RalphRuntimeFileSystem,
+  projectRoot: string,
+  runtimeRoot: string,
+  runDirectory: string,
+  eventsDirectory: string,
+  quarantineDirectory: string,
+  stateDirectory: string,
+): Promise<void> {
+  assertDurabilityCapabilities(fs);
+  await ensureNoSymlinkAncestors(fs, projectRoot);
+  await ensureDirectory(fs, projectRoot, true);
+  await ensureDirectory(fs, join(projectRoot, ".rb-harness"), false);
+  await ensureDirectory(fs, runtimeRoot, false);
+  await ensureDirectory(fs, join(runtimeRoot, "runs"), false);
+  await ensureDirectory(fs, runDirectory, false);
+  await ensureDirectory(fs, eventsDirectory, false);
+  await ensureDirectory(fs, quarantineDirectory, false);
+  await ensureDirectory(fs, stateDirectory, false);
+}
+
 export class RalphEventStore {
   readonly projectRoot: string;
   readonly runtimeRoot: string;
@@ -113,7 +130,7 @@ export class RalphEventStore {
   readonly stateDirectory: string;
   private readonly fs: RalphRuntimeFileSystem;
   private readonly nonce: () => string;
-  private cursor: VerifiedLedgerCursor | undefined;
+  private readonly ledger: DurableOneEventPerFileLedger<RalphEvent>;
 
   constructor(private readonly options: EventStoreOptions) {
     if (typeof options.projectRoot !== "string" || options.projectRoot.length === 0) throw new RalphEventStoreError("RALPH_PROJECT_ROOT_INVALID");
@@ -126,150 +143,91 @@ export class RalphEventStore {
     this.stateDirectory = join(this.runDirectory, "state");
     this.fs = options.fs ?? nodeRalphRuntimeFileSystem;
     this.nonce = options.nonce ?? (() => `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    this.ledger = new DurableOneEventPerFileLedger({
+      runId: options.runId,
+      eventsDirectory: this.eventsDirectory,
+      quarantineDirectory: this.quarantineDirectory,
+      fileSystem: this.fs,
+      nonce: this.nonce,
+      maxEvents: RALPH_EVENT_MAX,
+      eventFileName,
+      isEventFileName,
+      isEventTempFileName,
+      createError: (code, message) => new RalphEventStoreError(code, message),
+      codec: {
+        validate: validateRalphEvent,
+        canonicalBytes: canonicalEventBytes,
+        runId: (event) => event.runId,
+        sequence: (event) => event.sequence,
+        eventHash: (event) => event.eventHash,
+        previousEventHash: (event) => event.previousEventHash,
+      },
+      digits: RALPH_EVENT_DIGITS,
+    });
   }
 
   get runId(): string { return this.options.runId; }
   get fileSystem(): RalphRuntimeFileSystem { return this.fs; }
-  get verifiedCursor(): VerifiedLedgerCursor | undefined { return this.cursor; }
+  get verifiedCursor(): VerifiedLedgerCursor | undefined { return this.ledger.verifiedCursor; }
 
   async ensureLayout(): Promise<void> {
-    assertDurabilityCapabilities(this.fs);
-    await ensureNoSymlinkAncestors(this.fs, this.projectRoot);
-    await ensureDirectory(this.fs, this.projectRoot, true);
-    await ensureDirectory(this.fs, join(this.projectRoot, ".rb-harness"), false);
-    await ensureDirectory(this.fs, this.runtimeRoot, false);
-    await ensureDirectory(this.fs, join(this.runtimeRoot, "runs"), false);
-    await ensureDirectory(this.fs, this.runDirectory, false);
-    await ensureDirectory(this.fs, this.eventsDirectory, false);
-    await ensureDirectory(this.fs, this.quarantineDirectory, false);
-    await ensureDirectory(this.fs, this.stateDirectory, false);
+    await ensureRalphRuntimeLayout(
+      this.fs,
+      this.projectRoot,
+      this.runtimeRoot,
+      this.runDirectory,
+      this.eventsDirectory,
+      this.quarantineDirectory,
+      this.stateDirectory,
+    );
+    await assertV1RunFamily(this.fs, this.runDirectory);
   }
 
   async inspect(): Promise<LedgerInspection> {
     await this.ensureLayout();
-    let names: readonly string[];
-    try { names = await this.fs.readdir(this.eventsDirectory); }
-    catch (error) {
-      if (isMissing(error)) {
-        const empty = { events: [], lastSequence: 0, lastEventHash: null } as const;
-        this.cursor = { runId: this.runId, lastSequence: 0, lastEventHash: null };
-        return empty;
-      }
-      throw error;
-    }
-    const finalNames = names.filter(isEventFileName).sort();
-    const unknownNames = names.filter((name) => !isEventFileName(name) && !isEventTempFileName(name));
-    if (unknownNames.length > 0) throw new RalphEventStoreError("RALPH_EVENT_LEDGER_INVALID_FILENAME", `RALPH_EVENT_LEDGER_INVALID_FILENAME: ${unknownNames.sort().join(",")}`);
-    if (finalNames.length > RALPH_EVENT_MAX) throw new RalphEventStoreError("RALPH_EVENT_LEDGER_CAPACITY_EXCEEDED");
-
-    const events: RalphEvent[] = [];
-    let previousHash: string | null = null;
-    for (let index = 0; index < finalNames.length; index += 1) {
-      const name = finalNames[index];
-      if (name === undefined) throw new RalphEventStoreError("RALPH_EVENT_LEDGER_INTERNAL_INDEX");
-      const sequence = Number(name.slice(0, RALPH_EVENT_DIGITS));
-      if (sequence !== index + 1) throw new RalphEventStoreError("RALPH_EVENT_LEDGER_GAP");
-      const path = join(this.eventsDirectory, name);
-      let bytes: Buffer;
-      try { bytes = await this.fs.readFile(path); } catch { throw new RalphEventStoreError("RALPH_EVENT_LEDGER_READ_FAILED", `RALPH_EVENT_LEDGER_READ_FAILED: ${name}`); }
-      let parsed: unknown;
-      try { parsed = JSON.parse(bytes.toString("utf8")); } catch { throw new RalphEventStoreError("RALPH_EVENT_LEDGER_MALFORMED_JSON", `RALPH_EVENT_LEDGER_MALFORMED_JSON: ${name}`); }
-      try { validateRalphEvent(parsed); } catch (error) { throw new RalphEventStoreError("RALPH_EVENT_LEDGER_SCHEMA_INVALID", `${name}: ${error instanceof Error ? error.message : String(error)}`); }
-      const event = parsed as RalphEvent;
-      if (event.runId !== this.runId) throw new RalphEventStoreError("RALPH_EVENT_LEDGER_FOREIGN_RUN");
-      if (event.sequence !== sequence) throw new RalphEventStoreError("RALPH_EVENT_LEDGER_SEQUENCE_MISMATCH");
-      if (event.previousEventHash !== previousHash) throw new RalphEventStoreError("RALPH_EVENT_LEDGER_HASH_CHAIN_MISMATCH");
-      if (bytes.toString("utf8") !== canonicalJson(event)) throw new RalphEventStoreError("RALPH_EVENT_LEDGER_NON_CANONICAL", `RALPH_EVENT_LEDGER_NON_CANONICAL: ${name}`);
-      events.push(event);
-      previousHash = event.eventHash;
-    }
-    const result = { events, lastSequence: events.length, lastEventHash: previousHash };
-    this.cursor = { runId: this.runId, lastSequence: result.lastSequence, lastEventHash: result.lastEventHash };
-    return result;
+    return this.ledger.inspect();
   }
 
   async append(event: RalphEvent): Promise<AppendEventResult> {
     validateRalphEvent(event);
     if (event.runId !== this.runId) throw new RalphEventStoreError("RALPH_EVENT_FOREIGN_RUN");
     await this.ensureLayout();
-    const cursor = await this.ensureVerifiedCursor();
-    await this.verifyCursorTail(cursor);
-    if (event.sequence > RALPH_EVENT_MAX) throw new RalphEventStoreError("RALPH_EVENT_LEDGER_CAPACITY_EXCEEDED");
-    const target = join(this.eventsDirectory, eventFileName(event.sequence));
-    const bytes = canonicalEventBytes(event);
-
-    if (event.sequence <= cursor.lastSequence) {
-      const existing = await readRequired(this.fs, target);
-      if (existing.equals(bytes)) return { sequence: event.sequence, committed: false, event };
-      throw new RalphEventStoreError("RALPH_EVENT_SEQUENCE_FORK");
-    }
-    if (event.sequence !== cursor.lastSequence + 1) throw new RalphEventStoreError("RALPH_EVENT_SEQUENCE_NOT_NEXT");
-    if (event.previousEventHash !== cursor.lastEventHash) throw new RalphEventStoreError("RALPH_EVENT_PREVIOUS_HASH_MISMATCH");
-
-    const temporary = join(this.eventsDirectory, `.${eventFileName(event.sequence)}.tmp-${this.nonce()}`);
-    await this.fs.writeFile(temporary, bytes, { flag: "wx", mode: 0o600 });
-    await this.fs.fsyncFile(temporary);
     try {
-      await this.fs.link(temporary, target);
+      const result = await this.ledger.append(event);
+      return { sequence: result.sequence, committed: result.committed, event: result.event };
     } catch (error) {
-      if (!isExisting(error)) {
-        this.cursor = undefined;
-        throw new RalphEventStoreError("RALPH_EVENT_EXCLUSIVE_PUBLISH_UNAVAILABLE", error instanceof Error ? error.message : String(error));
-      }
-      const existing = await readRequired(this.fs, target);
-      await removeTemporary(this.fs, temporary, this.eventsDirectory);
-      await this.inspect();
-      if (existing.equals(bytes)) return { sequence: event.sequence, committed: false, event };
-      throw new RalphEventStoreError("RALPH_EVENT_SEQUENCE_FORK");
-    }
-
-    try {
-      await this.fs.fsyncDirectory(this.eventsDirectory);
-      await this.fs.unlink(temporary);
-      await this.fs.fsyncDirectory(this.eventsDirectory);
-    } catch (error) {
-      this.cursor = undefined;
+      // Preserve V1's established raw failure surface. V2 consumes the
+      // richer typed uncertainty from the shared physical primitive.
+      if (error instanceof DurableLedgerDurabilityUnknownError) throw error.cause;
       throw error;
     }
-    this.cursor = { runId: this.runId, lastSequence: event.sequence, lastEventHash: event.eventHash };
-    return { sequence: event.sequence, committed: true, event };
   }
 
   async quarantineTemporaryFiles(): Promise<readonly string[]> {
     await this.ensureLayout();
-    const names = (await this.fs.readdir(this.eventsDirectory)).filter(isEventTempFileName).sort();
-    const quarantined: string[] = [];
-    for (const name of names) {
-      const destination = join(this.quarantineDirectory, `event-${name.slice(1)}`);
-      await this.fs.rename(join(this.eventsDirectory, name), destination);
-      quarantined.push(destination);
-    }
-    if (quarantined.length > 0) await this.fs.fsyncDirectory(this.quarantineDirectory);
-    if (quarantined.length > 0) await this.fs.fsyncDirectory(this.eventsDirectory);
-    return quarantined;
+    return this.ledger.quarantineTemporaryFiles();
+  }
+}
+
+async function assertV1RunFamily(fs: RalphRuntimeFileSystem, runDirectory: string): Promise<void> {
+  const snapshotPath = join(runDirectory, "run-snapshot.json");
+  let bytes: Buffer;
+  try { bytes = await fs.readFile(snapshotPath); }
+  catch (error) {
+    if (isMissing(error)) return;
+    throw error;
   }
 
-  private async ensureVerifiedCursor(): Promise<VerifiedLedgerCursor> {
-    if (this.cursor?.runId === this.runId) return this.cursor;
-    const ledger = await this.inspect();
-    return { runId: this.runId, lastSequence: ledger.lastSequence, lastEventHash: ledger.lastEventHash };
-  }
-
-  private async verifyCursorTail(cursor: VerifiedLedgerCursor): Promise<void> {
-    if (cursor.lastSequence === 0) return;
-    try {
-      const bytes = await readRequired(this.fs, join(this.eventsDirectory, eventFileName(cursor.lastSequence)));
-      let parsed: unknown;
-      try { parsed = JSON.parse(bytes.toString("utf8")); } catch { throw new RalphEventStoreError("RALPH_EVENT_LEDGER_MALFORMED_JSON"); }
-      validateRalphEvent(parsed);
-      const event = parsed as RalphEvent;
-      if (event.runId !== this.runId || event.sequence !== cursor.lastSequence || event.eventHash !== cursor.lastEventHash || bytes.toString("utf8") !== canonicalJson(event)) {
-        throw new RalphEventStoreError("RALPH_EVENT_LEDGER_CURSOR_INVALID");
-      }
-    } catch (error) {
-      this.cursor = undefined;
-      throw error;
-    }
+  let parsed: unknown;
+  try { parsed = JSON.parse(bytes.toString("utf8")); }
+  catch { return; }
+  if (
+    parsed !== null
+    && typeof parsed === "object"
+    && "snapshotSchemaVersion" in parsed
+    && (parsed as { snapshotSchemaVersion?: unknown }).snapshotSchemaVersion === "rb-ralph-run-snapshot/v2"
+  ) {
+    throw new RalphEventStoreError("RALPH_V1_RUN_SCHEMA_FAMILY_MISMATCH");
   }
 }
 
