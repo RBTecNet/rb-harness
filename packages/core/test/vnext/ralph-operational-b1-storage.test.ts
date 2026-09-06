@@ -16,6 +16,7 @@ import {
   STATE_SCHEMA_V2,
   createInitialRuntimeStateV2,
   createRalphEventV2,
+  parseValidationSpec,
   type EventPayloadMapV2,
   type RalphEventTypeV2,
   type RalphEventV2,
@@ -29,6 +30,7 @@ import {
   createStateSnapshotV2,
   initializeOperationalRunV2,
   inspectOperationalRunV2,
+  replayOperationalRunV2,
   persistRunSnapshotV2,
   persistStateSnapshotV2,
   readRunSnapshotV2,
@@ -43,6 +45,14 @@ import { sha256, sha256Canonical } from "../../src/vnext/ralph-runtime/hashing.j
 
 const RUN_ID = "run-b1";
 const TEST_DIRECTORY = dirname(fileURLToPath(import.meta.url));
+
+type LifecycleEventContext = {
+  readonly entityKind: "run" | "task" | "attempt" | "workspace";
+  readonly entityId?: string;
+  readonly phaseId?: string;
+  readonly taskId?: string;
+  readonly attemptId?: string;
+};
 
 function descriptor(schemaVersion: string, descriptorId: string): { schemaVersion: string; descriptorId: string; descriptorDigest: string } {
   const base = { schemaVersion, descriptorId };
@@ -121,6 +131,40 @@ function runStarted(state: RalphRuntimeStateV2): RalphEventV2 {
   return event(state, "run.started", {});
 }
 
+function humanLifecycleGenesis(): RalphRuntimeStateV2 {
+  return createInitialRuntimeStateV2({
+    runId: RUN_ID,
+    phases: [{ phaseId: "P01", taskIds: ["T001"] }],
+    tasks: [{ taskId: "T001", phaseId: "P01", dependsOn: [] }],
+  });
+}
+
+function humanLifecycleEvent<TType extends RalphEventTypeV2>(
+  state: RalphRuntimeStateV2,
+  eventType: TType,
+  payload: EventPayloadMapV2[TType],
+  context: LifecycleEventContext,
+): RalphEventV2 {
+  return createRalphEventV2({
+    eventId: `b1-human-${state.lastSequence + 1}-${eventType}`,
+    eventType,
+    schemaVersion: EVENT_SCHEMA_V2,
+    runId: state.runId,
+    sequence: state.lastSequence + 1,
+    occurredAt: `2026-09-05T04:10:${String(state.lastSequence).padStart(2, "0")}.000Z`,
+    recordedAt: `2026-09-05T04:10:${String(state.lastSequence).padStart(2, "0")}.100Z`,
+    entity: { kind: context.entityKind, id: context.entityId ?? context.attemptId ?? context.taskId ?? "workspace-1" },
+    ...(context.phaseId === undefined ? {} : { phaseId: context.phaseId }),
+    ...(context.taskId === undefined ? {} : { taskId: context.taskId }),
+    ...(context.attemptId === undefined ? {} : { attemptId: context.attemptId }),
+    actor: "CORE",
+    causationId: null,
+    correlationId: "b1-human-correlation",
+    payload,
+    previousEventHash: state.lastEventHash,
+  } as UnsignedRalphEventV2<TType>) as RalphEventV2;
+}
+
 async function initialized(root: string): Promise<{
   readonly store: RalphEventStoreV2;
   readonly snapshot: RunSnapshotV2;
@@ -142,6 +186,137 @@ async function initialized(root: string): Promise<{
 }
 
 describe("Ralph Operational Core V2 — Slice B1 storage", () => {
+  it("physically persists and cold-replays the human resume without duplicating proofRef", async () => {
+    const root = await mkdtemp(resolve(process.env.TMPDIR ?? "/tmp", "rb-ralph-b1-human-resume-"));
+    try {
+      const initial = humanLifecycleGenesis();
+      const snapshot = await snapshotFor(root);
+      const store = new RalphEventStoreV2({ projectRoot: root, runId: RUN_ID, nonce: () => "b1-human-resume" });
+      const runCreated = humanLifecycleEvent(initial, "run.created", { phaseIds: initial.phaseIds, taskIds: initial.taskIds }, { entityKind: "run", entityId: RUN_ID });
+      const initializedResult = await initializeOperationalRunV2({
+        store,
+        snapshot,
+        genesisState: initial,
+        runCreatedEvent: runCreated,
+        createdAt: "2026-09-05T04:10:00.000Z",
+        nonce: "b1-human-init",
+      });
+      let state = initializedResult.state;
+      const events: RalphEventV2[] = [runCreated];
+
+      const push = async <TType extends RalphEventTypeV2>(
+        eventType: TType,
+        payload: EventPayloadMapV2[TType],
+        context: LifecycleEventContext,
+      ): Promise<void> => {
+        const nextEvent = humanLifecycleEvent(state, eventType, payload, context);
+        const committed = await commitRalphEventV2({
+          store,
+          state,
+          event: nextEvent,
+          writtenAt: nextEvent.recordedAt,
+          nonce: `b1-human-${nextEvent.sequence}`,
+        });
+        events.push(nextEvent);
+        state = committed.state;
+      };
+
+      await push("run.started", {}, { entityKind: "run", entityId: RUN_ID });
+      await push("task.state-changed", { disposition: "READY", activity: "IDLE", owner: "NONE", hold: "NONE" }, {
+        entityKind: "task",
+        entityId: "T001",
+        taskId: "T001",
+        phaseId: "P01",
+      });
+      await push("workspace.checkpointed", {
+        checkpoint: { kind: "runStartFingerprint", fingerprintDigest: "fp-base", emittedAt: "2026-09-05T04:10:03.000Z" },
+      }, { entityKind: "workspace", entityId: "workspace-1" });
+      await push("attempt.started", {
+        taskId: "T001",
+        attemptId: "A001",
+        ordinal: 1,
+        strategyGeneration: 0,
+        attemptBaseFingerprint: "fp-base",
+        startedAt: "2026-09-05T04:10:04.000Z",
+      }, { entityKind: "attempt", entityId: "A001", attemptId: "A001", taskId: "T001", phaseId: "P01" });
+      await push("executor.dispatch-authorized", {
+        invocationId: "invocation-1",
+        workUnitDigest: "work-unit-1",
+        attemptBaseFingerprint: "fp-base",
+        timeoutPolicyDigest: "timeout-policy-1",
+        capabilityPolicyDigest: "capability-policy-1",
+        authorizedAt: "2026-09-05T04:10:05.000Z",
+      }, { entityKind: "attempt", entityId: "A001", attemptId: "A001", taskId: "T001", phaseId: "P01" });
+      await push("executor.started", { invocationId: "invocation-1", startedAt: "2026-09-05T04:10:06.000Z" }, {
+        entityKind: "attempt", entityId: "A001", attemptId: "A001", taskId: "T001", phaseId: "P01",
+      });
+      await push("executor.finished", {
+        invocationId: "invocation-1",
+        status: "SUCCEEDED",
+        termination: "NORMAL",
+        finishedAt: "2026-09-05T04:10:07.000Z",
+      }, { entityKind: "attempt", entityId: "A001", attemptId: "A001", taskId: "T001", phaseId: "P01" });
+      await push("evidence.capture-started", {
+        evidenceCaptureId: "capture-1",
+        postExecutorFingerprint: "fp-post",
+        startedAt: "2026-09-05T04:10:08.000Z",
+      }, { entityKind: "attempt", entityId: "A001", attemptId: "A001", taskId: "T001", phaseId: "P01" });
+      await push("evidence.captured", {
+        evidenceCaptureId: "capture-1",
+        evidenceDigest: "evidence-digest-1",
+        postExecutorFingerprint: "fp-post",
+        capturedAt: "2026-09-05T04:10:09.000Z",
+      }, { entityKind: "attempt", entityId: "A001", attemptId: "A001", taskId: "T001", phaseId: "P01" });
+      const spec = parseValidationSpec("`printf validation`", { taskId: "T001", planIdentity: "plan-b1-human", ordinal: 1 });
+      await push("validation.started", {
+        validationSpec: spec,
+        validationRunId: "validation-run-1",
+        validationRunOrdinal: 1,
+        startedAt: "2026-09-05T04:10:10.000Z",
+      }, { entityKind: "attempt", entityId: "A001", attemptId: "A001", taskId: "T001", phaseId: "P01" });
+      await push("attempt.human-required", {
+        reason: "human decision is required",
+        proofRef: "human-request-proof",
+      }, { entityKind: "attempt", entityId: "A001", attemptId: "A001", taskId: "T001", phaseId: "P01" });
+      await push("run.hold-cleared", {
+        previousHold: "HUMAN_REQUIRED",
+        reason: "human decision was recorded",
+        proofRef: "human-resolution-proof",
+      }, { entityKind: "run", entityId: RUN_ID });
+
+      expect(state).toMatchObject({ hold: "NONE" });
+      expect(state.attempts.A001).toMatchObject({ disposition: "OPEN", stage: "VALIDATING", recovery: { kind: "NONE" } });
+      expect(state.attempts.A001?.recovery).not.toHaveProperty("proofRef");
+      expect(state.tasks.T001).toMatchObject({ activity: "VALIDATING", owner: "CORE", hold: "NONE", currentAttemptId: "A001" });
+
+      const reopened = new RalphEventStoreV2({ projectRoot: root, runId: RUN_ID });
+      await unlink(resolve(reopened.runDirectory, "state", "current.json"));
+      const replayed = await replayOperationalRunV2(reopened, initial);
+      expect(replayed.snapshotUsed).toBe(false);
+      expect(replayed.snapshotRepairRequired).toBe(true);
+      expect(replayed.state).toEqual(state);
+      expect(replayed.state.attempts.A001?.stage).toBe("VALIDATING");
+      expect(replayed.state.tasks.T001).toMatchObject({ activity: "VALIDATING", owner: "CORE", hold: "NONE" });
+
+      const opened = await inspectOperationalRunV2({
+        projectRoot: root,
+        runId: RUN_ID,
+        genesisState: initial,
+        externalFacts: { workspaceFingerprint: snapshot.initialWorkspaceFingerprint },
+      });
+      expect(opened.outcome).toBe("READY_FOR_LEASE");
+      expect(opened.state).toEqual(state);
+      const ledger = await reopened.inspect();
+      expect(ledger.events).toHaveLength(events.length);
+      expect(ledger.lastSequence).toBe(13);
+      const clearEvent = ledger.events.at(-1);
+      expect(clearEvent?.eventType).toBe("run.hold-cleared");
+      if (clearEvent?.eventType === "run.hold-cleared") expect(clearEvent.payload.proofRef).toBe("human-resolution-proof");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("proves the mechanical ledger extraction preserves V1 bytes and duplicate semantics", async () => {
     const root = await mkdtemp(resolve(process.env.TMPDIR ?? "/tmp", "rb-ralph-b1-v1-proof-"));
     try {

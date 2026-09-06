@@ -59,9 +59,9 @@ export function reduceRalphEventV2(state: RuntimeStateV2, event: RalphEventV2): 
       if (event.actor !== "CORE" || state.disposition !== "ACTIVE" || state.hold === "NONE" || event.payload.previousHold !== state.hold) {
         throw new Error("RALPH_V2_INVALID_RUN_HOLD_CLEAR");
       }
-      // Clearing a hold is deliberately limited to Run.hold.  The persisted
-      // Attempt stage and Task projection are not guessed or rewritten here.
-      next = { ...state, hold: "NONE" };
+      next = event.payload.previousHold === "HUMAN_REQUIRED"
+        ? reduceHumanHoldCleared(state, event.recordedAt)
+        : { ...state, hold: "NONE" };
       break;
     case "run.completed":
       if (!canCompleteRuntimeV2(state, event.payload.finalStatePersisted)) throw new Error("RALPH_V2_RUN_COMPLETION_PRECONDITION");
@@ -438,6 +438,44 @@ function reduceAttemptHumanRequired(
   };
   const withAttempt = replaceOpenAttempt(state, nextAttempt, event.recordedAt);
   return { ...withAttempt, hold: "HUMAN_REQUIRED" };
+}
+
+function reduceHumanHoldCleared(
+  state: RalphRuntimeStateV2,
+  recordedAt: string,
+): RalphRuntimeStateV2 {
+  const openAttempts = openAttemptsV2(state);
+  if (openAttempts.length > 1) throw new Error("RALPH_V2_SEQUENTIAL_OPEN_ATTEMPT_VIOLATION");
+
+  // HUMAN_REQUIRED is also a valid global RunHold.  Only an open Attempt that
+  // explicitly claims the human boundary is eligible for the Attempt-bound
+  // resume; all other valid states retain the historical Run-only clear.
+  const humanAttempt = openAttempts[0];
+  if (!humanAttempt) return { ...state, hold: "NONE" };
+  if (humanAttempt.stage !== "AWAITING_HUMAN") return { ...state, hold: "NONE" };
+  if (humanAttempt.recovery.kind !== "HUMAN_REQUIRED") {
+    throw new Error("RALPH_V2_HUMAN_RESUME_ATTEMPT_INVALID");
+  }
+
+  const task = state.tasks[humanAttempt.taskId];
+  if (!task
+    || task.currentAttemptId !== humanAttempt.attemptId
+    || task.disposition !== "READY"
+    || task.activity !== "IDLE"
+    || task.owner !== "NONE"
+    || task.hold !== "HUMAN_REQUIRED") {
+    throw new Error("RALPH_V2_HUMAN_RESUME_TASK_INVALID");
+  }
+
+  // The clear is one durable ledger fact.  Reuse the normal VALIDATING
+  // projection without copying its proof into unlabelled NONE recovery state.
+  const resumedAttempt: AttemptStateV2 = {
+    ...humanAttempt,
+    stage: "VALIDATING",
+    recovery: { kind: "NONE" },
+  };
+  const withAttempt = replaceOpenAttempt(state, resumedAttempt, recordedAt);
+  return { ...withAttempt, hold: "NONE" };
 }
 
 function reduceAttemptAuditReady(

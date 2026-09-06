@@ -320,6 +320,65 @@ function validationStartedState(): RalphRuntimeStateV2 {
   });
 }
 
+function humanResumeLifecycle(): {
+  readonly genesis: RalphRuntimeStateV2;
+  readonly events: readonly RalphEventV2[];
+  readonly afterHumanRequired: RalphRuntimeStateV2;
+  readonly afterClear: RalphRuntimeStateV2;
+} {
+  const genesis = createState();
+  let cursor = genesis;
+  const events: RalphEventV2[] = [];
+  let afterHumanRequired: RalphRuntimeStateV2 | undefined;
+
+  const append = <TType extends RalphEventTypeV2>(
+    eventType: TType,
+    payload: EventPayloadMapV2[TType],
+    options: EventOptions = {},
+  ): void => {
+    const event = makeEvent(cursor, eventType, payload, options);
+    events.push(event);
+    cursor = reduceRalphEventV2(cursor, event);
+  };
+
+  append("run.created", { phaseIds: ["P01"], taskIds: ["T001"] });
+  append("run.started", {});
+  append("task.state-changed", { disposition: "READY", activity: "IDLE", owner: "NONE", hold: "NONE" }, { taskId: "T001", phaseId: "P01" });
+  append("workspace.checkpointed", { checkpoint: { kind: "runStartFingerprint", fingerprintDigest: "fp-base", emittedAt: "2026-01-01T00:00:10.000Z" } });
+  append("attempt.started", {
+    taskId: "T001",
+    attemptId: "A001",
+    ordinal: 1,
+    strategyGeneration: 0,
+    attemptBaseFingerprint: "fp-base",
+    startedAt: "2026-01-01T00:00:20.000Z",
+  }, { attemptId: "A001", taskId: "T001", phaseId: "P01" });
+  append("executor.dispatch-authorized", {
+    invocationId: "invocation-1",
+    workUnitDigest: "work-unit-1",
+    attemptBaseFingerprint: "fp-base",
+    timeoutPolicyDigest: "timeout-policy-1",
+    capabilityPolicyDigest: "capability-policy-1",
+    authorizedAt: "2026-01-01T00:00:30.000Z",
+  });
+  append("executor.started", { invocationId: "invocation-1", startedAt: "2026-01-01T00:00:40.000Z" });
+  append("executor.finished", { invocationId: "invocation-1", status: "SUCCEEDED", termination: "NORMAL", finishedAt: "2026-01-01T00:00:50.000Z" });
+  append("evidence.capture-started", { evidenceCaptureId: "capture-1", postExecutorFingerprint: "fp-post", startedAt: "2026-01-01T00:01:00.000Z" });
+  append("evidence.captured", { evidenceCaptureId: "capture-1", evidenceDigest: "evidence-digest-1", postExecutorFingerprint: "fp-post", capturedAt: "2026-01-01T00:01:10.000Z" });
+  const spec = parseValidationSpec("`printf validation`", { taskId: "T001", planIdentity: PLAN_ID, ordinal: 1 });
+  append("validation.started", { validationSpec: spec, validationRunId: "validation-run-1", validationRunOrdinal: 1, startedAt: "2026-01-01T00:01:20.000Z" });
+  append("attempt.human-required", { reason: "human decision is required", proofRef: "human-request-proof" }, { attemptId: "A001", taskId: "T001", phaseId: "P01" });
+  afterHumanRequired = cursor;
+  append("run.hold-cleared", { previousHold: "HUMAN_REQUIRED", reason: "human decision was recorded", proofRef: "human-resolution-proof" });
+
+  return {
+    genesis,
+    events,
+    afterHumanRequired: afterHumanRequired!,
+    afterClear: cursor,
+  };
+}
+
 function closeAttempt(state: RalphRuntimeStateV2, closureReason: AttemptClosureReason): RalphRuntimeStateV2 {
   return applyEvent(state, "attempt.closed", {
     attemptId: "A001",
@@ -760,20 +819,23 @@ describe("RALPH Operational V2 event schema and Attempt lifecycle", () => {
     expect(audited.tasks.T001).toMatchObject({ activity: "AUDITING", owner: "AUDITOR" });
   });
 
-  it("applies human and reconciliation holds atomically and clears only the Run hold", () => {
-    let human = applyEvent(attemptStartedState(), "attempt.human-required", {
+  it("resumes the same Attempt atomically when a HUMAN_REQUIRED hold is cleared", () => {
+    let human = applyEvent(validationStartedState(), "attempt.human-required", {
       reason: "external human evidence is required",
       proofRef: "proof-human-1",
     });
     expect(human).toMatchObject({ hold: "HUMAN_REQUIRED" });
     expect(human.attempts.A001).toMatchObject({ disposition: "OPEN", stage: "AWAITING_HUMAN", recovery: { kind: "HUMAN_REQUIRED", proofRef: "proof-human-1" } });
     expect(human.tasks.T001).toMatchObject({ disposition: "READY", activity: "IDLE", owner: "NONE", hold: "HUMAN_REQUIRED" });
-    const humanStage = human.attempts.A001?.stage;
     human = applyEvent(human, "run.hold-cleared", { previousHold: "HUMAN_REQUIRED", reason: "Core verified the human handoff", proofRef: "clear-proof-human-1" });
     expect(human.hold).toBe("NONE");
-    expect(human.attempts.A001?.stage).toBe(humanStage);
-    expect(human.attempts.A001?.disposition).toBe("OPEN");
-    expect(human.tasks.T001).toMatchObject({ disposition: "READY", activity: "IDLE", owner: "NONE", hold: "HUMAN_REQUIRED" });
+    expect(human.attempts.A001).toMatchObject({ disposition: "OPEN", stage: "VALIDATING" });
+    expect(human.attempts.A001?.recovery).toEqual({ kind: "NONE" });
+    expect(human.tasks.T001).toMatchObject({ disposition: "READY", activity: "VALIDATING", owner: "CORE", hold: "NONE", currentAttemptId: "A001" });
+    expect(human.attempts.A001?.validationRuns).toHaveLength(1);
+    expect(human.attempts.A001?.validationSet).toBeUndefined();
+    expect(human.attempts.A001?.auditPackage).toBeUndefined();
+    expect(human.tasks.T001?.disposition).not.toBe("COMPLETE");
     expect(() => applyEvent(human, "run.hold-cleared", { previousHold: "HUMAN_REQUIRED", reason: "arbitrary", proofRef: "proof" })).toThrow("RALPH_V2_INVALID_RUN_HOLD_CLEAR");
 
     let reconciliation = applyEvent(attemptStartedState(), "attempt.reconciliation-required", {
@@ -787,6 +849,190 @@ describe("RALPH Operational V2 event schema and Attempt lifecycle", () => {
     expect(reconciliation.hold).toBe("NONE");
     expect(reconciliation.attempts.A001?.stage).toBe("RECONCILING");
     expect(reconciliation.tasks.T001).toMatchObject({ activity: "RECONCILING", owner: "CORE", hold: "WORKSPACE_DRIFT" });
+  });
+
+  it("resumes the validated human lifecycle through one replayable event", () => {
+    const lifecycle = humanResumeLifecycle();
+    const held = lifecycle.afterHumanRequired;
+    const cleared = lifecycle.afterClear;
+
+    expect(held).toMatchObject({ hold: "HUMAN_REQUIRED" });
+    expect(held.attempts.A001).toMatchObject({
+      disposition: "OPEN",
+      stage: "AWAITING_HUMAN",
+      recovery: { kind: "HUMAN_REQUIRED", proofRef: "human-request-proof" },
+    });
+    expect(held.tasks.T001).toMatchObject({
+      disposition: "READY",
+      activity: "IDLE",
+      owner: "NONE",
+      hold: "HUMAN_REQUIRED",
+      currentAttemptId: "A001",
+    });
+
+    expect(() => assertV2RuntimeState({ ...held, hold: "NONE" })).toThrow("RALPH_V2_HUMAN_ATTEMPT_RUN_HOLD_MISMATCH");
+    expect(() => assertV2RuntimeState(cleared)).not.toThrow();
+    expect(cleared).toMatchObject({ hold: "NONE" });
+    expect(cleared.attempts.A001).toMatchObject({
+      disposition: "OPEN",
+      stage: "VALIDATING",
+      recovery: { kind: "NONE" },
+    });
+    expect(cleared.attempts.A001?.recovery).toEqual({ kind: "NONE" });
+    expect(cleared.attempts.A001?.recovery).not.toHaveProperty("proofRef");
+    expect(() => assertV2RuntimeState({
+      ...cleared,
+      attempts: { ...cleared.attempts, A001: { ...cleared.attempts.A001!, recovery: { kind: "NONE", proofRef: "duplicated-clear-proof" } } },
+    } as RalphRuntimeStateV2)).toThrow("RALPH_V2_NONE_RECOVERY_HAS_DETAILS");
+    expect(cleared.tasks.T001).toMatchObject({
+      disposition: "READY",
+      activity: "VALIDATING",
+      owner: "CORE",
+      hold: "NONE",
+      currentAttemptId: "A001",
+    });
+    expect(cleared.attempts.A001?.attemptId).toBe(held.attempts.A001?.attemptId);
+    expect(cleared.attempts.A001?.validationRuns).toEqual(held.attempts.A001?.validationRuns);
+  });
+
+  it("does not synthesize a validation result or downstream completion while resuming", () => {
+    const lifecycle = humanResumeLifecycle();
+    const cleared = lifecycle.afterClear;
+    const attempt = cleared.attempts.A001!;
+    const eventTypes = lifecycle.events.map((event) => event.eventType);
+
+    expect(attempt.disposition).toBe("OPEN");
+    expect(attempt.validationRuns).toHaveLength(1);
+    expect(attempt.validationRuns[0]?.outcome).toBe("PENDING");
+    expect(attempt.validationSet).toBeUndefined();
+    expect(attempt.auditPackage).toBeUndefined();
+    expect(cleared.tasks.T001?.disposition).not.toBe("COMPLETE");
+    expect(eventTypes).not.toContain("validation.completed");
+    expect(eventTypes).not.toContain("attempt.audit-ready");
+    expect(eventTypes).not.toContain("audit.started");
+    expect(eventTypes).not.toContain("attempt.closed");
+    expect(eventTypes).not.toContain("run.completed");
+  });
+
+  it("preserves generic non-human hold clearing without changing Attempt or Task", () => {
+    let held = applyEvent(validationStartedState(), "run.hold-set", { hold: "PAUSED", reason: "operator pause" });
+    const attemptBefore = held.attempts.A001;
+    const taskBefore = held.tasks.T001;
+    held = applyEvent(held, "run.hold-cleared", { previousHold: "PAUSED", reason: "operator resumed", proofRef: "pause-clear-proof" });
+
+    expect(held.hold).toBe("NONE");
+    expect(held.attempts.A001).toEqual(attemptBefore);
+    expect(held.tasks.T001).toEqual(taskBefore);
+    expect(held.attempts.A001?.stage).toBe("VALIDATING");
+    expect(held.tasks.T001).toMatchObject({ activity: "VALIDATING", owner: "CORE", hold: "NONE" });
+  });
+
+  it("clears a global HUMAN_REQUIRED hold when there is no OPEN Attempt", () => {
+    let held = applyEvent(startedState(), "run.hold-set", { hold: "HUMAN_REQUIRED", reason: "global human decision" });
+    expect(() => assertV2RuntimeState(held)).not.toThrow();
+    const attemptsBefore = held.attempts;
+    const tasksBefore = held.tasks;
+    held = applyEvent(held, "run.hold-cleared", {
+      previousHold: "HUMAN_REQUIRED",
+      reason: "global human decision resolved",
+      proofRef: "global-human-clear-proof",
+    });
+
+    expect(held.hold).toBe("NONE");
+    expect(held.attempts).toEqual(attemptsBefore);
+    expect(held.tasks).toEqual(tasksBefore);
+    expect(openAttempt(held)).toBeUndefined();
+  });
+
+  it("clears a global HUMAN_REQUIRED hold without resuming a mid-flight EXECUTOR_RUNNING Attempt", () => {
+    let held = applyEvent(executorRunningState(), "run.hold-set", { hold: "HUMAN_REQUIRED", reason: "global human decision" });
+    const attemptBefore = held.attempts.A001;
+    const taskBefore = held.tasks.T001;
+    held = applyEvent(held, "run.hold-cleared", {
+      previousHold: "HUMAN_REQUIRED",
+      reason: "global human decision resolved",
+      proofRef: "mid-flight-human-clear-proof",
+    });
+
+    expect(held.hold).toBe("NONE");
+    expect(held.attempts.A001).toEqual(attemptBefore);
+    expect(held.tasks.T001).toEqual(taskBefore);
+    expect(held.attempts.A001?.stage).toBe("EXECUTOR_RUNNING");
+    expect(held.tasks.T001).toMatchObject({ disposition: "READY", activity: "EXECUTING", owner: "EXECUTOR", hold: "NONE" });
+  });
+
+  it("clears the remaining global HUMAN_REQUIRED hold after the former human Attempt is closed", () => {
+    const held = applyEvent(validationStartedState(), "attempt.human-required", {
+      reason: "external human evidence is required",
+      proofRef: "human-request-proof",
+    });
+    const closed = closeAttempt(held, "BUDGET_EXHAUSTED");
+    expect(closed).toMatchObject({ hold: "HUMAN_REQUIRED" });
+    expect(closed.attempts.A001).toMatchObject({
+      disposition: "CLOSED",
+      stage: "AWAITING_HUMAN",
+      closureReason: "BUDGET_EXHAUSTED",
+      recovery: { kind: "NONE" },
+    });
+    expect(closed.tasks.T001).toMatchObject({ activity: "IDLE", owner: "NONE", hold: "HUMAN_REQUIRED", currentAttemptId: "A001" });
+
+    const attemptBefore = closed.attempts.A001;
+    const taskBefore = closed.tasks.T001;
+    const cleared = applyEvent(closed, "run.hold-cleared", {
+      previousHold: "HUMAN_REQUIRED",
+      reason: "closed human Attempt no longer needs a Run hold",
+      proofRef: "closed-human-clear-proof",
+    });
+
+    expect(cleared.hold).toBe("NONE");
+    expect(cleared.attempts.A001).toEqual(attemptBefore);
+    expect(cleared.tasks.T001).toEqual(taskBefore);
+    expect(cleared.attempts.A001?.disposition).toBe("CLOSED");
+    expect(cleared.attempts.A001?.stage).toBe("AWAITING_HUMAN");
+    expect(cleared.tasks.T001?.activity).not.toBe("VALIDATING");
+    expect(openAttempt(cleared)).toBeUndefined();
+  });
+
+  it("fails closed for every invalid HUMAN_REQUIRED resume precondition", () => {
+    const clearPayload = { previousHold: "HUMAN_REQUIRED" as const, reason: "human resolved", proofRef: "clear-proof" };
+
+    const wrongStage = applyEvent(validationStartedState(), "run.hold-set", { hold: "HUMAN_REQUIRED", reason: "global human hold" });
+    const wrongStageAttempt = wrongStage.attempts.A001;
+    const wrongStageTask = wrongStage.tasks.T001;
+    const globallyCleared = applyEvent(wrongStage, "run.hold-cleared", clearPayload);
+    expect(globallyCleared.hold).toBe("NONE");
+    expect(globallyCleared.attempts.A001).toEqual(wrongStageAttempt);
+    expect(globallyCleared.tasks.T001).toEqual(wrongStageTask);
+
+    const human = humanResumeLifecycle().afterHumanRequired;
+    const currentAttemptMismatch = {
+      ...human,
+      tasks: { ...human.tasks, T001: { ...human.tasks.T001!, currentAttemptId: "A999" } },
+    } as RalphRuntimeStateV2;
+    expect(() => applyEvent(currentAttemptMismatch, "run.hold-cleared", clearPayload)).toThrow("RALPH_V2_TASK_ATTEMPT_RELATION_MISMATCH");
+
+    const taskHoldMismatch = {
+      ...human,
+      tasks: { ...human.tasks, T001: { ...human.tasks.T001!, hold: "NONE" } },
+    } as RalphRuntimeStateV2;
+    expect(() => applyEvent(taskHoldMismatch, "run.hold-cleared", clearPayload)).toThrow("RALPH_V2_HUMAN_ATTEMPT_TASK_PROJECTION_INVALID");
+
+    expect(() => applyEvent(validationStartedState(), "run.hold-cleared", clearPayload)).toThrow("RALPH_V2_INVALID_RUN_HOLD_CLEAR");
+    expect(() => applyEvent(human, "run.hold-cleared", { ...clearPayload, previousHold: "PAUSED" })).toThrow("RALPH_V2_INVALID_RUN_HOLD_CLEAR");
+    expect(() => applyEvent(human, "run.hold-cleared", clearPayload, { actor: "HUMAN" })).toThrow("RALPH_V2_INVALID_RUN_HOLD_CLEAR");
+    expect(() => applyEvent(human, "run.hold-cleared", { ...clearPayload, proofRef: "" })).toThrow("RALPH_V2_EVENT_INVALID_PAYLOAD");
+    expect(() => applyEvent(human, "run.hold-cleared", { previousHold: "HUMAN_REQUIRED", reason: "human resolved" } as never)).toThrow("RALPH_V2_EVENT_MISSING_PAYLOAD_FIELD: proofRef");
+  });
+
+  it("replays the durable event sequence to the identical post-clear state", () => {
+    const lifecycle = humanResumeLifecycle();
+    validateV2EventSequence(lifecycle.events, RUN_ID);
+    const replayed = replayV2Events(lifecycle.genesis, lifecycle.events);
+
+    expect(replayed).toEqual(lifecycle.afterClear);
+    expect(replayV2Events(lifecycle.genesis, lifecycle.events)).toEqual(replayed);
+    expect(replayed.lastSequence).toBe(13);
+    expect(replayed.lastEventHash).toBe(lifecycle.events[lifecycle.events.length - 1]?.eventHash);
   });
 });
 

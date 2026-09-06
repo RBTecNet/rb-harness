@@ -333,10 +333,47 @@ and one atomic reduction.
 `run.hold-cleared` is Core-owned and may clear a Hold only after the condition
 that caused it has been resolved or proven resolved according to this
 contract. Clearing `HUMAN_REQUIRED` does not imply validation PASS, Attempt
-closure, or Task completion. The Attempt resumes from its persisted lifecycle
-without reexecuting the Executor by default. Clearing
-`RECONCILIATION_REQUIRED` requires explicit, proven reconciliation; the
-reconciliation algorithm is outside this contract.
+closure, or Task completion. Clearing `RECONCILIATION_REQUIRED` requires
+explicit, proven reconciliation; the reconciliation algorithm is outside this
+contract.
+
+For `run.hold-cleared` with `previousHold = HUMAN_REQUIRED`, the reducer
+inspects the current authoritative state and distinguishes an Attempt-bound
+human hold from a global Run hold:
+
+- **Attempt-bound HUMAN_REQUIRED hold:** when there is exactly one OPEN
+  Attempt with `stage = AWAITING_HUMAN` and
+  `recovery.kind = HUMAN_REQUIRED`, and its Task has the matching
+  `currentAttemptId` plus the `READY` / `IDLE` / `NONE` /
+  `HUMAN_REQUIRED` projection, the event atomically clears `Run.hold`,
+  resumes that same Attempt at `VALIDATING`, and applies the existing
+  `READY` / `VALIDATING` / `CORE` / `NONE` Task projection. The Executor is not
+  reexecuted by default.
+- **Global HUMAN_REQUIRED hold:** when no OPEN Attempt claims the
+  `AWAITING_HUMAN` plus `HUMAN_REQUIRED` Attempt-bound state (including no
+  Attempt, an Attempt at another stage, or a formerly human-held Attempt that
+  is already closed), the event retains generic Run-only hold-clearing
+  semantics: `Run.hold` becomes `NONE` and no Attempt or Task state is
+  resumed or inferred.
+
+An OPEN Attempt that claims `AWAITING_HUMAN` plus
+`recovery.kind = HUMAN_REQUIRED` is never silently downgraded to a global
+clear. If its Task/Run projection is inconsistent, if `currentAttemptId` does
+not match, or if the sequential invariant is violated, the reducer rejects
+the clear and fails closed.
+
+The state invariant is one-way: an OPEN Attempt in `AWAITING_HUMAN` requires
+`Run.hold = HUMAN_REQUIRED` and the matching Task human projection, but a
+`HUMAN_REQUIRED` Run hold does not imply that an OPEN `AWAITING_HUMAN` Attempt
+exists. This preserves `run.hold-set(HUMAN_REQUIRED)` as a valid global hold
+authority.
+
+The `proofRef` remains durably authoritative in the
+`run.hold-cleared` event payload. After a successful Attempt-bound resume,
+`Attempt.recovery` is the normal `{ kind: "NONE" }` projection and does not
+duplicate that reference. No ValidationRun result, PASS, FAIL, audit
+readiness, finding resolution, Attempt closure, or Task completion is
+inferred.
 
 ## 11. EventType × entity.kind matrix
 

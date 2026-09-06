@@ -244,6 +244,9 @@ export function assertV2RuntimeState(value: unknown): asserts value is RalphRunt
   for (const attempt of openAttempts) {
     const task = value.tasks[attempt.taskId];
     if (!task || task.currentAttemptId !== attempt.attemptId) throw new Error("RALPH_V2_OPEN_ATTEMPT_NOT_CURRENT");
+    if (attempt.stage === "AWAITING_HUMAN" && value.hold !== "HUMAN_REQUIRED") {
+      throw new Error("RALPH_V2_HUMAN_ATTEMPT_RUN_HOLD_MISMATCH");
+    }
     assertAttemptTaskProjection(attempt, task);
   }
 }
@@ -573,6 +576,7 @@ function assertRecovery(value: unknown): void {
   assertEnum(value.kind, ATTEMPT_RECOVERY_KINDS, "RALPH_V2_STATE_INVALID_RECOVERY");
   if (value.reason !== undefined) assertNonEmptyString(value.reason, "RALPH_V2_STATE_INVALID_RECOVERY");
   if (value.proofRef !== undefined) assertNonEmptyString(value.proofRef, "RALPH_V2_STATE_INVALID_RECOVERY");
+  if (value.kind === "NONE" && (value.reason !== undefined || value.proofRef !== undefined)) throw new Error("RALPH_V2_NONE_RECOVERY_HAS_DETAILS");
   if (value.kind !== "NONE" && (value.reason === undefined || value.proofRef === undefined)) throw new Error("RALPH_V2_RECOVERY_PROOF_MISSING");
 }
 
