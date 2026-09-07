@@ -20,8 +20,10 @@ import {
 import {
   RALPH_RUN_SNAPSHOT_V2_SCHEMA,
   commitRalphEventV2,
+  createRetryPolicyV1,
   initializeOperationalRunV2,
   RalphEventStoreV2,
+  retryPolicyDescriptorV1,
   type RunSnapshotV2,
 } from "../../src/vnext/ralph-runtime/operational-b1/index.js";
 import {
@@ -50,6 +52,8 @@ import { nodeRalphRuntimeFileSystem, type RalphRuntimeFileSystem } from "../../s
 import { sha256, sha256Canonical } from "../../src/vnext/ralph-runtime/hashing.js";
 
 const TEST_DIRECTORY = dirname(fileURLToPath(import.meta.url));
+const TEST_MAX_TASK_ATTEMPTS = 4;
+const TEST_VALIDATION_INFRA_RETRIES = 2;
 const ownerIdentity: ProcessIdentity = {
   pid: 53201,
   processStartIdentity: "c-owner-start",
@@ -91,6 +95,7 @@ function plan(): ExecutionDocument {
 function genesis(document: ExecutionDocument, runId: string): RalphRuntimeStateV2 {
   return createInitialRuntimeStateV2({
     runId,
+    maxTaskAttemptsPerTask: TEST_MAX_TASK_ATTEMPTS,
     phases: document.phases.map((phase) => ({ phaseId: phase.id, taskIds: phase.tasks.map((candidate) => candidate.id) })),
     tasks: document.phases.flatMap((phase) => phase.tasks.map((candidate) => ({ taskId: candidate.id, phaseId: phase.id, dependsOn: candidate.dependsOn }))),
   });
@@ -157,7 +162,7 @@ async function createFixture(prefix: string, runId: string): Promise<{ readonly 
     permissionCapabilityPolicy: descriptor("rb-ralph-capabilities/v2", "c-capabilities"),
     workspacePolicy: policy,
     initialWorkspaceFingerprint: { controlPlaneFingerprint: fingerprint.controlPlaneFingerprint, productWorkspaceFingerprint: fingerprint.productWorkspaceFingerprint, policyDigest: fingerprint.policyDigest, fingerprintDigest: fingerprint.fingerprintDigest },
-    retryPolicies: descriptor("rb-ralph-retry/v2", "c-retry"),
+    retryPolicies: retryPolicyDescriptorV1(createRetryPolicyV1({ runId, policyId: "c-retry", maxTaskAttemptsPerTask: TEST_MAX_TASK_ATTEMPTS, validationInfrastructureRetryLimit: TEST_VALIDATION_INFRA_RETRIES })),
     timeoutPolicy: descriptor("rb-ralph-timeout/v2", "c-timeout"),
     runtimeIdentity: descriptor("rb-ralph-runtime/v2", "c-runtime"),
     leasePolicy: descriptor("rb-ralph-lease/v2", "c-lease"),
@@ -168,6 +173,7 @@ async function createFixture(prefix: string, runId: string): Promise<{ readonly 
   const initialized = await initializeOperationalRunV2({
     store,
     snapshot,
+    retryPolicy: createRetryPolicyV1({ runId, policyId: "c-retry", maxTaskAttemptsPerTask: TEST_MAX_TASK_ATTEMPTS, validationInfrastructureRetryLimit: TEST_VALIDATION_INFRA_RETRIES }),
     genesisState: initial,
     runCreatedEvent: event(initial, "run.created", { phaseIds: initial.phaseIds, taskIds: initial.taskIds }),
     createdAt: "2026-09-06T06:00:01.000Z",

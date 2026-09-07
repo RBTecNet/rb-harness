@@ -355,7 +355,7 @@ export async function executeAuthorizedInvocationV2(input: ExecuteAuthorizedInvo
   const clock = input.clock ?? (() => new Date().toISOString());
   const nonceFactory = input.nonceFactory ?? randomUUID;
   const eventIdFactory = input.eventIdFactory ?? randomUUID;
-  await refreshLeasedRunV2(input.leasedRun, { workspaceComparison: "ALLOW_POST_EXECUTOR_DRIFT" });
+  await refreshLeasedRunV2(input.leasedRun);
   const initialAttempt = findAttempt(input.leasedRun.state, input.attemptId);
   if (!initialAttempt) throw new RalphB4ExecutionError("B4_AUTHORIZATION_REQUIRED", "B4_AUTHORIZATION_REQUIRED: no open Attempt");
   if (initialAttempt.stage === "RECONCILING") {
@@ -662,7 +662,7 @@ async function commitStartedIfNeeded(
     invocationId: attempt.invocation?.invocationId ?? observation.invocationId,
     startedAt: observation.startedAt,
   }, { phaseId: attempt.phaseId, taskId: attempt.taskId, attemptId: attempt.attemptId, eventIdFactory, clock });
-  await commitB4Event(input.leasedRun, event, clock, nonceFactory, true);
+  await commitB4Event(input.leasedRun, event, clock, nonceFactory, observation);
 }
 
 async function commitFinishedIfNeeded(
@@ -685,7 +685,7 @@ async function commitFinishedIfNeeded(
     termination: observation.termination,
     finishedAt: observation.finishedAt,
   }, { phaseId: current.phaseId, taskId: current.taskId, attemptId: current.attemptId, eventIdFactory, clock });
-  await commitB4Event(input.leasedRun, event, clock, nonceFactory, true);
+  await commitB4Event(input.leasedRun, event, clock, nonceFactory, observation);
 }
 
 async function closeBeforeStart(
@@ -704,7 +704,7 @@ async function closeBeforeStart(
     closureReason: reason,
     finishedAt: observation.finishedAt ?? clock(),
   }, { phaseId: attempt.phaseId, taskId: attempt.taskId, attemptId: attempt.attemptId, eventIdFactory, clock });
-  await commitB4Event(input.leasedRun, event, clock, nonceFactory, false);
+  await commitB4Event(input.leasedRun, event, clock, nonceFactory);
   await releaseLeasedRunV2(input.leasedRun);
   const closed = input.leasedRun.state.attempts[attempt.attemptId];
   if (!closed) throw new RalphB4ExecutionError("B4_EVENT_DURABILITY_UNKNOWN_REQUIRES_INSPECTION");
@@ -737,7 +737,7 @@ async function reconcileUnknown(
   }, { phaseId: attempt.phaseId, taskId: attempt.taskId, attemptId: attempt.attemptId, eventIdFactory: typeof eventIdFactory === "function" ? eventIdFactory : () => eventIdFactory, clock });
   // Recording ambiguity is safe even if a physical side effect happened in
   // the crash window; the event does not claim that the workspace is stable.
-  await commitB4Event(input.leasedRun, event, clock, nonceFactory, true);
+  await commitB4Event(input.leasedRun, event, clock, nonceFactory, observation);
   const next = input.leasedRun.state.attempts[attempt.attemptId];
   if (!next) throw new RalphB4ExecutionError("B4_EVENT_DURABILITY_UNKNOWN_REQUIRES_INSPECTION");
   return { kind: "RECONCILIATION_REQUIRED", outcome: "RECONCILIATION_REQUIRED", state: input.leasedRun.state, attempt: next, invocationId, observation, leaseReleased: false };
@@ -757,7 +757,7 @@ async function reconcileWithoutObservation(
     reason,
     proofRef: `core-reconciliation-${attempt.attemptId}`,
   }, { phaseId: attempt.phaseId, taskId: attempt.taskId, attemptId: attempt.attemptId, eventIdFactory, clock });
-  await commitB4Event(input.leasedRun, event, clock, nonceFactory, true);
+  await commitB4Event(input.leasedRun, event, clock, nonceFactory);
   const next = input.leasedRun.state.attempts[attempt.attemptId];
   if (!next) throw new RalphB4ExecutionError("B4_EVENT_DURABILITY_UNKNOWN_REQUIRES_INSPECTION");
   const observation = await observeTrustedExecutorInvocationV2(input.runtime, authorizedInvocation);
@@ -783,7 +783,7 @@ async function commitB4Event(
   event: RalphEventV2,
   clock: () => string,
   nonceFactory: () => string,
-  allowPostExecutorDrift: boolean,
+  executorObservation?: TrustedExecutorObservationV2,
 ): Promise<void> {
   await revalidateLeaseOwnershipV2(leasedRun);
   let committed;
@@ -796,9 +796,9 @@ async function commitB4Event(
   if (committed.eventDurability !== "DURABLE") throw new RalphB4ExecutionError("B4_EVENT_DURABILITY_UNKNOWN_REQUIRES_INSPECTION");
   try {
     if (committed.snapshotStatus !== "CURRENT") {
-      await repairStateSnapshotWhileLeasedV2(leasedRun, { writtenAt: clock(), nonce: nonceFactory(), workspaceComparison: allowPostExecutorDrift ? "ALLOW_POST_EXECUTOR_DRIFT" : "REQUIRE_INITIAL" });
+      await repairStateSnapshotWhileLeasedV2(leasedRun, { writtenAt: clock(), nonce: nonceFactory(), ...(executorObservation === undefined ? {} : { executorObservation }) });
     }
-    await refreshLeasedRunV2(leasedRun, { workspaceComparison: allowPostExecutorDrift ? "ALLOW_POST_EXECUTOR_DRIFT" : "REQUIRE_INITIAL" });
+    await refreshLeasedRunV2(leasedRun, executorObservation === undefined ? {} : { executorObservation });
   } catch (error) {
     throw new RalphB4ExecutionError("B4_EVENT_DURABILITY_UNKNOWN_REQUIRES_INSPECTION", "B4_EVENT_DURABILITY_UNKNOWN_REQUIRES_INSPECTION: state refresh failed", error);
   }

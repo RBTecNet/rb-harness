@@ -215,7 +215,7 @@ export async function captureEvidenceV2(input: CaptureEvidenceV2Input): Promise<
   const clock = input.clock ?? (() => new Date().toISOString());
   const nonceFactory = input.nonceFactory ?? randomUUID;
   const eventIdFactory = input.eventIdFactory ?? randomUUID;
-  await refreshLeasedRunV2(input.leasedRun, { workspaceComparison: "ALLOW_POST_EXECUTOR_DRIFT" });
+  await refreshLeasedRunV2(input.leasedRun);
   const initialAttempt = findAttempt(input.leasedRun.state, input.attemptId);
   if (!initialAttempt || !initialAttempt.invocation) throw new RalphCEvidenceError("C_AUTHORIZATION_REQUIRED", "C_AUTHORIZATION_REQUIRED: open authorized Attempt is required");
   const invocationId = initialAttempt.invocation.invocationId;
@@ -473,8 +473,8 @@ async function commitCEvidenceEvent(leasedRun: LeasedRunV2, event: RalphEventV2,
   }
   if (committed.eventDurability !== "DURABLE") throw new RalphCEvidenceError("C_EVENT_DURABILITY_UNKNOWN_REQUIRES_INSPECTION");
   try {
-    if (committed.snapshotStatus !== "CURRENT") await repairStateSnapshotWhileLeasedV2(leasedRun, { writtenAt: clock(), nonce: nonceFactory(), workspaceComparison: "ALLOW_POST_EXECUTOR_DRIFT" });
-    await refreshLeasedRunV2(leasedRun, { workspaceComparison: "ALLOW_POST_EXECUTOR_DRIFT" });
+    if (committed.snapshotStatus !== "CURRENT") await repairStateSnapshotWhileLeasedV2(leasedRun, { writtenAt: clock(), nonce: nonceFactory() });
+    await refreshLeasedRunV2(leasedRun);
   } catch (error) {
     throw new RalphCEvidenceError("C_EVENT_DURABILITY_UNKNOWN_REQUIRES_INSPECTION", "C_EVENT_DURABILITY_UNKNOWN_REQUIRES_INSPECTION: replay/refresh failed", error);
   }

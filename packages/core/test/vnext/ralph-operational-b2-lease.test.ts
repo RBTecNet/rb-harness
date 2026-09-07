@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, symlink, unlink } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -19,11 +19,13 @@ import {
 import {
   RALPH_RUN_SNAPSHOT_V2_SCHEMA,
   commitRalphEventV2,
+  createRetryPolicyV1,
   initializeOperationalRunV2,
   inspectOperationalRunV2,
   persistStateSnapshotV2,
   readStateSnapshotV2,
   RalphEventStoreV2,
+  retryPolicyDescriptorV1,
   type RunSnapshotV2,
 } from "../../src/vnext/ralph-runtime/operational-b1/index.js";
 import {
@@ -51,6 +53,8 @@ import type { RuntimeEntityRef } from "../../src/vnext/ralph-runtime/contracts.j
 
 const TEST_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const RUN_ID = "run-b2";
+const TEST_MAX_TASK_ATTEMPTS = 4;
+const TEST_VALIDATION_INFRA_RETRIES = 2;
 
 const ownerIdentity: ProcessIdentity = {
   pid: 41001,
@@ -106,6 +110,7 @@ function genesis(): RalphRuntimeStateV2 {
   const document = plan();
   return createInitialRuntimeStateV2({
     runId: RUN_ID,
+    maxTaskAttemptsPerTask: TEST_MAX_TASK_ATTEMPTS,
     phases: document.phases.map((phase) => ({ phaseId: phase.id, taskIds: phase.tasks.map((task) => task.id) })),
     tasks: document.phases.flatMap((phase) => phase.tasks.map((task) => ({ taskId: task.id, phaseId: phase.id, dependsOn: task.dependsOn }))),
   });
@@ -141,7 +146,7 @@ async function snapshotFor(root: string): Promise<RunSnapshotV2> {
       policyDigest: fingerprint.policyDigest,
       fingerprintDigest: fingerprint.fingerprintDigest,
     },
-    retryPolicies: descriptor("rb-ralph-retry/v2", "retry-b2"),
+    retryPolicies: retryPolicyDescriptorV1(createRetryPolicyV1({ runId: RUN_ID, policyId: "retry-b2", maxTaskAttemptsPerTask: TEST_MAX_TASK_ATTEMPTS, validationInfrastructureRetryLimit: TEST_VALIDATION_INFRA_RETRIES })),
     timeoutPolicy: descriptor("rb-ralph-timeout/v2", "timeout-b2"),
     runtimeIdentity: descriptor("rb-ralph-runtime/v2", "runtime-b2"),
     leasePolicy: descriptor("rb-ralph-lease/v2", "lease-b2"),
@@ -194,6 +199,7 @@ async function initialized(root: string): Promise<{
   const result = await initializeOperationalRunV2({
     store,
     snapshot,
+    retryPolicy: createRetryPolicyV1({ runId: RUN_ID, policyId: "retry-b2", maxTaskAttemptsPerTask: TEST_MAX_TASK_ATTEMPTS, validationInfrastructureRetryLimit: TEST_VALIDATION_INFRA_RETRIES }),
     genesisState: initial,
     runCreatedEvent: event(initial, "run.created", { phaseIds: initial.phaseIds, taskIds: initial.taskIds }),
     createdAt: "2026-09-05T04:00:01.000Z",
@@ -317,6 +323,23 @@ describe("Ralph Operational Core V2 — B2 run lease", () => {
       await expect(releaseLeasedRunV2(leased, { noActiveExternalInvocation: true })).rejects.toMatchObject({ code: "LEASE_RELEASE_REJECTED" });
       await releaseLeasedRunV2(leased);
       expect((await inspectRunLeaseV2(leased.store)).kind).toBe("ABSENT");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not let a caller widen pre-executor workspace comparison", async () => {
+    const root = await mkdtemp(resolve(process.env.TMPDIR ?? "/tmp", "rb-ralph-b2-workspace-authority-"));
+    try {
+      const base = await initialized(root);
+      await writeFile(resolve(root, "caller-drift.txt"), "caller drift\n");
+      const attemptedWidening = {
+        ...leaseInput(root, base.genesis, provider(ownerIdentity), { externalFacts: undefined }),
+        workspaceComparison: "ALLOW_POST_EXECUTOR_DRIFT",
+      } as unknown as LeaseRuntimeInputV2;
+      await expect(acquireLeasedRunV2(attemptedWidening)).rejects.toMatchObject({ code: "LEASE_ACQUISITION_NOT_READY" });
+      const store = new RalphEventStoreV2({ projectRoot: root, runId: RUN_ID });
+      expect((await inspectRunLeaseV2(store)).kind).toBe("ABSENT");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

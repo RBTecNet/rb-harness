@@ -1,5 +1,6 @@
 import type { AuthorizedInvocationV2 } from "../operational-b3/index.js";
 import { assertAuthorizedInvocationV2 } from "../operational-b3/index.js";
+import { canonicalJson } from "../canonical-json.js";
 import {
   buildExecutorObservationEnvelopeV2,
   type ExecutorObservationStateV2,
@@ -34,6 +35,18 @@ export interface ScriptedWorkspaceActionContextV2 {
   readonly taskId: string;
   readonly attemptId: string;
   readonly workUnitId: string;
+  /** Core-validated correction input; absent on the first Attempt. */
+  readonly correctionContext?: ScriptedExecutorCorrectionContextV2;
+}
+
+export interface ScriptedExecutorCorrectionContextV2 {
+  readonly contextId: string;
+  readonly contextDigest: string;
+  readonly taskId: string;
+  readonly attemptId: string;
+  readonly findingIds: readonly string[];
+  readonly findingDigests: readonly string[];
+  readonly openFindings: readonly Readonly<Record<string, string>>[];
 }
 
 /** Test-fixture-only workspace hook; it is never a plan command or a shell. */
@@ -102,6 +115,7 @@ export class ScriptedExecutor extends ExecutorRuntimeV2 {
   private observationOrdinal = 0;
   private cancelOrdinal = 0;
   private readonly invocationAttempts = new Map<string, number>();
+  private readonly correctionContexts = new Map<string, ScriptedExecutorCorrectionContextV2>();
 
   constructor(options: ScriptedExecutorOptionsV2 = {}) {
     super();
@@ -214,6 +228,21 @@ export class ScriptedExecutor extends ExecutorRuntimeV2 {
     };
   }
 
+  /**
+   * Attach a Core-persisted correction context before crossing the Executor
+   * side-effect boundary. This method is intentionally available only on the
+   * nominal ScriptedExecutor runtime, never on a caller-supplied record.
+   */
+  setCorrectionContext(invocationId: string, context: ScriptedExecutorCorrectionContextV2): void {
+    assertInvocationId(invocationId);
+    if (context.taskId.length === 0 || context.attemptId.length === 0 || context.findingIds.length !== context.findingDigests.length || context.findingIds.length !== context.openFindings.length) {
+      throw new ExecutorRuntimeError("B4_EXECUTOR_AUTHORIZATION_REQUIRED", "B4_EXECUTOR_AUTHORIZATION_REQUIRED: malformed correction context");
+    }
+    const existing = this.correctionContexts.get(invocationId);
+    if (existing && canonicalJson(existing) !== canonicalJson(context)) throw new ExecutorRuntimeError("B4_EXECUTOR_REDISPATCH_FORBIDDEN", "B4_EXECUTOR_REDISPATCH_FORBIDDEN: correction context is immutable");
+    this.correctionContexts.set(invocationId, freezeCorrectionContext(context));
+  }
+
   /** Seed an untrusted recovery observation for a deterministic test. */
   seedObservation(invocationId: string, seed: ScriptedObservationSeedV2): void {
     assertInvocationId(invocationId);
@@ -297,6 +326,7 @@ export class ScriptedExecutor extends ExecutorRuntimeV2 {
         taskId: invocation.taskId,
         attemptId: invocation.attemptId,
         workUnitId: invocation.workUnitId,
+        ...(this.correctionContexts.has(invocation.invocationId) ? { correctionContext: this.correctionContexts.get(invocation.invocationId) } : {}),
       });
     } catch {
       // A fixture action failure is represented as a bounded execution failure;
@@ -381,4 +411,13 @@ function freezeScenario(value: ScriptedExecutorScenarioV2): ScriptedExecutorScen
 
 function assertInvocationId(value: string): void {
   if (typeof value !== "string" || !/^inv-[A-Za-z0-9._-]{1,200}$/.test(value)) throw new ExecutorRuntimeError("B4_EXECUTOR_INVOCATION_ID_INVALID");
+}
+
+function freezeCorrectionContext(value: ScriptedExecutorCorrectionContextV2): ScriptedExecutorCorrectionContextV2 {
+  return Object.freeze({
+    ...value,
+    findingIds: Object.freeze([...value.findingIds]),
+    findingDigests: Object.freeze([...value.findingDigests]),
+    openFindings: Object.freeze(value.openFindings.map((finding) => Object.freeze({ ...finding }))),
+  });
 }

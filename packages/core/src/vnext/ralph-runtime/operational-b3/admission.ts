@@ -243,13 +243,13 @@ export async function prepareNextAuthorizedInvocationV2(
   if (!phase || !task) throw new RalphAdmissionError("B3_PLAN_IDENTITY_MISMATCH", "B3_PLAN_IDENTITY_MISMATCH: scheduler candidate is not in the plan");
   assertTaskAdmissible(input.leasedRun.state, phase, task);
 
-  const taskBudget = input.leasedRun.state.tasks[task.id]?.executorBudget;
-  if (taskBudget && (taskBudget.exhausted || taskBudget.exceeded)) {
+  const taskState = input.leasedRun.state.tasks[task.id];
+  if (!taskState) throw new RalphAdmissionError("B3_ATTEMPT_RECONCILIATION_REQUIRED");
+  const taskBudget = taskState.executorBudget;
+  if (!taskBudget || taskState.attemptsUsed >= taskBudget.limit) {
     return await finishDecision(input.leasedRun, { kind: "NO_WORK", reason: "NEW_ATTEMPT_BUDGET_EXHAUSTED" }, true);
   }
   const attemptId = safeCoreId(attemptIdFactory(), "B3_ATTEMPT_RECONCILIATION_REQUIRED");
-  const taskState = input.leasedRun.state.tasks[task.id];
-  if (!taskState) throw new RalphAdmissionError("B3_ATTEMPT_RECONCILIATION_REQUIRED");
   const ordinal = taskState.attemptsUsed + 1;
   if (!Number.isSafeInteger(ordinal) || ordinal < 1) throw new RalphAdmissionError("B3_ATTEMPT_RECONCILIATION_REQUIRED");
   const attemptStartedAt = clock();
@@ -478,9 +478,7 @@ export async function reopenAuthorizedInvocationV2(input: ReopenAuthorizedInvoca
   assertLeasedRunV2(input.leasedRun);
   if (!input.plan) throw new RalphAdmissionError("B3_PLAN_IDENTITY_MISMATCH", "B3_PLAN_IDENTITY_MISMATCH: plan is required");
   const initialAttempt = input.attemptId === undefined ? onlyOpenAttempt(input.leasedRun.state) : input.leasedRun.state.attempts[input.attemptId];
-  const allowWorkspaceDrift = input.requireBaseFingerprint === false
-    || (initialAttempt !== undefined && initialAttempt.stage !== "EXECUTOR_DISPATCH_AUTHORIZED");
-  await refreshLeasedRunV2(input.leasedRun, { workspaceComparison: allowWorkspaceDrift ? "ALLOW_POST_EXECUTOR_DRIFT" : "REQUIRE_INITIAL" });
+  await refreshLeasedRunV2(input.leasedRun);
   const attempt = input.attemptId === undefined ? onlyOpenAttempt(input.leasedRun.state) : input.leasedRun.state.attempts[input.attemptId];
   if (!attempt || attempt.disposition !== "OPEN" || !["EXECUTOR_DISPATCH_AUTHORIZED", "EXECUTOR_RUNNING", "POST_EXECUTOR_CAPTURE", "EVIDENCE_CAPTURING", "RECONCILING"].includes(attempt.stage)) {
     throw new RalphAdmissionError("B3_AUTHORIZED_INVOCATION_REQUIRED", "B3_AUTHORIZED_INVOCATION_REQUIRED: durable dispatch authorization is required");
@@ -696,7 +694,11 @@ function assertDispatchFacts(
   if (fingerprint.fingerprintDigest !== attempt.attemptBaseFingerprint) throw new RalphAdmissionError("B3_WORKSPACE_RECONCILIATION_REQUIRED", "B3_WORKSPACE_RECONCILIATION_REQUIRED: base fingerprint changed");
 }
 
-async function refreshAndRepair(leasedRun: LeasedRunV2, clock: () => string, nonceFactory: () => string): Promise<void> {
+async function refreshAndRepair(
+  leasedRun: LeasedRunV2,
+  clock: () => string,
+  nonceFactory: () => string,
+): Promise<void> {
   await refreshLeasedRunV2(leasedRun);
   await repairStateSnapshotWhileLeasedV2(leasedRun, { writtenAt: clock(), nonce: nonceFactory() });
 }

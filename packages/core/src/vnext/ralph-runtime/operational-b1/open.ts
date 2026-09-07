@@ -5,6 +5,11 @@ import { assertV2RuntimeState } from "../operational-v2/state.js";
 import type { RalphRuntimeStateV2 } from "../operational-v2/contracts.js";
 import { RalphEventStoreV2, type EventStoreV2Options, type LedgerInspectionV2 } from "./event-store.js";
 import { RalphRunSnapshotV2Error, readRunSnapshotV2, type RunSnapshotV2 } from "./run-snapshot.js";
+import {
+  assertGenesisRetryPolicyBindingV1,
+  readBoundRetryPolicyV1,
+  type RalphRetryPolicyV1,
+} from "./retry-policy.js";
 import { replayOperationalRunV2 } from "./state-snapshot.js";
 
 export const OPERATIONAL_RUN_V2_OPEN_OUTCOMES = [
@@ -55,6 +60,7 @@ export interface InspectOperationalRunV2Result {
   readonly issues: readonly string[];
   readonly store: RalphEventStoreV2;
   readonly runSnapshot?: RunSnapshotV2;
+  readonly retryPolicy?: RalphRetryPolicyV1;
   readonly ledger?: LedgerInspectionV2;
   readonly state?: RalphRuntimeStateV2;
   readonly snapshotUsed: boolean;
@@ -83,6 +89,14 @@ export async function inspectOperationalRunV2(input: InspectOperationalRunV2Inpu
     return failed(store, error);
   }
 
+  let retryPolicy: RalphRetryPolicyV1;
+  try {
+    retryPolicy = await readBoundRetryPolicyV1(store, snapshot);
+    assertGenesisRetryPolicyBindingV1(input.genesisState, retryPolicy);
+  } catch (error) {
+    return failed(store, error, snapshot);
+  }
+
   let ledger: LedgerInspectionV2;
   try {
     ledger = await store.inspect();
@@ -96,6 +110,7 @@ export async function inspectOperationalRunV2(input: InspectOperationalRunV2Inpu
       issues: ["RALPH_V2_RUN_CREATED_MISSING"],
       store,
       runSnapshot: snapshot,
+      retryPolicy,
       ledger,
       snapshotUsed: false,
       snapshotRecovered: false,
@@ -121,6 +136,7 @@ export async function inspectOperationalRunV2(input: InspectOperationalRunV2Inpu
     issues,
     store,
     runSnapshot: snapshot,
+    retryPolicy,
     ledger,
     state: replay.state,
     snapshotUsed: replay.snapshotUsed,

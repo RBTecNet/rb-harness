@@ -21,9 +21,11 @@ import {
 import {
   RALPH_RUN_SNAPSHOT_V2_SCHEMA,
   commitRalphEventV2,
+  createRetryPolicyV1,
   initializeOperationalRunV2,
   inspectOperationalRunV2,
   RalphEventStoreV2,
+  retryPolicyDescriptorV1,
   type RunSnapshotV2,
 } from "../../src/vnext/ralph-runtime/operational-b1/index.js";
 import {
@@ -57,6 +59,8 @@ import { nodeRalphRuntimeFileSystem } from "../../src/vnext/ralph-runtime/event-
 
 const TEST_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const RUN_ID = "run-b3";
+const TEST_MAX_TASK_ATTEMPTS = 4;
+const TEST_VALIDATION_INFRA_RETRIES = 2;
 
 const ownerIdentity: ProcessIdentity = {
   pid: 52001,
@@ -115,6 +119,7 @@ function plan(taskList: readonly Task[] = [task("T001")]): ExecutionDocument {
 function genesis(document: ExecutionDocument, runId = RUN_ID): RalphRuntimeStateV2 {
   return createInitialRuntimeStateV2({
     runId,
+    maxTaskAttemptsPerTask: TEST_MAX_TASK_ATTEMPTS,
     phases: document.phases.map((phase) => ({ phaseId: phase.id, taskIds: phase.tasks.map((candidate) => candidate.id) })),
     tasks: document.phases.flatMap((phase) => phase.tasks.map((candidate) => ({ taskId: candidate.id, phaseId: phase.id, dependsOn: candidate.dependsOn }))),
   });
@@ -150,7 +155,7 @@ async function snapshotFor(root: string, document: ExecutionDocument, runId = RU
       policyDigest: fingerprint.policyDigest,
       fingerprintDigest: fingerprint.fingerprintDigest,
     },
-    retryPolicies: descriptor("rb-ralph-retry/v2", "retry-b3"),
+    retryPolicies: retryPolicyDescriptorV1(createRetryPolicyV1({ runId, policyId: "retry-b3", maxTaskAttemptsPerTask: TEST_MAX_TASK_ATTEMPTS, validationInfrastructureRetryLimit: TEST_VALIDATION_INFRA_RETRIES })),
     timeoutPolicy: descriptor("rb-ralph-timeout/v2", "timeout-b3"),
     runtimeIdentity: descriptor("rb-ralph-runtime/v2", "runtime-b3"),
     leasePolicy: descriptor("rb-ralph-lease/v2", "lease-b3"),
@@ -221,6 +226,7 @@ async function initialized(root: string, document = plan(), runId = RUN_ID): Pro
   const result = await initializeOperationalRunV2({
     store,
     snapshot,
+    retryPolicy: createRetryPolicyV1({ runId, policyId: "retry-b3", maxTaskAttemptsPerTask: TEST_MAX_TASK_ATTEMPTS, validationInfrastructureRetryLimit: TEST_VALIDATION_INFRA_RETRIES }),
     genesisState: initial,
     runCreatedEvent: event(initial, "run.created", { phaseIds: initial.phaseIds, taskIds: initial.taskIds }),
     createdAt: "2026-09-05T05:00:01.000Z",

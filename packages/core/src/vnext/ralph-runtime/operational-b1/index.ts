@@ -7,6 +7,7 @@
  */
 export * from "./event-store.js";
 export * from "./run-snapshot.js";
+export * from "./retry-policy.js";
 export * from "./state-snapshot.js";
 export * from "./commit.js";
 export * from "./initialization.js";

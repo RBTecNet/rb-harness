@@ -20,6 +20,7 @@ import {
 } from "../durable-ledger.js";
 import { canonicalEventBytesV2, validateRalphEventV2, type RalphEventV2 } from "../operational-v2/events.js";
 import { readRunSnapshotV2File, type OperationalRunV2Storage, type RunSnapshotV2 } from "./run-snapshot.js";
+import { readBoundRetryPolicyV1 } from "./retry-policy.js";
 import { assertNoCredentialMaterial, RalphCredentialSafetyError } from "./secret-safety.js";
 
 export interface EventStoreV2Options {
@@ -180,7 +181,9 @@ export class RalphEventStoreV2 implements OperationalRunV2Storage {
   }
 
   async verifyRunSnapshot(): Promise<RunSnapshotV2> {
-    return readRunSnapshotV2File(this);
+    const snapshot = await readRunSnapshotV2File(this);
+    await readBoundRetryPolicyV1(this, snapshot);
+    return snapshot;
   }
 }
 

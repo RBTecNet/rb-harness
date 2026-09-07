@@ -20,8 +20,10 @@ import {
 import {
   RALPH_RUN_SNAPSHOT_V2_SCHEMA,
   commitRalphEventV2,
+  createRetryPolicyV1,
   initializeOperationalRunV2,
   RalphEventStoreV2,
+  retryPolicyDescriptorV1,
   type RunSnapshotV2,
 } from "../../src/vnext/ralph-runtime/operational-b1/index.js";
 import {
@@ -57,6 +59,8 @@ import { sha256, sha256Canonical } from "../../src/vnext/ralph-runtime/hashing.j
 import { nodeRalphRuntimeFileSystem, type RalphRuntimeFileSystem } from "../../src/vnext/ralph-runtime/event-store.js";
 
 const TEST_DIRECTORY = dirname(fileURLToPath(import.meta.url));
+const TEST_MAX_TASK_ATTEMPTS = 4;
+const TEST_VALIDATION_INFRA_RETRIES = 2;
 
 const ownerIdentity: ProcessIdentity = {
   pid: 53101,
@@ -108,6 +112,7 @@ function descriptor(schemaVersion: string, descriptorId: string): { readonly sch
 function genesis(document: ExecutionDocument, runId: string): RalphRuntimeStateV2 {
   return createInitialRuntimeStateV2({
     runId,
+    maxTaskAttemptsPerTask: TEST_MAX_TASK_ATTEMPTS,
     phases: document.phases.map((phase) => ({ phaseId: phase.id, taskIds: phase.tasks.map((candidate) => candidate.id) })),
     tasks: document.phases.flatMap((phase) => phase.tasks.map((candidate) => ({ taskId: candidate.id, phaseId: phase.id, dependsOn: candidate.dependsOn }))),
   });
@@ -188,7 +193,7 @@ async function fixtureRoot(prefix: string, runId: string): Promise<{
       policyDigest: fingerprint.policyDigest,
       fingerprintDigest: fingerprint.fingerprintDigest,
     },
-    retryPolicies: descriptor("rb-ralph-retry/v2", "b4-retry"),
+    retryPolicies: retryPolicyDescriptorV1(createRetryPolicyV1({ runId, policyId: "b4-retry", maxTaskAttemptsPerTask: TEST_MAX_TASK_ATTEMPTS, validationInfrastructureRetryLimit: TEST_VALIDATION_INFRA_RETRIES })),
     timeoutPolicy: descriptor("rb-ralph-timeout/v2", "b4-timeout"),
     runtimeIdentity: descriptor("rb-ralph-runtime/v2", "b4-runtime"),
     leasePolicy: descriptor("rb-ralph-lease/v2", "b4-lease"),
@@ -199,6 +204,7 @@ async function fixtureRoot(prefix: string, runId: string): Promise<{
   const initialized = await initializeOperationalRunV2({
     store,
     snapshot,
+    retryPolicy: createRetryPolicyV1({ runId, policyId: "b4-retry", maxTaskAttemptsPerTask: TEST_MAX_TASK_ATTEMPTS, validationInfrastructureRetryLimit: TEST_VALIDATION_INFRA_RETRIES }),
     genesisState: initial,
     runCreatedEvent: event(initial, "run.created", { phaseIds: initial.phaseIds, taskIds: initial.taskIds }),
     createdAt: "2026-09-06T05:00:01.000Z",
@@ -472,14 +478,14 @@ describe("Ralph Operational Core V2 — B4 scripted executor", () => {
       // The fixture's store is a separate facade instance from the leased
       // handle. Refresh its verified cursor before the first direct commit.
       await fixture.store.inspect();
-      await refreshLeasedRunV2(authorized.resumed, { workspaceComparison: "ALLOW_POST_EXECUTOR_DRIFT" });
+      await refreshLeasedRunV2(authorized.resumed);
       const startedState = authorized.resumed.state;
       const started = event(startedState, "executor.started", {
         invocationId: observation.invocationId,
         startedAt: observation.startedAt,
       }, { phaseId: "P01", taskId: "T001", attemptId });
       await append(fixture.store, startedState, started, nonce());
-      await refreshLeasedRunV2(authorized.resumed, { workspaceComparison: "ALLOW_POST_EXECUTOR_DRIFT" });
+      await refreshLeasedRunV2(authorized.resumed);
 
       const result = createInvocationResultV2({
         runId: fixture.store.runId,
@@ -517,7 +523,7 @@ describe("Ralph Operational Core V2 — B4 scripted executor", () => {
         finishedAt: observation.finishedAt,
       }, { phaseId: "P01", taskId: "T001", attemptId });
       await append(fixture.store, authorized.resumed.state, finished, nonce());
-      await refreshLeasedRunV2(authorized.resumed, { workspaceComparison: "ALLOW_POST_EXECUTOR_DRIFT" });
+      await refreshLeasedRunV2(authorized.resumed);
 
       const proof = await deriveExecutorReleaseProofV2(authorized.resumed, observation, refs);
       expect(proof.record.externalInvocationState).toBe("TERMINATED_QUIESCENT");

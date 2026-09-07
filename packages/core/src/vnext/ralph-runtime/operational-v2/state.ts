@@ -37,6 +37,7 @@ import {
   type ValidationSpecRef,
 } from "./contracts.js";
 import { isAttemptClosureAllowed } from "./attempt-closure.js";
+import { deriveBudgetUsage } from "../budgets.js";
 
 export interface InitialPhaseV2 {
   readonly phaseId: string;
@@ -49,6 +50,8 @@ export function createInitialRuntimeStateV2(input: {
   readonly runId: string;
   readonly phases: readonly InitialPhaseV2[];
   readonly tasks: readonly InitialTaskV2[];
+  /** Resolved from the immutable run RetryPolicy by B1. No Core default exists. */
+  readonly maxTaskAttemptsPerTask?: number;
 }): RalphRuntimeStateV2 {
   assertNonEmptyString(input.runId, "RALPH_V2_INVALID_RUN_ID");
   const phaseIds = input.phases.map((phase) => phase.phaseId);
@@ -76,6 +79,9 @@ export function createInitialRuntimeStateV2(input: {
     assertNonEmptyString(task.phaseId, "RALPH_V2_INVALID_PHASE_ID");
     if (!phaseIdSet.has(task.phaseId)) throw new Error("RALPH_V2_TASK_REFERENCES_UNKNOWN_PHASE");
     assertStringArray(task.dependsOn, "RALPH_V2_INVALID_TASK_DEPENDENCIES");
+    const executorBudget = input.maxTaskAttemptsPerTask === undefined
+      ? undefined
+      : deriveBudgetUsage(0, input.maxTaskAttemptsPerTask);
     return [task.taskId, {
       taskId: task.taskId,
       phaseId: task.phaseId,
@@ -85,6 +91,7 @@ export function createInitialRuntimeStateV2(input: {
       owner: "NONE" as const,
       hold: "NONE" as const,
       attemptsUsed: 0,
+      ...(executorBudget === undefined ? {} : { executorBudget }),
       findingIds: [],
       updatedAt: "",
     } satisfies TaskState];

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -27,17 +27,22 @@ import {
   RALPH_RUN_SNAPSHOT_V2_SCHEMA,
   RALPH_STATE_SNAPSHOT_V2_SCHEMA,
   commitRalphEventV2,
+  createRetryPolicyV1,
   createStateSnapshotV2,
   initializeOperationalRunV2,
   inspectOperationalRunV2,
   replayOperationalRunV2,
   persistRunSnapshotV2,
+  persistRetryPolicyV1,
   persistStateSnapshotV2,
   readRunSnapshotV2,
+  readRetryPolicyV1,
+  retryPolicyDescriptorV1,
   readStateSnapshotV2,
   RalphEventStoreV2,
   validateRunSnapshotV2,
   type RunSnapshotV2,
+  type RalphRetryPolicyV1,
 } from "../../src/vnext/ralph-runtime/operational-b1/index.js";
 import { canonicalJson } from "../../src/vnext/ralph-runtime/canonical-json.js";
 import { createWorkspacePolicy, fingerprintWorkspace } from "../../src/vnext/ralph-runtime/fingerprint.js";
@@ -45,6 +50,8 @@ import { sha256, sha256Canonical } from "../../src/vnext/ralph-runtime/hashing.j
 
 const RUN_ID = "run-b1";
 const TEST_DIRECTORY = dirname(fileURLToPath(import.meta.url));
+const TEST_MAX_TASK_ATTEMPTS = 4;
+const TEST_VALIDATION_INFRA_RETRIES = 2;
 
 type LifecycleEventContext = {
   readonly entityKind: "run" | "task" | "attempt" | "workspace";
@@ -57,6 +64,15 @@ type LifecycleEventContext = {
 function descriptor(schemaVersion: string, descriptorId: string): { schemaVersion: string; descriptorId: string; descriptorDigest: string } {
   const base = { schemaVersion, descriptorId };
   return { ...base, descriptorDigest: sha256Canonical(base) };
+}
+
+function retryPolicyFor(runId: string): RalphRetryPolicyV1 {
+  return createRetryPolicyV1({
+    runId,
+    policyId: "retry-default",
+    maxTaskAttemptsPerTask: TEST_MAX_TASK_ATTEMPTS,
+    validationInfrastructureRetryLimit: TEST_VALIDATION_INFRA_RETRIES,
+  });
 }
 
 async function snapshotFor(root: string, runId = RUN_ID): Promise<RunSnapshotV2> {
@@ -89,7 +105,7 @@ async function snapshotFor(root: string, runId = RUN_ID): Promise<RunSnapshotV2>
       policyDigest: fingerprint.policyDigest,
       fingerprintDigest: fingerprint.fingerprintDigest,
     },
-    retryPolicies: descriptor("rb-ralph-retry/v2", "retry-default"),
+    retryPolicies: retryPolicyDescriptorV1(retryPolicyFor(runId)),
     timeoutPolicy: descriptor("rb-ralph-timeout/v2", "timeout-default"),
     runtimeIdentity: descriptor("rb-ralph-runtime/v2", "runtime-b1"),
     leasePolicy: descriptor("rb-ralph-lease/v2", "lease-future"),
@@ -134,6 +150,7 @@ function runStarted(state: RalphRuntimeStateV2): RalphEventV2 {
 function humanLifecycleGenesis(): RalphRuntimeStateV2 {
   return createInitialRuntimeStateV2({
     runId: RUN_ID,
+    maxTaskAttemptsPerTask: TEST_MAX_TASK_ATTEMPTS,
     phases: [{ phaseId: "P01", taskIds: ["T001"] }],
     tasks: [{ taskId: "T001", phaseId: "P01", dependsOn: [] }],
   });
@@ -177,6 +194,7 @@ async function initialized(root: string): Promise<{
   const result = await initializeOperationalRunV2({
     store,
     snapshot,
+    retryPolicy: retryPolicyFor(snapshot.runId),
     genesisState: initial,
     runCreatedEvent: runCreated(initial),
     createdAt: "2026-09-05T04:00:01.000Z",
@@ -186,6 +204,90 @@ async function initialized(root: string): Promise<{
 }
 
 describe("Ralph Operational Core V2 — Slice B1 storage", () => {
+  it("publishes the immutable RetryPolicy before RunSnapshot/run.created and cold-replays its Task budget", async () => {
+    const root = await mkdtemp(resolve(process.env.TMPDIR ?? "/tmp", "rb-ralph-b1-retry-policy-"));
+    try {
+      const publications: string[] = [];
+      const fs = {
+        ...nodeRalphRuntimeFileSystem,
+        link: async (existingPath: string, newPath: string) => {
+          publications.push(newPath);
+          return nodeRalphRuntimeFileSystem.link(existingPath, newPath);
+        },
+      };
+      const snapshot = await snapshotFor(root);
+      const retryPolicy = retryPolicyFor(snapshot.runId);
+      const initial = humanLifecycleGenesis();
+      const store = new RalphEventStoreV2({ projectRoot: root, runId: snapshot.runId, fs });
+      const initializedResult = await initializeOperationalRunV2({
+        store,
+        snapshot,
+        retryPolicy,
+        genesisState: initial,
+        runCreatedEvent: humanLifecycleEvent(initial, "run.created", { phaseIds: initial.phaseIds, taskIds: initial.taskIds }, { entityKind: "run", entityId: RUN_ID }),
+        createdAt: "2026-09-05T04:00:00.000Z",
+        nonce: "retry-policy-order",
+      });
+      const retryIndex = publications.findIndex((path) => path.endsWith("/retry-policy.json"));
+      const snapshotIndex = publications.findIndex((path) => path.endsWith("/run-snapshot.json"));
+      const eventIndex = publications.findIndex((path) => path.includes("/events/"));
+      expect(retryIndex).toBeGreaterThanOrEqual(0);
+      expect(snapshotIndex).toBeGreaterThan(retryIndex);
+      expect(eventIndex).toBeGreaterThan(snapshotIndex);
+      expect((await stat(resolve(store.runDirectory, "retry-policy.json"))).mode & 0o7777).toBe(0o600);
+      expect(await readRetryPolicyV1(store)).toEqual(retryPolicy);
+      expect(initializedResult.state.tasks.T001?.executorBudget).toEqual({ used: 0, limit: TEST_MAX_TASK_ATTEMPTS, remaining: TEST_MAX_TASK_ATTEMPTS, exhausted: false, exceeded: false });
+
+      const coldGenesis = humanLifecycleGenesis();
+      const opened = await inspectOperationalRunV2({ projectRoot: root, runId: RUN_ID, genesisState: coldGenesis, externalFacts: { workspaceFingerprint: snapshot.initialWorkspaceFingerprint } });
+      expect(opened.outcome).toBe("READY_FOR_LEASE");
+      expect(opened.retryPolicy).toEqual(retryPolicy);
+      expect(opened.state?.tasks.T001?.executorBudget).toEqual(coldGenesis.tasks.T001?.executorBudget);
+      expect(await persistRetryPolicyV1(store, retryPolicy, "retry-policy-idempotent")).toBe("already-present");
+      await expect(persistRetryPolicyV1(store, createRetryPolicyV1({ ...retryPolicy, maxTaskAttemptsPerTask: TEST_MAX_TASK_ATTEMPTS + 1 }), "retry-policy-conflict")).rejects.toMatchObject({ code: "RALPH_V2_RETRY_POLICY_IMMUTABLE_CONFLICT" });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when RetryPolicy is missing, symlinked, or does not match RunSnapshot", async () => {
+    const missingRoot = await mkdtemp(resolve(process.env.TMPDIR ?? "/tmp", "rb-ralph-b1-retry-missing-"));
+    try {
+      const snapshot = await snapshotFor(missingRoot);
+      const store = new RalphEventStoreV2({ projectRoot: missingRoot, runId: RUN_ID });
+      await persistRunSnapshotV2(store, snapshot, "missing-policy-snapshot");
+      const opened = await inspectOperationalRunV2({ projectRoot: missingRoot, runId: RUN_ID, genesisState: genesis() });
+      expect(opened.outcome).toBe("FAILED_INTEGRITY");
+      expect(opened.issues).toContain("RALPH_V2_RETRY_POLICY_MISSING");
+    } finally {
+      await rm(missingRoot, { recursive: true, force: true });
+    }
+
+    const unsafeRoot = await mkdtemp(resolve(process.env.TMPDIR ?? "/tmp", "rb-ralph-b1-retry-unsafe-"));
+    try {
+      const store = new RalphEventStoreV2({ projectRoot: unsafeRoot, runId: RUN_ID });
+      await store.ensureLayout();
+      const target = resolve(unsafeRoot, "outside-policy.json");
+      await writeFile(target, canonicalJson(retryPolicyFor(RUN_ID)), { mode: 0o600 });
+      await symlink(target, resolve(store.runDirectory, "retry-policy.json"));
+      await expect(readRetryPolicyV1(store)).rejects.toMatchObject({ code: "RALPH_V2_RETRY_POLICY_PATH_UNSAFE" });
+    } finally {
+      await rm(unsafeRoot, { recursive: true, force: true });
+    }
+
+    const mismatchRoot = await mkdtemp(resolve(process.env.TMPDIR ?? "/tmp", "rb-ralph-b1-retry-mismatch-"));
+    try {
+      const { store, snapshot } = await initialized(mismatchRoot);
+      const different = createRetryPolicyV1({ runId: RUN_ID, policyId: "retry-default", maxTaskAttemptsPerTask: TEST_MAX_TASK_ATTEMPTS + 1, validationInfrastructureRetryLimit: TEST_VALIDATION_INFRA_RETRIES });
+      await writeFile(resolve(store.runDirectory, "retry-policy.json"), canonicalJson(different), { mode: 0o600 });
+      const opened = await inspectOperationalRunV2({ projectRoot: mismatchRoot, runId: RUN_ID, genesisState: genesis(), externalFacts: { workspaceFingerprint: snapshot.initialWorkspaceFingerprint } });
+      expect(opened.outcome).toBe("FAILED_INTEGRITY");
+      expect(opened.issues).toContain("RALPH_V2_RETRY_POLICY_SNAPSHOT_MISMATCH");
+    } finally {
+      await rm(mismatchRoot, { recursive: true, force: true });
+    }
+  });
+
   it("physically persists and cold-replays the human resume without duplicating proofRef", async () => {
     const root = await mkdtemp(resolve(process.env.TMPDIR ?? "/tmp", "rb-ralph-b1-human-resume-"));
     try {
@@ -196,6 +298,7 @@ describe("Ralph Operational Core V2 — Slice B1 storage", () => {
       const initializedResult = await initializeOperationalRunV2({
         store,
         snapshot,
+        retryPolicy: retryPolicyFor(snapshot.runId),
         genesisState: initial,
         runCreatedEvent: runCreated,
         createdAt: "2026-09-05T04:10:00.000Z",
@@ -591,6 +694,7 @@ describe("Ralph Operational Core V2 — Slice B1 storage", () => {
       const retry = await initializeOperationalRunV2({
         store,
         snapshot,
+        retryPolicy: retryPolicyFor(snapshot.runId),
         genesisState: initial,
         runCreatedEvent: runCreated(initial),
         createdAt: "2026-09-05T04:06:15.000Z",
@@ -681,6 +785,7 @@ describe("Ralph Operational Core V2 — Slice B1 storage", () => {
       const snapshot = await snapshotFor(root);
       const storeA = new RalphEventStoreV2({ projectRoot: root, runId: RUN_ID, nonce: () => "a" });
       const storeB = new RalphEventStoreV2({ projectRoot: root, runId: RUN_ID, nonce: () => "b" });
+      await persistRetryPolicyV1(storeA, retryPolicyFor(RUN_ID), "concurrency-policy");
       await Promise.all([persistRunSnapshotV2(storeA, snapshot, "same-a"), persistRunSnapshotV2(storeB, snapshot, "same-b")]);
       const first = runCreated(genesis());
       const identical = await Promise.all([storeA.append(first), storeB.append(first)]);
@@ -692,6 +797,7 @@ describe("Ralph Operational Core V2 — Slice B1 storage", () => {
         const divergentSnapshot = await snapshotFor(divergentRoot);
         const left = new RalphEventStoreV2({ projectRoot: divergentRoot, runId: RUN_ID, nonce: () => "left" });
         const right = new RalphEventStoreV2({ projectRoot: divergentRoot, runId: RUN_ID, nonce: () => "right" });
+        await persistRetryPolicyV1(left, retryPolicyFor(RUN_ID), "divergent-policy");
         const differentSnapshot = { ...divergentSnapshot, readyManifestHash: sha256("different-manifest") };
         const snapshotResults = await Promise.allSettled([
           persistRunSnapshotV2(left, divergentSnapshot, "divergent-snapshot-left"),
@@ -719,6 +825,7 @@ describe("Ralph Operational Core V2 — Slice B1 storage", () => {
     try {
       const snapshot = await snapshotFor(root);
       const store = new RalphEventStoreV2({ projectRoot: root, runId: RUN_ID });
+      await persistRetryPolicyV1(store, retryPolicyFor(RUN_ID), "capacity-policy");
       await persistRunSnapshotV2(store, snapshot, "capacity-snapshot");
       const overCapacity = createRalphEventV2({
         eventId: "over-capacity",
@@ -750,12 +857,13 @@ describe("Ralph Operational Core V2 — Slice B1 storage", () => {
       let opened = await inspectOperationalRunV2({ projectRoot: root, runId: RUN_ID, genesisState: genesis() });
       expect(opened.outcome).toBe("INCOMPLETE_INITIALIZATION");
 
+      await persistRetryPolicyV1(store, retryPolicyFor(snapshot.runId), "open-retry-policy");
       await persistRunSnapshotV2(store, snapshot, "open-snapshot");
       opened = await inspectOperationalRunV2({ projectRoot: root, runId: RUN_ID, genesisState: genesis(), externalFacts: { workspaceFingerprint: snapshot.initialWorkspaceFingerprint } });
       expect(opened.outcome).toBe("INCOMPLETE_INITIALIZATION");
       expect(opened.issues).toContain("RALPH_V2_RUN_CREATED_MISSING");
 
-      const initializedResult = await initializeOperationalRunV2({ store, snapshot, genesisState: genesis(), runCreatedEvent: runCreated(genesis()), createdAt: "2026-09-05T04:07:00.000Z", nonce: "open-event" });
+      const initializedResult = await initializeOperationalRunV2({ store, snapshot, retryPolicy: retryPolicyFor(snapshot.runId), genesisState: genesis(), runCreatedEvent: runCreated(genesis()), createdAt: "2026-09-05T04:07:00.000Z", nonce: "open-event" });
       expect(initializedResult.initialization).toBe("COMPLETE");
       opened = await inspectOperationalRunV2({ projectRoot: root, runId: RUN_ID, genesisState: genesis(), externalFacts: { readyPlanHash: sha256("changed"), workspaceFingerprint: snapshot.initialWorkspaceFingerprint } });
       expect(opened.outcome).toBe("RECONCILIATION_REQUIRED");
@@ -825,6 +933,7 @@ describe("Ralph Operational Core V2 — Slice B1 storage", () => {
         readFile: async (path: string) => { if (path.includes("/events/")) eventReadCount += 1; return nodeRalphRuntimeFileSystem.readFile(path); },
       };
       const store = new RalphEventStoreV2({ projectRoot: root, runId: RUN_ID, fs: countedFs, nonce: () => "cursor" });
+      await persistRetryPolicyV1(store, retryPolicyFor(RUN_ID), "cursor-policy");
       await persistRunSnapshotV2(store, snapshot, "cursor-snapshot");
       let previousEventHash: string | null = null;
       for (let sequence = 1; sequence <= 8; sequence += 1) {
@@ -878,6 +987,7 @@ describe("Ralph Operational Core V2 — Slice B1 storage", () => {
     try {
       const snapshot = await snapshotFor(root);
       const baseStore = new RalphEventStoreV2({ projectRoot: root, runId: RUN_ID });
+      await persistRetryPolicyV1(baseStore, retryPolicyFor(RUN_ID), "crash-policy");
       await persistRunSnapshotV2(baseStore, snapshot, "crash-snapshot");
       const first = runCreated(genesis());
       const beforeTemp = new RalphEventStoreV2({

@@ -182,8 +182,6 @@ export interface LeaseRuntimeInputV2 {
   readonly fs?: EventStoreV2Options["fs"];
   readonly externalFacts?: OperationalRunV2ExternalFacts;
   readonly workspaceFingerprintFileSystem?: WorkspaceFingerprintFileSystem;
-  /** Explicit continuation mode for a lease reacquired after execution. */
-  readonly workspaceComparison?: "REQUIRE_INITIAL" | "ALLOW_POST_EXECUTOR_DRIFT";
   readonly processIdentityProvider?: ProcessIdentityProvider;
   readonly clock?: () => string;
   /** Injectable only for deterministic tests; the default is CSPRNG-backed. */
@@ -236,8 +234,12 @@ interface LeaseInternals {
   workspaceFingerprintFileSystem?: WorkspaceFingerprintFileSystem;
   clock: () => string;
   nonceFactory: () => string;
+  /** Core-derived at acquisition and carried by this sealed capability. */
+  workspaceComparison: WorkspaceComparisonV2;
   lifecycle: "HELD" | "LOST" | "RELEASED" | "DURABILITY_UNKNOWN";
 }
+
+type WorkspaceComparisonV2 = "REQUIRE_INITIAL" | "ALLOW_POST_EXECUTOR_DRIFT";
 
 const leaseInternals = new WeakMap<LeasedRunV2, LeaseInternals>();
 const LEASED_RUN_CONSTRUCTION_SEAL = Symbol("LeasedRunV2");
@@ -342,11 +344,12 @@ export const verifyLeasedRunV2 = revalidateLeaseOwnershipV2;
 /** Refresh the post-lease B1 view and replace the handle's verified checkpoint. */
 export async function refreshLeasedRunV2(
   leasedRun: LeasedRunV2,
-  options: { readonly workspaceComparison?: "REQUIRE_INITIAL" | "ALLOW_POST_EXECUTOR_DRIFT" } = {},
+  options: { readonly executorObservation?: TrustedExecutorObservationV2 } = {},
 ): Promise<LeasedRunV2> {
   const internal = requireActiveLease(leasedRun);
   await verifyLeaseOwnership(internal);
-  const inspected = await inspectOperationalRunV2({ ...openInput(internal), workspaceComparison: options.workspaceComparison ?? inferredWorkspaceComparison(internal.state) });
+  internal.workspaceComparison = workspaceComparisonForHandle(internal, options.executorObservation);
+  const inspected = await inspectOperationalRunV2({ ...openInput(internal), workspaceComparison: internal.workspaceComparison });
   assertReadyForLease(inspected);
   updateFromInspection(internal, inspected);
   await verifyLeaseOwnership(internal);
@@ -365,12 +368,13 @@ export async function repairStateSnapshotWhileLeasedV2(
   options: {
     readonly writtenAt?: string;
     readonly nonce?: string;
-    readonly workspaceComparison?: "REQUIRE_INITIAL" | "ALLOW_POST_EXECUTOR_DRIFT";
+    readonly executorObservation?: TrustedExecutorObservationV2;
   } = {},
 ): Promise<SnapshotRepairResultV2> {
   const internal = requireActiveLease(leasedRun);
   await verifyLeaseOwnership(internal);
-  const inspected = await inspectOperationalRunV2({ ...openInput(internal), workspaceComparison: options.workspaceComparison ?? inferredWorkspaceComparison(internal.state) });
+  internal.workspaceComparison = workspaceComparisonForHandle(internal, options.executorObservation);
+  const inspected = await inspectOperationalRunV2({ ...openInput(internal), workspaceComparison: internal.workspaceComparison });
   assertReadyForLease(inspected);
   if (!inspected.state || !inspected.ledger) throw new RalphRunLeaseError("LEASE_RECONCILIATION_REQUIRED", "LEASE_RECONCILIATION_REQUIRED: verified replay is unavailable");
   updateFromInspection(internal, inspected);
@@ -382,7 +386,8 @@ export async function repairStateSnapshotWhileLeasedV2(
   await verifyLeaseOwnership(internal);
   const stableLedger = await internal.store.inspect();
   if (stableLedger.lastSequence !== internal.ledger.lastSequence || stableLedger.lastEventHash !== internal.ledger.lastEventHash) {
-    const refreshed = await inspectOperationalRunV2({ ...openInput(internal), workspaceComparison: options.workspaceComparison ?? inferredWorkspaceComparison(internal.state) });
+    internal.workspaceComparison = workspaceComparisonForHandle(internal, options.executorObservation);
+    const refreshed = await inspectOperationalRunV2({ ...openInput(internal), workspaceComparison: internal.workspaceComparison });
     assertReadyForLease(refreshed);
     if (!refreshed.state || !refreshed.ledger) throw new RalphRunLeaseError("LEASE_RECONCILIATION_REQUIRED");
     updateFromInspection(internal, refreshed);
@@ -427,9 +432,14 @@ export async function releaseLeasedRunV2(
     releaseProof = options.proof;
   }
   const proofRecord = releaseProof?.record;
+  if (proofRecord?.externalInvocationState === "TERMINATED_QUIESCENT") {
+    internal.workspaceComparison = "ALLOW_POST_EXECUTOR_DRIFT";
+  } else {
+    internal.workspaceComparison = inferredWorkspaceComparison(internal.state);
+  }
   const inspected = await inspectOperationalRunV2({
     ...openInput(internal),
-    workspaceComparison: proofRecord?.externalInvocationState === "TERMINATED_QUIESCENT" ? "ALLOW_POST_EXECUTOR_DRIFT" : "REQUIRE_INITIAL",
+    workspaceComparison: internal.workspaceComparison,
   });
   assertReadyForLease(inspected);
   updateFromInspection(internal, inspected);
@@ -471,11 +481,16 @@ export const releaseRunLeaseV2 = releaseLeasedRunV2;
  */
 export async function derivePreExecutorReleaseProofV2(
   leasedRun: LeasedRunV2,
-  input: { readonly attemptId: string; readonly invocationId: string; readonly artifactRefs: readonly string[] },
+  input: {
+    readonly attemptId: string;
+    readonly invocationId: string;
+    readonly artifactRefs: readonly string[];
+  },
 ): Promise<LeaseReleaseProofV2> {
   const internal = requireActiveLease(leasedRun);
   await verifyLeaseOwnership(internal);
-  const inspected = await inspectOperationalRunV2({ ...openInput(internal), workspaceComparison: "REQUIRE_INITIAL" });
+  internal.workspaceComparison = inferredWorkspaceComparison(internal.state);
+  const inspected = await inspectOperationalRunV2({ ...openInput(internal), workspaceComparison: internal.workspaceComparison });
   assertReadyForLease(inspected);
   updateFromInspection(internal, inspected);
   const attempt = internal.state.attempts[input.attemptId];
@@ -557,18 +572,12 @@ export async function deriveExecutorReleaseProofV2(
 export async function recoverStaleRunLeaseV2(input: RecoveryLeaseInputV2): Promise<{ readonly kind: "RECOVERED"; readonly leasedRun: LeasedRunV2; readonly targetLeaseId: string }> {
   assertV2RuntimeState(input.genesisState);
   const provider = input.processIdentityProvider ?? defaultProcessIdentityProvider;
-  const initialInspectInput = toInspectInput(input);
-  const initialPre = await inspectOperationalRunV2(initialInspectInput);
-  const workspaceComparison = input.workspaceComparison ?? inferredWorkspaceComparison(initialPre.state);
-  const pre = workspaceComparison === input.workspaceComparison
-    ? initialPre
-    : await inspectOperationalRunV2({ ...initialInspectInput, workspaceComparison });
+  const { inspected: pre, workspaceComparison } = await inspectWithCoreWorkspaceComparison(input);
   assertReadyForLease(pre);
   const store = pre.store;
   const paths = await ensureLocksDirectory(store);
   const target = await readLeaseRecord(store.fileSystem, paths.leasePath, input.runId);
-  const effectiveInput = { ...input, workspaceComparison };
-  if (!target) return { kind: "RECOVERED", leasedRun: await acquireLeasedRunV2(effectiveInput), targetLeaseId: "NONE" };
+  if (!target) return { kind: "RECOVERED", leasedRun: await acquireLeasedRunV2(input), targetLeaseId: "NONE" };
 
   const recoverer = await provider.current();
   const recoveryId = nonEmptyFactory(input.recoveryIdFactory ?? randomUUID, "RECOVERY_ID_INVALID");
@@ -601,7 +610,7 @@ export async function recoverStaleRunLeaseV2(input: RecoveryLeaseInputV2): Promi
     }
     await proveOwnerStale(provider, currentTarget);
 
-    const authoritative = await inspectOperationalRunV2(toAuthoritativeInspectInput(effectiveInput));
+    const authoritative = await inspectOperationalRunV2({ ...toAuthoritativeInspectInput(input), workspaceComparison });
     assertReadyForLease(authoritative);
     const attempt = authoritative.state ? Object.values(authoritative.state.attempts).find((candidate) => candidate.disposition === "OPEN") : undefined;
     assertSafeRecoveryStage(attempt, input.notInvokedProof, input.runId);
@@ -624,7 +633,7 @@ export async function recoverStaleRunLeaseV2(input: RecoveryLeaseInputV2): Promi
       throw new RalphRunLeaseError("LEASE_DURABILITY_UNKNOWN_REQUIRES_INSPECTION", "LEASE_DURABILITY_UNKNOWN_REQUIRES_INSPECTION", error);
     }
 
-    fresh = await acquireLeasedRunInternal(effectiveInput, { ownedRecoveryClaim: claim });
+    fresh = await acquireLeasedRunInternal(input, { ownedRecoveryClaim: claim });
     await releaseRecoveryClaim(store.fileSystem, paths, claim, recoveryToken, provider);
     return { kind: "RECOVERED", leasedRun: fresh, targetLeaseId: target.leaseId };
   } catch (error) {
@@ -650,12 +659,7 @@ async function acquireLeasedRunInternal(
   assertV2RuntimeState(input.genesisState);
   validateRalphRunId(input.runId);
   const provider = input.processIdentityProvider ?? defaultProcessIdentityProvider;
-  const initialInspectInput = toInspectInput(input);
-  const initialPre = await inspectOperationalRunV2(initialInspectInput);
-  const workspaceComparison = input.workspaceComparison ?? inferredWorkspaceComparison(initialPre.state);
-  const pre = workspaceComparison === input.workspaceComparison
-    ? initialPre
-    : await inspectOperationalRunV2({ ...initialInspectInput, workspaceComparison });
+  const { inspected: pre, workspaceComparison } = await inspectWithCoreWorkspaceComparison(input);
   assertReadyForLease(pre);
   const store = pre.store;
   const paths = await ensureLocksDirectory(store);
@@ -686,7 +690,7 @@ async function acquireLeasedRunInternal(
 
   let post: InspectOperationalRunV2Result;
   try {
-    post = await inspectOperationalRunV2(toAuthoritativeInspectInput({ ...input, workspaceComparison }));
+    post = await inspectOperationalRunV2({ ...toAuthoritativeInspectInput(input), workspaceComparison });
     assertReadyForLease(post);
     if (!post.runSnapshot || !post.ledger || !post.state) throw new RalphRunLeaseError("LEASE_RECONCILIATION_REQUIRED");
     const actual = await readLeaseRecord(store.fileSystem, paths.leasePath, input.runId);
@@ -717,6 +721,7 @@ async function acquireLeasedRunInternal(
     workspaceFingerprintFileSystem: input.workspaceFingerprintFileSystem,
     clock: input.clock ?? (() => new Date().toISOString()),
     nonceFactory: input.nonceFactory ?? randomUUID,
+    workspaceComparison,
     lifecycle: "HELD",
   };
   return new LeasedRunV2(internal, LEASED_RUN_CONSTRUCTION_SEAL);
@@ -730,14 +735,61 @@ function toInspectInput(input: LeaseRuntimeInputV2): InspectOperationalRunV2Inpu
     ...(input.fs === undefined ? {} : { fs: input.fs }),
     ...(input.externalFacts === undefined ? {} : { externalFacts: input.externalFacts }),
     ...(input.workspaceFingerprintFileSystem === undefined ? {} : { workspaceFingerprintFileSystem: input.workspaceFingerprintFileSystem }),
-    ...(input.workspaceComparison === undefined ? {} : { workspaceComparison: input.workspaceComparison }),
   };
 }
 
-function inferredWorkspaceComparison(state: RalphRuntimeStateV2 | undefined): "REQUIRE_INITIAL" | "ALLOW_POST_EXECUTOR_DRIFT" {
-  const postExecutorStages = new Set(["EXECUTOR_RUNNING", "POST_EXECUTOR_CAPTURE", "EVIDENCE_CAPTURING", "RECONCILING"]);
-  const hasPostExecutorAttempt = state !== undefined && Object.values(state.attempts).some((attempt) => attempt.disposition === "OPEN" && postExecutorStages.has(attempt.stage));
-  return hasPostExecutorAttempt ? "ALLOW_POST_EXECUTOR_DRIFT" : "REQUIRE_INITIAL";
+async function inspectWithCoreWorkspaceComparison(input: LeaseRuntimeInputV2): Promise<{
+  readonly inspected: InspectOperationalRunV2Result;
+  readonly workspaceComparison: WorkspaceComparisonV2;
+}> {
+  // Replay first with the least workspace-specific B1 comparison solely so
+  // Core can derive the policy from durable state. A pre-executor Run is then
+  // reopened strictly before any lease is published.
+  const base = toInspectInput(input);
+  const relaxed = await inspectOperationalRunV2({ ...base, workspaceComparison: "ALLOW_POST_EXECUTOR_DRIFT" });
+  const workspaceComparison = inferredWorkspaceComparison(relaxed.state);
+  if (workspaceComparison === "ALLOW_POST_EXECUTOR_DRIFT" || relaxed.state === undefined) {
+    return { inspected: relaxed, workspaceComparison };
+  }
+  return {
+    inspected: await inspectOperationalRunV2({ ...base, workspaceComparison: "REQUIRE_INITIAL" }),
+    workspaceComparison,
+  };
+}
+
+function inferredWorkspaceComparison(state: RalphRuntimeStateV2 | undefined): WorkspaceComparisonV2 {
+  if (!state) return "REQUIRE_INITIAL";
+  const crossedExecutorBoundary = Object.values(state.attempts).some((attempt) =>
+    attempt.executorFinished !== undefined
+    || attempt.evidenceCaptureInProgress !== undefined
+    || attempt.evidenceCapture !== undefined
+    || attempt.validationSpecs.length > 0
+    || attempt.validationRuns.length > 0
+    || attempt.validationSet !== undefined
+    || attempt.auditPackage !== undefined
+    || ["EXECUTOR_RUNNING", "POST_EXECUTOR_CAPTURE", "EVIDENCE_CAPTURING", "VALIDATING", "AWAITING_HUMAN", "AWAITING_AUDIT", "AUDITING", "RECONCILING"].includes(attempt.stage));
+  const durablePostExecutorCheckpoint = state.checkpoints.acceptedCheckpointFingerprint !== undefined;
+  return crossedExecutorBoundary || durablePostExecutorCheckpoint
+    ? "ALLOW_POST_EXECUTOR_DRIFT"
+    : "REQUIRE_INITIAL";
+}
+
+function workspaceComparisonForHandle(
+  internal: LeaseInternals,
+  observation?: TrustedExecutorObservationV2,
+): WorkspaceComparisonV2 {
+  if (observation === undefined) return inferredWorkspaceComparison(internal.state);
+  assertTrustedExecutorObservationV2(observation);
+  if (observation.state === "NOT_INVOKED") return inferredWorkspaceComparison(internal.state);
+  const attempt = Object.values(internal.state.attempts).find((candidate) => candidate.invocation?.invocationId === observation.invocationId);
+  if (!attempt
+    || observation.record.runId !== internal.runId
+    || observation.record.phaseId !== attempt.phaseId
+    || observation.record.taskId !== attempt.taskId
+    || observation.record.attemptId !== attempt.attemptId) {
+    throw new RalphRunLeaseError("LEASE_RECONCILIATION_REQUIRED", "LEASE_RECONCILIATION_REQUIRED: executor observation is not bound to the leased Run");
+  }
+  return "ALLOW_POST_EXECUTOR_DRIFT";
 }
 
 function openInput(internal: LeaseInternals): InspectOperationalRunV2Input {
