@@ -6,10 +6,10 @@
   "modelId": "opencode-go/deepseek-v4-pro",
   "transport": "opencode-cli",
   "requestAccounting": "opaque",
-  "transportVersion": "1.18.25",
+  "transportVersion": "1.18.29",
   "suiteVersion": "rb-adapter-conformance/v1",
-  "runId": "b5a8c074-b300-498e-9a56-162dfeafb56a",
-  "recordedAt": "2026-09-01T23:24:46.511Z",
+  "runId": "fe9a7a61-f8a3-4dcf-9246-a367f7144ac4",
+  "recordedAt": "2026-09-07T22:43:02.197Z",
   "rawResponses": {
     "representation-comprehensive": {
       "origin": "live-recorded",
@@ -37,9 +37,9 @@
       },
       "response": {
         "exitCode": 0,
-        "startedAt": "2026-09-01T23:24:28.710Z",
-        "completedAt": "2026-09-01T23:24:35.200Z",
-        "firstOutputMs": 6381,
+        "startedAt": "2026-09-07T22:42:49.290Z",
+        "completedAt": "2026-09-07T22:42:54.673Z",
+        "firstOutputMs": 5299,
         "streamComplete": true,
         "treeQuiescent": true,
         "treeVerified": true,
@@ -50,23 +50,23 @@
         "events": [
           {
             "kind": "step-start",
-            "messageId": "msg_05f49de980015mC5kDeDI1izYj"
+            "messageId": "msg_07e09df98001FgRttQp45h0dvo"
           },
           {
             "kind": "text",
-            "id": "prt_05f49e9fb001cFonMRIUElZRLI",
+            "id": "prt_07e09ea820013bcg6Zxjw5RXpL",
             "text": "{\"title\":\"transport-probe\",\"mode\":\"alpha\",\"nested\":{\"level1\":{\"level2\":{\"value\":\"kept\"}}},\"arrays\":[[],[\"one\"],[\"one\",\"two\"]],\"optional\":null}"
           },
           {
             "kind": "step-finish",
             "reason": "stop",
             "usage": {
-              "input": 2212,
+              "input": 2214,
               "output": 45,
-              "reasoning": 19,
+              "reasoning": 36,
               "cacheRead": 0,
               "cacheWrite": 0,
-              "cost": 0.00158664
+              "cost": 0.00162162
             }
           }
         ],
@@ -80,9 +80,9 @@
       },
       "response": {
         "exitCode": 0,
-        "startedAt": "2026-09-01T23:24:37.384Z",
-        "completedAt": "2026-09-01T23:24:43.738Z",
-        "firstOutputMs": 6254,
+        "startedAt": "2026-09-07T22:42:55.943Z",
+        "completedAt": "2026-09-07T22:43:00.785Z",
+        "firstOutputMs": 4762,
         "streamComplete": true,
         "treeQuiescent": true,
         "treeVerified": true,
@@ -93,23 +93,23 @@
         "events": [
           {
             "kind": "step-start",
-            "messageId": "msg_05f4a00c3001QlLoxa4GPS7bQ1"
+            "messageId": "msg_07e09f92a0016gQ8uc6JoCLHhO"
           },
           {
             "kind": "text",
-            "id": "prt_05f4a0c860012YvxnMpNI0RUo7",
+            "id": "prt_07e0a0377001oS4QcnqBSXNmo9",
             "text": "{\"items\":[]}"
           },
           {
             "kind": "step-finish",
             "reason": "stop",
             "usage": {
-              "input": 2061,
+              "input": 2060,
               "output": 6,
-              "reasoning": 20,
+              "reasoning": 37,
               "cacheRead": 0,
               "cacheWrite": 0,
-              "cost": 0.00141174
+              "cost": 0.00144474
             }
           }
         ],
@@ -120,9 +120,9 @@
       "origin": "derived-from-recording",
       "response": {
         "exitCode": 0,
-        "startedAt": "2026-09-01T23:24:28.710Z",
-        "completedAt": "2026-09-01T23:24:35.200Z",
-        "firstOutputMs": 6381,
+        "startedAt": "2026-09-07T22:42:49.290Z",
+        "completedAt": "2026-09-07T22:42:54.673Z",
+        "firstOutputMs": 5299,
         "streamComplete": false,
         "treeQuiescent": true,
         "treeVerified": true,
@@ -133,23 +133,23 @@
         "events": [
           {
             "kind": "step-start",
-            "messageId": "msg_05f49de980015mC5kDeDI1izYj"
+            "messageId": "msg_07e09df98001FgRttQp45h0dvo"
           },
           {
             "kind": "text",
-            "id": "prt_05f49e9fb001cFonMRIUElZRLI",
+            "id": "prt_07e09ea820013bcg6Zxjw5RXpL",
             "text": "{\"title\":\"transport-probe\",\"mode\":\"alpha\",\"nested\":{\"level1\":{\"level2\":{\"value\":\"kept\"}}},\"arrays\":[[],[\"one\"],[\"one\",\"two\"]],\"optional\":null}"
           },
           {
             "kind": "step-finish",
             "reason": "stop",
             "usage": {
-              "input": 2212,
+              "input": 2214,
               "output": 45,
-              "reasoning": 19,
+              "reasoning": 36,
               "cacheRead": 0,
               "cacheWrite": 0,
-              "cost": 0.00158664
+              "cost": 0.00162162
             }
           }
         ],
@@ -162,9 +162,9 @@
       "origin": "derived-from-recording",
       "response": {
         "exitCode": 0,
-        "startedAt": "2026-09-01T23:24:28.710Z",
-        "completedAt": "2026-09-01T23:24:35.200Z",
-        "firstOutputMs": 6381,
+        "startedAt": "2026-09-07T22:42:49.290Z",
+        "completedAt": "2026-09-07T22:42:54.673Z",
+        "firstOutputMs": 5299,
         "streamComplete": true,
         "treeQuiescent": true,
         "treeVerified": true,
@@ -193,7 +193,7 @@
     "cancellation": {
       "passed": true,
       "errorKind": "cancelled",
-      "durationMs": 119,
+      "durationMs": 88,
       "providerRequestMeasurement": {
         "measured": false,
         "reason": "unsupported-by-provider"
@@ -206,7 +206,7 @@
     "timeout": {
       "passed": true,
       "errorKind": "timeout",
-      "durationMs": 91,
+      "durationMs": 43,
       "providerRequestMeasurement": {
         "measured": false,
         "reason": "unsupported-by-provider"
@@ -219,8 +219,8 @@
   },
   "externalCliEvidence": {
     "format": "rb-external-cli-evidence/v1",
-    "executable": "opencode",
-    "transportVersion": "1.18.25",
+    "executable": "/home/bruno/.opencode/bin/opencode",
+    "transportVersion": "1.18.29",
     "requestedModel": "opencode-go/deepseek-v4-pro",
     "transportInvocations": 2,
     "observedProviderRequests": {
@@ -276,8 +276,8 @@
   "result": {
     "profileId": "opencode:cli:opencode-go/deepseek-v4-pro",
     "suiteVersion": "rb-adapter-conformance/v1",
-    "runId": "b5a8c074-b300-498e-9a56-162dfeafb56a",
-    "recordedAt": "2026-09-01T23:24:46.511Z",
+    "runId": "fe9a7a61-f8a3-4dcf-9246-a367f7144ac4",
+    "recordedAt": "2026-09-07T22:43:02.197Z",
     "tier": "SUPPORTED",
     "cases": [
       {
@@ -413,5 +413,5 @@
       "usage-reporting"
     ]
   },
-  "integritySha256": "31ee92a902221f188e80abf3622b35c6f097565d6b7cdaf77b88f2de6b6dc4aa"
+  "integritySha256": "0eab4d237eccafcea9e79a6a98d2b6eb8b687f12329f48590a12e946bcc68dc0"
 }
