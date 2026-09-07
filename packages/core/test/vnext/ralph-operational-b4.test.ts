@@ -943,6 +943,8 @@ describe("Ralph Operational Core V2 — B4 scripted executor", () => {
       b4Observation: await import("../../src/vnext/ralph-runtime/operational-b4/execution-observation.js"),
       b4Runtime: await import("../../src/vnext/ralph-runtime/operational-b4/executor-runtime.js"),
       b4Scripted: await import("../../src/vnext/ralph-runtime/operational-b4/scripted-executor.js"),
+      m4aArtifacts: await import("../../src/vnext/ralph-runtime/operational-b4/provider-invocation-artifacts.js"),
+      m4aObserver: await import("../../src/vnext/ralph-runtime/operational-b4/opencode-cli-observer.js"),
       c: await import("../../src/vnext/ralph-runtime/operational-c/index.js"),
       cEvidence: await import("../../src/vnext/ralph-runtime/operational-c/evidence.js"),
       root: await import("../../src/vnext/ralph-runtime/index.js"),
@@ -975,16 +977,27 @@ describe("Ralph Operational Core V2 — B4 scripted executor", () => {
       b3Admission: ["ADMISSION_ERROR_CODES", "AuthorizedInvocationV2", "RalphAdmissionError", "assertAuthorizedInvocationV2", "isAuthorizedInvocationV2", "prepareNextAuthorizedInvocationV2", "reopenAuthorizedInvocationV2"],
       b4: [
         "B4_ARTIFACT_ERROR_CODES", "B4_EXECUTION_ERROR_CODES", "EXECUTOR_BOUNDARY_STATES", "EXECUTOR_OBSERVATION_SCHEMA_V2", "EXECUTOR_OBSERVATION_STATES",
-        "EXECUTOR_RESULT_ENVELOPE_STATUSES", "EXECUTOR_RUNTIME_ERROR_CODES", "ExecutorRuntimeError", "ExecutorRuntimeV2", "LEASE_OWNERSHIP_STATES",
-        "RALPH_EXECUTOR_RESULT_SCHEMA_V2", "RALPH_WORKSPACE_MANIFEST_SCHEMA_V2", "RalphB4ArtifactError", "RalphB4ExecutionError", "SCRIPTED_SCENARIO_KINDS",
+        "EXECUTOR_RESULT_ENVELOPE_STATUSES", "EXECUTOR_RUNTIME_ERROR_CODES", "ExecutorRuntimeError", "ExecutorRuntimeV2", "LEASE_OWNERSHIP_STATES", "M4A_ERROR_CODES",
+        "OPENCODE_CLI_CONFORMANCE_STATES_V2", "OPENCODE_SESSION_ACTIVITY_STATES_V2", "OPENCODE_SESSION_IDENTITY_STATES_V2", "OPENCODE_SESSION_MESSAGE_STATES_V2", "OPENCODE_SESSION_MODEL_STATES_V2",
+        "OPENCODE_SESSION_RESULT_STATES_V2", "OpenCodeCliInvocationObserverV2", "PROVIDER_PROCESS_TREE_STATES_V2", "PROVIDER_TERMINAL_PROCESS_STATES_V2",
+        "RALPH_EXECUTOR_RESULT_SCHEMA_V2", "RALPH_PROVIDER_DISPATCH_INTENT_SCHEMA_V2", "RALPH_PROVIDER_INVOCATION_DESCRIPTOR_SCHEMA_V2",
+        "RALPH_PROVIDER_SESSION_BINDING_SCHEMA_V2", "RALPH_PROVIDER_TERMINAL_SCHEMA_V2", "RALPH_PROVIDER_WORKER_RECEIPT_SCHEMA_V2",
+        "RALPH_WORKSPACE_MANIFEST_SCHEMA_V2", "RalphB4ArtifactError", "RalphB4ExecutionError", "RalphM4AError", "SCRIPTED_SCENARIO_KINDS",
         "ScriptedExecutor", "assertNotInvokedProofV2", "assertObservationForInvocation", "assertRuntimeObservation", "assertSafeArtifactRefV2",
-        "assertTrustedExecutorObservationV2", "assertTrustedExecutorRuntimeV2", "attemptArtifactPathV2", "attemptArtifactRefV2",
-        "buildExecutorObservationEnvelopeV2", "canonicalExecutorObservationV2", "createInvocationResultV2", "createWorkspaceManifestV2", "deriveNotInvokedProofV2",
+        "assertTrustedExecutorObservationV2", "assertTrustedExecutorRuntimeV2", "assertTrustedOpenCodeCliInvocationObserverV2", "attemptArtifactPathV2", "attemptArtifactRefV2",
+        "buildExecutorObservationEnvelopeV2", "canonicalExecutorObservationV2", "createInvocationResultV2", "createProviderDispatchIntentV2",
+        "createProviderInvocationDescriptorV2", "createProviderSessionBindingV2", "createProviderTerminalArtifactV2", "createProviderWorkerReceiptV2",
+        "createWorkspaceManifestV2", "deriveNotInvokedProofV2",
         "ensureAttemptArtifactDirectoryV2", "executeAuthorizedInvocationV2", "executeScriptedInvocationV2", "invocationResultRefV2", "isNotInvokedProofV2",
-        "isQuiescentObservation", "isTrustedExecutorObservationV2", "isTrustedExecutorRuntimeV2", "observationState", "observeWorkspaceManifestV2",
-        "persistImmutableJsonArtifactV2", "persistInvocationResultV2", "persistWorkspaceAfterManifestV2", "persistWorkspaceBeforeManifestV2",
-        "readImmutableJsonArtifactV2", "readInvocationResultV2", "readWorkspaceAfterManifestV2", "readWorkspaceBeforeManifestV2", "runAuthorizedInvocationV2",
-        "validateExecutorObservationEnvelopeV2", "validateInvocationResultV2", "validateWorkspaceManifestV2", "workspaceAfterRefV2", "workspaceBeforeRefV2",
+        "isQuiescentObservation", "isTrustedExecutorObservationV2", "isTrustedExecutorRuntimeV2", "isTrustedOpenCodeCliInvocationObserverV2", "observationState", "observeWorkspaceManifestV2",
+        "persistImmutableJsonArtifactV2", "persistInvocationResultV2", "persistProviderDispatchIntentV2", "persistProviderInvocationDescriptorV2",
+        "persistProviderSessionBindingV2", "persistProviderTerminalArtifactV2", "persistProviderWorkerReceiptV2", "persistWorkspaceAfterManifestV2", "persistWorkspaceBeforeManifestV2",
+        "providerDispatchIntentRefV2", "providerInvocationDescriptorRefV2", "providerSessionBindingRefV2", "providerTerminalRefV2", "providerWorkerReceiptRefV2",
+        "readImmutableJsonArtifactV2", "readInvocationResultV2", "readProviderDispatchIntentV2", "readProviderInvocationArtifactSetV2",
+        "readProviderInvocationDescriptorV2", "readProviderSessionBindingV2", "readProviderTerminalArtifactV2", "readProviderWorkerReceiptV2",
+        "readWorkspaceAfterManifestV2", "readWorkspaceBeforeManifestV2", "runAuthorizedInvocationV2", "validateExecutorObservationEnvelopeV2", "validateInvocationResultV2",
+        "validateProviderDispatchIntentV2", "validateProviderInvocationDescriptorV2", "validateProviderSessionBindingV2", "validateProviderTerminalArtifactV2",
+        "validateProviderWorkerReceiptV2", "validateWorkspaceManifestV2", "workspaceAfterRefV2", "workspaceBeforeRefV2",
         "workspaceManifestCoreJson", "workspaceManifestEntries",
       ],
       b4Execution: [
@@ -998,35 +1011,61 @@ describe("Ralph Operational Core V2 — B4 scripted executor", () => {
       ],
       b4Runtime: ["EXECUTOR_RUNTIME_ERROR_CODES", "ExecutorRuntimeError", "ExecutorRuntimeV2", "assertObservationForInvocation", "assertRuntimeObservation", "isQuiescentObservation", "observationState"],
       b4Scripted: ["SCRIPTED_SCENARIO_KINDS", "ScriptedExecutor", "assertTrustedExecutorRuntimeV2", "isTrustedExecutorRuntimeV2"],
+      m4aArtifacts: [
+        "M4A_ERROR_CODES", "OPENCODE_CLI_CONFORMANCE_STATES_V2", "PROVIDER_TERMINAL_PROCESS_STATES_V2", "RALPH_PROVIDER_DISPATCH_INTENT_SCHEMA_V2",
+        "RALPH_PROVIDER_INVOCATION_DESCRIPTOR_SCHEMA_V2", "RALPH_PROVIDER_SESSION_BINDING_SCHEMA_V2", "RALPH_PROVIDER_TERMINAL_SCHEMA_V2",
+        "RALPH_PROVIDER_WORKER_RECEIPT_SCHEMA_V2", "RalphM4AError", "createProviderDispatchIntentV2", "createProviderInvocationDescriptorV2",
+        "createProviderSessionBindingV2", "createProviderTerminalArtifactV2", "createProviderWorkerReceiptV2", "persistProviderDispatchIntentV2",
+        "persistProviderInvocationDescriptorV2", "persistProviderSessionBindingV2", "persistProviderTerminalArtifactV2", "persistProviderWorkerReceiptV2",
+        "providerDispatchIntentRefV2", "providerInvocationDescriptorRefV2", "providerSessionBindingRefV2", "providerTerminalRefV2",
+        "providerWorkerReceiptRefV2", "readProviderDispatchIntentV2", "readProviderInvocationArtifactSetV2", "readProviderInvocationDescriptorV2",
+        "readProviderSessionBindingV2", "readProviderTerminalArtifactV2", "readProviderWorkerReceiptV2", "validateProviderDispatchIntentV2",
+        "validateProviderInvocationDescriptorV2", "validateProviderSessionBindingV2", "validateProviderTerminalArtifactV2", "validateProviderWorkerReceiptV2",
+      ],
+      m4aObserver: [
+        "OPENCODE_SESSION_ACTIVITY_STATES_V2", "OPENCODE_SESSION_IDENTITY_STATES_V2", "OPENCODE_SESSION_MESSAGE_STATES_V2", "OPENCODE_SESSION_MODEL_STATES_V2",
+        "OPENCODE_SESSION_RESULT_STATES_V2", "OpenCodeCliInvocationObserverV2", "PROVIDER_PROCESS_TREE_STATES_V2",
+        "assertTrustedOpenCodeCliInvocationObserverV2", "isTrustedOpenCodeCliInvocationObserverV2",
+      ],
       c: ["C_EVIDENCE_ERROR_CODES", "EVIDENCE_CAPTURE_SCHEMA_V2", "EVIDENCE_CHANGE_KINDS", "RalphCEvidenceError", "captureEvidenceV2", "createEvidenceCaptureV2", "deriveWorkspaceChangesV2", "evidenceCaptureRefV2", "persistEvidenceCaptureV2", "readEvidenceCaptureV2", "runEvidenceCaptureV2", "validateEvidenceCaptureV2"],
       cEvidence: ["C_EVIDENCE_ERROR_CODES", "EVIDENCE_CAPTURE_SCHEMA_V2", "EVIDENCE_CHANGE_KINDS", "RalphCEvidenceError", "captureEvidenceV2", "createEvidenceCaptureV2", "deriveWorkspaceChangesV2", "evidenceCaptureRefV2", "persistEvidenceCaptureV2", "readEvidenceCaptureV2", "runEvidenceCaptureV2", "validateEvidenceCaptureV2"],
       root: [
         "B4_ARTIFACT_ERROR_CODES", "B4_EXECUTION_ERROR_CODES", "C_EVIDENCE_ERROR_CODES", "EVIDENCE_CAPTURE_SCHEMA_V2", "EVIDENCE_CHANGE_KINDS",
         "EXECUTOR_BOUNDARY_STATES", "EXECUTOR_OBSERVATION_SCHEMA_V2", "EXECUTOR_OBSERVATION_STATES", "EXECUTOR_RESULT_ENVELOPE_STATUSES",
-        "EXECUTOR_RUNTIME_ERROR_CODES", "ExecutorRuntimeError", "ExecutorRuntimeV2", "FINDING_STATUSES", "LEASE_OWNERSHIP_STATES", "PHASE_ACTIVITIES",
+        "EXECUTOR_RUNTIME_ERROR_CODES", "ExecutorRuntimeError", "ExecutorRuntimeV2", "FINDING_STATUSES", "LEASE_OWNERSHIP_STATES", "M4A_ERROR_CODES",
+        "OPENCODE_CLI_CONFORMANCE_STATES_V2", "OPENCODE_SESSION_ACTIVITY_STATES_V2", "OPENCODE_SESSION_IDENTITY_STATES_V2", "OPENCODE_SESSION_MESSAGE_STATES_V2", "OPENCODE_SESSION_MODEL_STATES_V2",
+        "OPENCODE_SESSION_RESULT_STATES_V2", "OpenCodeCliInvocationObserverV2", "PROVIDER_PROCESS_TREE_STATES_V2", "PROVIDER_TERMINAL_PROCESS_STATES_V2", "PHASE_ACTIVITIES",
         "PHASE_DISPOSITIONS", "RALPH_EVENT_DIGITS", "RALPH_EVENT_MAX", "RALPH_EVENT_SCHEMA", "RALPH_EVENT_TYPES", "RALPH_EXECUTOR_RESULT_SCHEMA_V2",
-        "RALPH_STATE_SNAPSHOT_SCHEMA", "RALPH_WORKSPACE_MANIFEST_SCHEMA_V2", "RUN_DISPOSITIONS", "RUN_HOLDS", "RalphB4ArtifactError",
-        "RalphB4ExecutionError", "RalphCEvidenceError", "RalphEventStore", "RalphEventStoreError", "RalphStateSnapshotError", "SCRIPTED_SCENARIO_KINDS",
+        "RALPH_PROVIDER_DISPATCH_INTENT_SCHEMA_V2", "RALPH_PROVIDER_INVOCATION_DESCRIPTOR_SCHEMA_V2", "RALPH_PROVIDER_SESSION_BINDING_SCHEMA_V2",
+        "RALPH_PROVIDER_TERMINAL_SCHEMA_V2", "RALPH_PROVIDER_WORKER_RECEIPT_SCHEMA_V2", "RALPH_STATE_SNAPSHOT_SCHEMA", "RALPH_WORKSPACE_MANIFEST_SCHEMA_V2",
+        "RUN_DISPOSITIONS", "RUN_HOLDS", "RalphB4ArtifactError", "RalphB4ExecutionError", "RalphCEvidenceError", "RalphEventStore", "RalphEventStoreError",
+        "RalphM4AError", "RalphStateSnapshotError", "SCRIPTED_SCENARIO_KINDS",
         "ScriptedExecutor", "TASK_ACTIVITIES", "TASK_DISPOSITIONS", "TASK_HOLDS", "TASK_OWNERS", "WORKSPACE_FINGERPRINT_FORMAT", "activeTaskIds",
         "assertAttemptBaseFingerprint", "assertAuditBinding", "assertNotInvokedProofV2", "assertObservationForInvocation", "assertRunCombination",
         "assertRuntimeObservation", "assertSafeArtifactRefV2", "assertSha256Digest", "assertTaskState", "assertTrustedExecutorObservationV2",
-        "assertTrustedExecutorRuntimeV2", "attemptArtifactPathV2", "attemptArtifactRefV2", "auditMayApprove", "buildExecutorObservationEnvelopeV2",
+        "assertTrustedExecutorRuntimeV2", "assertTrustedOpenCodeCliInvocationObserverV2", "attemptArtifactPathV2", "attemptArtifactRefV2", "auditMayApprove", "buildExecutorObservationEnvelopeV2",
         "canAuditorProposeFindingResolution", "canCompleteCurrentBudgetedOperation", "canCompleteRun", "canStartBudgetedOperation", "canonicalEventBytes",
         "canonicalExecutorObservationV2", "canonicalJson", "canonicalJsonBytes", "captureEvidenceV2", "commitRalphEvent", "createEvidenceCaptureV2",
-        "createInitialRuntimeState", "createInvocationResultV2", "createRalphEvent", "createStateSnapshot", "createWorkspaceManifestV2", "createWorkspacePolicy",
+        "createInitialRuntimeState", "createInvocationResultV2", "createProviderDispatchIntentV2", "createProviderInvocationDescriptorV2",
+        "createProviderSessionBindingV2", "createProviderTerminalArtifactV2", "createProviderWorkerReceiptV2", "createRalphEvent", "createStateSnapshot",
+        "createWorkspaceManifestV2", "createWorkspacePolicy",
         "deriveAllPhases", "deriveBudgetUsage", "deriveLocalBlockingRunHold", "deriveNotInvokedProofV2", "derivePhaseState", "deriveWorkspaceChangesV2",
         "ensureAttemptArtifactDirectoryV2", "ensureRalphRuntimeLayout", "eventFileName", "evidenceCaptureRefV2", "executeAuthorizedInvocationV2",
         "executeScriptedInvocationV2", "expectedAttemptBaseFingerprint", "fingerprintWorkspace", "inspectRalphResume", "invocationResultRefV2", "isEventFileName",
         "isEventTempFileName", "isNotInvokedProofV2", "isQuiescentObservation", "isSha256Digest", "isTrustedExecutorObservationV2",
-        "isTrustedExecutorRuntimeV2", "nodeRalphRuntimeFileSystem", "nodeWorkspaceFingerprintFileSystem", "observationState", "observeWorkspaceManifestV2",
-        "persistEvidenceCaptureV2", "persistImmutableJsonArtifactV2", "persistImmutableRunSnapshot", "persistInvocationResultV2", "persistStateSnapshot",
+        "isTrustedExecutorRuntimeV2", "isTrustedOpenCodeCliInvocationObserverV2", "nodeRalphRuntimeFileSystem", "nodeWorkspaceFingerprintFileSystem", "observationState", "observeWorkspaceManifestV2",
+        "persistEvidenceCaptureV2", "persistImmutableJsonArtifactV2", "persistImmutableRunSnapshot", "persistInvocationResultV2", "persistProviderDispatchIntentV2",
+        "persistProviderInvocationDescriptorV2", "persistProviderSessionBindingV2", "persistProviderTerminalArtifactV2", "persistProviderWorkerReceiptV2", "persistStateSnapshot",
         "persistWorkspaceAfterManifestV2", "persistWorkspaceBeforeManifestV2", "phaseHasActiveTask", "phaseHasExecutableReadyTask", "phaseProgress",
         "projectPhase", "projectPhases", "projectRun", "projectTask", "projectTasks", "readEvidenceCaptureV2", "readImmutableJsonArtifactV2",
-        "readInvocationResultV2", "readRunSnapshot", "readRuntimeFile", "readStateSnapshot", "readWorkspaceAfterManifestV2", "readWorkspaceBeforeManifestV2",
+        "providerDispatchIntentRefV2", "providerInvocationDescriptorRefV2", "providerSessionBindingRefV2", "providerTerminalRefV2", "providerWorkerReceiptRefV2",
+        "readInvocationResultV2", "readProviderDispatchIntentV2", "readProviderInvocationArtifactSetV2", "readProviderInvocationDescriptorV2",
+        "readProviderSessionBindingV2", "readProviderTerminalArtifactV2", "readProviderWorkerReceiptV2", "readRunSnapshot", "readRuntimeFile", "readStateSnapshot", "readWorkspaceAfterManifestV2", "readWorkspaceBeforeManifestV2",
         "recomputePhaseState", "reduceRalphEvent", "replayFromRecords", "replayRalphRuntime", "resolveRalphRunDirectory", "runAuthorizedInvocationV2",
         "runEvidenceCaptureV2", "runHasEligibleWork", "runHasKnownBlockingCondition", "sha256", "sha256Canonical", "taskDependenciesSatisfied",
         "taskIsActive", "taskIsExecutableReady", "transitionFinding", "unsignedEventHash", "validateAuditBinding", "validateEvidenceCaptureV2",
-        "validateExecutorObservationEnvelopeV2", "validateInvocationResultV2", "validateRalphEvent", "validateRalphResume", "validateRalphRunId",
+        "validateExecutorObservationEnvelopeV2", "validateInvocationResultV2", "validateProviderDispatchIntentV2", "validateProviderInvocationDescriptorV2",
+        "validateProviderSessionBindingV2", "validateProviderTerminalArtifactV2", "validateProviderWorkerReceiptV2", "validateRalphEvent", "validateRalphResume", "validateRalphRunId",
         "validateRunSnapshot", "validateSnapshotAgainstLedger", "validateWorkspaceManifestV2", "workspaceAfterRefV2", "workspaceBeforeRefV2",
         "workspaceManifestCoreJson", "workspaceManifestEntries", "writeAtomicRuntimeFile", "writeExclusiveRuntimeFile",
       ],
@@ -1036,20 +1075,27 @@ describe("Ralph Operational Core V2 — B4 scripted executor", () => {
     }
   });
 
-  it("structurally reads every B4 production file and proves the runtime has no forbidden process/provider surface", async () => {
+  it("structurally proves M2 stays process/provider-free and M4-A adds only the OpenCode observation surface", async () => {
     const roots = [
       resolve(TEST_DIRECTORY, "../../src/vnext/ralph-runtime/operational-b4"),
       resolve(TEST_DIRECTORY, "../../src/vnext/ralph-runtime/operational-c"),
     ];
     const entries = (await Promise.all(roots.map(async (root) => (await readdir(root, { recursive: true })).filter((entry) => entry.endsWith(".ts")).map((entry) => join(root, entry))))).flat().sort();
     expect(entries.length).toBeGreaterThan(0);
-    const source = (await Promise.all(entries.map(async (entry) => readFile(entry, "utf8")))).join("\n");
+    const sources = await Promise.all(entries.map(async (entry) => ({ entry, source: await readFile(entry, "utf8") })));
+    const source = sources.map((item) => item.source).join("\n");
     for (const pattern of [
       /from\s+["']node:child_process["']/,
       /\b(?:spawn|exec|execFile|fork)\s*\(/,
-      /\b(?:Codex|Claude|OpenCode|OpenAI|Anthropic|DeepSeek|MiniMax)\b/,
       /provider\s+registry/i,
       /model\s+API/i,
     ]) expect(source).not.toMatch(pattern);
+    const m4aFiles = new Set(["provider-invocation-artifacts.ts", "opencode-cli-observer.ts"]);
+    const legacySource = sources.filter(({ entry }) => !m4aFiles.has(entry.split("/").at(-1) ?? "")).map((item) => item.source).join("\n");
+    expect(legacySource).not.toMatch(/\b(?:Codex|Claude|OpenCode|OpenAI|Anthropic|DeepSeek|MiniMax)\b/);
+    const m4aSource = sources.filter(({ entry }) => m4aFiles.has(entry.split("/").at(-1) ?? "")).map((item) => item.source).join("\n");
+    expect(m4aSource).toContain("OpenCode");
+    expect(m4aSource).not.toMatch(/\b(?:Codex|Claude|OpenAI|Anthropic|DeepSeek|MiniMax)\b/);
+    expect(m4aSource).not.toMatch(/vnext\/providers\/(?!opencode\/profiles)/);
   });
 });
