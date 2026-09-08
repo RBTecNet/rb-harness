@@ -72,7 +72,7 @@ describe.sequential("Progressive Dashboard production provider runtime", () => {
     vi.spyOn(codexSubscriptionAdapter, "runtimePreflight").mockResolvedValue({ ok: true, value: codexEvidence });
     vi.spyOn(openCodeCliAdapter, "runtimePreflight").mockResolvedValue({
       ok: true,
-      value: { executable: "opencode-fixture", transportVersion: "1.18.25" },
+      value: { executable: "opencode-fixture", transportVersion: "1.18.29" },
     });
     vi.spyOn(claudeCodeAdapter, "runtimePreflight").mockResolvedValue({
       ok: true,

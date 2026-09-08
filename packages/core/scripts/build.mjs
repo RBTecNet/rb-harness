@@ -64,6 +64,16 @@ await build({
   packages: "external",
 });
 
+await build({
+  entryPoints: [resolve(packageRoot, "src/vnext/ralph-runtime/operational-b4/opencode-cli-worker.ts")],
+  outfile: resolve(dist, "opencode-cli-worker.js"),
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node20",
+  packages: "external",
+});
+
 await cp(packageInstaller, resolve(dist, "install.js"));
 await cp(installerUx, resolve(dist, "installer-ux.mjs"));
 await cp(nodePreflight, resolve(dist, "node-preflight.mjs"));

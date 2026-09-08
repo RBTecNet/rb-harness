@@ -1,0 +1,407 @@
+{
+  "info": {
+    "id": "ses_m4bRealSanitizedFixture001",
+    "slug": "sanitized-real-opencode-1-18-29",
+    "projectID": "fixture-project",
+    "directory": "/fixture/project",
+    "path": "fixture/session",
+    "title": "Sanitized M4-B transport fixture",
+    "agent": "build",
+    "model": {
+      "id": "deepseek-v4-pro",
+      "providerID": "opencode-go"
+    },
+    "version": "1.18.29",
+    "summary": {
+      "additions": 1,
+      "deletions": 0,
+      "files": 1
+    },
+    "cost": 0.01,
+    "tokens": {
+      "input": 12525,
+      "output": 242,
+      "reasoning": 14,
+      "cache": {
+        "read": 15616,
+        "write": 0
+      }
+    },
+    "permission": [
+      {
+        "permission": "external_directory",
+        "pattern": "*",
+        "action": "deny"
+      }
+    ],
+    "time": {
+      "created": 1788834536162,
+      "updated": 1788834555177
+    }
+  },
+  "messages": [
+    {
+      "info": {
+        "role": "user",
+        "time": {
+          "created": 1788834536268
+        },
+        "tools": {
+          "read": true,
+          "glob": true,
+          "grep": true,
+          "list": true,
+          "edit": true,
+          "write": true,
+          "apply_patch": true,
+          "bash": true,
+          "task": false,
+          "webfetch": false,
+          "websearch": false
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "opencode-go",
+          "modelID": "deepseek-v4-pro"
+        },
+        "summary": {
+          "diffs": []
+        },
+        "id": "msg_ralph_m4b_real_fixture_001",
+        "sessionID": "ses_m4bRealSanitizedFixture001"
+      },
+      "parts": [
+        {
+          "type": "text",
+          "text": "[sanitized deterministic Core prompt]",
+          "id": "prt_real_user_text_001",
+          "sessionID": "ses_m4bRealSanitizedFixture001",
+          "messageID": "msg_ralph_m4b_real_fixture_001"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_ralph_m4b_real_fixture_001",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "[redacted:cwd]",
+          "root": "[redacted:root]"
+        },
+        "cost": 0.002,
+        "tokens": {
+          "total": 6917,
+          "input": 6841,
+          "output": 62,
+          "reasoning": 14,
+          "cache": {
+            "write": 0,
+            "read": 0
+          }
+        },
+        "modelID": "deepseek-v4-pro",
+        "providerID": "opencode-go",
+        "time": {
+          "created": 1788834536833,
+          "completed": 1788834540383
+        },
+        "finish": "tool-calls",
+        "id": "msg_real_tool_step_001",
+        "sessionID": "ses_m4bRealSanitizedFixture001"
+      },
+      "parts": [
+        {
+          "type": "step-start",
+          "id": "prt_real_step_start_001",
+          "sessionID": "ses_m4bRealSanitizedFixture001",
+          "messageID": "msg_real_tool_step_001"
+        },
+        {
+          "type": "reasoning",
+          "text": "[redacted:reasoning]",
+          "time": {
+            "start": 1788834539555,
+            "end": 1788834539964
+          },
+          "id": "prt_real_reasoning_001",
+          "sessionID": "ses_m4bRealSanitizedFixture001",
+          "messageID": "msg_real_tool_step_001"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_real_tool_001",
+          "state": {
+            "status": "completed",
+            "input": {
+              "redacted": "[redacted:input]"
+            },
+            "output": "[redacted:output]",
+            "metadata": {
+              "redacted": "[redacted:metadata]"
+            },
+            "title": "[redacted:title]",
+            "time": {
+              "start": 1788834540271,
+              "end": 1788834540363
+            }
+          },
+          "id": "prt_real_tool_001",
+          "sessionID": "ses_m4bRealSanitizedFixture001",
+          "messageID": "msg_real_tool_step_001"
+        },
+        {
+          "reason": "tool-calls",
+          "type": "step-finish",
+          "tokens": {
+            "total": 6917,
+            "input": 6841,
+            "output": 62,
+            "reasoning": 14,
+            "cache": {
+              "write": 0,
+              "read": 0
+            }
+          },
+          "cost": 0.002,
+          "id": "prt_real_step_finish_001",
+          "sessionID": "ses_m4bRealSanitizedFixture001",
+          "messageID": "msg_real_tool_step_001"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_ralph_m4b_real_fixture_001",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "[redacted:cwd]",
+          "root": "[redacted:root]"
+        },
+        "cost": 0.003,
+        "tokens": {
+          "total": 7090,
+          "input": 5213,
+          "output": 85,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 1792
+          }
+        },
+        "modelID": "deepseek-v4-pro",
+        "providerID": "opencode-go",
+        "time": {
+          "created": 1788834540390,
+          "completed": 1788834550608
+        },
+        "finish": "tool-calls",
+        "id": "msg_real_tool_step_002",
+        "sessionID": "ses_m4bRealSanitizedFixture001"
+      },
+      "parts": [
+        {
+          "type": "step-start",
+          "id": "prt_real_step_start_002",
+          "sessionID": "ses_m4bRealSanitizedFixture001",
+          "messageID": "msg_real_tool_step_002"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_real_tool_002",
+          "state": {
+            "status": "completed",
+            "input": {
+              "redacted": "[redacted:input]"
+            },
+            "output": "[redacted:output]",
+            "metadata": {
+              "redacted": "[redacted:metadata]"
+            },
+            "title": "[redacted:title]",
+            "time": {
+              "start": 1788834550541,
+              "end": 1788834550553
+            }
+          },
+          "id": "prt_real_tool_002",
+          "sessionID": "ses_m4bRealSanitizedFixture001",
+          "messageID": "msg_real_tool_step_002"
+        },
+        {
+          "reason": "tool-calls",
+          "type": "step-finish",
+          "tokens": {
+            "total": 7090,
+            "input": 5213,
+            "output": 85,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 1792
+            }
+          },
+          "cost": 0.003,
+          "id": "prt_real_step_finish_002",
+          "sessionID": "ses_m4bRealSanitizedFixture001",
+          "messageID": "msg_real_tool_step_002"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_ralph_m4b_real_fixture_001",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "[redacted:cwd]",
+          "root": "[redacted:root]"
+        },
+        "cost": 0.003,
+        "tokens": {
+          "total": 7177,
+          "input": 193,
+          "output": 72,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 6912
+          }
+        },
+        "modelID": "deepseek-v4-pro",
+        "providerID": "opencode-go",
+        "time": {
+          "created": 1788834550612,
+          "completed": 1788834553640
+        },
+        "finish": "tool-calls",
+        "id": "msg_real_tool_step_003",
+        "sessionID": "ses_m4bRealSanitizedFixture001"
+      },
+      "parts": [
+        {
+          "type": "step-start",
+          "id": "prt_real_step_start_003",
+          "sessionID": "ses_m4bRealSanitizedFixture001",
+          "messageID": "msg_real_tool_step_003"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_real_tool_003",
+          "state": {
+            "status": "completed",
+            "input": {
+              "redacted": "[redacted:input]"
+            },
+            "output": "[redacted:output]",
+            "metadata": {
+              "redacted": "[redacted:metadata]"
+            },
+            "title": "[redacted:title]",
+            "time": {
+              "start": 1788834553525,
+              "end": 1788834553631
+            }
+          },
+          "id": "prt_real_tool_003",
+          "sessionID": "ses_m4bRealSanitizedFixture001",
+          "messageID": "msg_real_tool_step_003"
+        },
+        {
+          "reason": "tool-calls",
+          "type": "step-finish",
+          "tokens": {
+            "total": 7177,
+            "input": 193,
+            "output": 72,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 6912
+            }
+          },
+          "cost": 0.003,
+          "id": "prt_real_step_finish_003",
+          "sessionID": "ses_m4bRealSanitizedFixture001",
+          "messageID": "msg_real_tool_step_003"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_ralph_m4b_real_fixture_001",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "[redacted:cwd]",
+          "root": "[redacted:root]"
+        },
+        "cost": 0.002,
+        "tokens": {
+          "total": 7213,
+          "input": 278,
+          "output": 23,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 6912
+          }
+        },
+        "modelID": "deepseek-v4-pro",
+        "providerID": "opencode-go",
+        "time": {
+          "created": 1788834553643,
+          "completed": 1788834555168
+        },
+        "finish": "stop",
+        "id": "msg_real_terminal_001",
+        "sessionID": "ses_m4bRealSanitizedFixture001"
+      },
+      "parts": [
+        {
+          "type": "step-start",
+          "id": "prt_real_step_start_004",
+          "sessionID": "ses_m4bRealSanitizedFixture001",
+          "messageID": "msg_real_terminal_001"
+        },
+        {
+          "type": "text",
+          "text": "Created the requested status module.",
+          "time": {
+            "start": 1788834554678,
+            "end": 1788834555160
+          },
+          "id": "prt_real_text_001",
+          "sessionID": "ses_m4bRealSanitizedFixture001",
+          "messageID": "msg_real_terminal_001"
+        },
+        {
+          "reason": "stop",
+          "type": "step-finish",
+          "tokens": {
+            "total": 7213,
+            "input": 278,
+            "output": 23,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 6912
+            }
+          },
+          "cost": 0.002,
+          "id": "prt_real_step_finish_004",
+          "sessionID": "ses_m4bRealSanitizedFixture001",
+          "messageID": "msg_real_terminal_001"
+        }
+      ]
+    }
+  ]
+}

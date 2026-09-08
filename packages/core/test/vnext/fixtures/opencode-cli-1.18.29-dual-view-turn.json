@@ -1,0 +1,414 @@
+{
+  "provenance": {
+    "source": "supported OpenCode 1.18.29 public export and export --sanitize --pure",
+    "sessionId": "ses_f80e11c17ffePBoHPiPJeH1wxf",
+    "capturedWithoutModelDispatch": true,
+    "normalization": "project paths and provider text/tool content replaced with credential-free fixture values; public IDs, ordering, timings, usage metrics, finish states and redaction structure retained"
+  },
+  "live": {
+    "info": {
+      "id": "ses_f80e11c17ffePBoHPiPJeH1wxf",
+      "slug": "nimble-planet",
+      "projectID": "global",
+      "directory": "/fixture/project",
+      "title": "Ralph observation identity fixture",
+      "agent": "build",
+      "model": { "id": "deepseek-v4-pro", "providerID": "opencode-go" },
+      "version": "1.18.29",
+      "summary": { "additions": 0, "deletions": 0, "files": 0 },
+      "cost": 0.005804524,
+      "tokens": { "input": 7378, "output": 239, "reasoning": 0, "cache": { "read": 20992, "write": 0 } },
+      "time": { "created": 1788839125992, "updated": 1788839136099 }
+    },
+    "messages": [
+      {
+        "info": {
+          "role": "user",
+          "time": { "created": 1788839126109 },
+          "agent": "build",
+          "model": { "providerID": "opencode-go", "modelID": "deepseek-v4-pro" },
+          "summary": { "diffs": [] },
+          "id": "msg_ralph_a7439ea788f86139dabe65cb15ed5e870e9bd381",
+          "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf"
+        },
+        "parts": [
+          {
+            "id": "prt_07f1ee4600017QNBai1S8vLSa1",
+            "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf",
+            "messageID": "msg_ralph_a7439ea788f86139dabe65cb15ed5e870e9bd381",
+            "type": "text",
+            "text": "Create the bounded fixture file inside the disposable project only."
+          }
+        ]
+      },
+      {
+        "info": {
+          "parentID": "msg_ralph_a7439ea788f86139dabe65cb15ed5e870e9bd381",
+          "role": "assistant",
+          "mode": "build",
+          "agent": "build",
+          "path": { "cwd": "/fixture/project", "root": "/fixture/root" },
+          "cost": 0.0046365,
+          "tokens": { "total": 6901, "input": 6839, "output": 62, "reasoning": 0, "cache": { "write": 0, "read": 0 } },
+          "modelID": "deepseek-v4-pro",
+          "providerID": "opencode-go",
+          "time": { "created": 1788839126694, "completed": 1788839129960 },
+          "finish": "tool-calls",
+          "id": "msg_07f1ee6a5001YFuy5yKi34Q7lD",
+          "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf"
+        },
+        "parts": [
+          { "id": "prt_07f1eec9b001fa6lpzKwhS5WMP", "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf", "messageID": "msg_07f1ee6a5001YFuy5yKi34Q7lD", "type": "step-start" },
+          {
+            "id": "prt_07f1ef1b5001Vpv0S2wDKA9Fkd",
+            "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf",
+            "messageID": "msg_07f1ee6a5001YFuy5yKi34Q7lD",
+            "type": "tool",
+            "callID": "call_00_ET_Xbx9HfCYXBQNLyyfwxQo6251",
+            "tool": "bash",
+            "state": {
+              "status": "completed",
+              "input": { "command": "pwd" },
+              "output": "/fixture/project\n",
+              "title": "Inspect fixture workspace",
+              "metadata": { "exit": 0, "output": "/fixture/project\n", "truncated": false },
+              "time": { "start": 1788839129812, "end": 1788839129943 }
+            }
+          },
+          {
+            "id": "prt_07f1ef35f0011e8gSKuAoIW1ND",
+            "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf",
+            "messageID": "msg_07f1ee6a5001YFuy5yKi34Q7lD",
+            "type": "step-finish",
+            "reason": "tool-calls",
+            "cost": 0.0046365,
+            "tokens": { "total": 6901, "input": 6839, "output": 62, "reasoning": 0, "cache": { "write": 0, "read": 0 } }
+          }
+        ]
+      },
+      {
+        "info": {
+          "parentID": "msg_ralph_a7439ea788f86139dabe65cb15ed5e870e9bd381",
+          "role": "assistant",
+          "mode": "build",
+          "agent": "build",
+          "path": { "cwd": "/fixture/project", "root": "/fixture/root" },
+          "cost": 0.000510268,
+          "tokens": { "total": 7165, "input": 298, "output": 83, "reasoning": 0, "cache": { "write": 0, "read": 6784 } },
+          "modelID": "deepseek-v4-pro",
+          "providerID": "opencode-go",
+          "time": { "created": 1788839129969, "completed": 1788839132187 },
+          "finish": "tool-calls",
+          "id": "msg_07f1ef3710018RFWrK6CUzfaJy",
+          "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf"
+        },
+        "parts": [
+          { "id": "prt_07f1ef6f400198HOefVFhc5IHg", "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf", "messageID": "msg_07f1ef3710018RFWrK6CUzfaJy", "type": "step-start" },
+          {
+            "id": "prt_07f1ef9f30013QR141JACv2oyC",
+            "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf",
+            "messageID": "msg_07f1ef3710018RFWrK6CUzfaJy",
+            "type": "tool",
+            "callID": "call_00_ET_d2f4pnDr6fwHEs7IGpDZ1398",
+            "tool": "write",
+            "state": {
+              "status": "completed",
+              "input": { "content": "module.exports = \"ready\";\n", "filePath": "/fixture/project/src/status.js" },
+              "output": "Wrote fixture status file.",
+              "title": "Write status fixture",
+              "metadata": { "diagnostics": [], "exists": false, "filepath": "/fixture/project/src/status.js", "truncated": false },
+              "time": { "start": 1788839132109, "end": 1788839132132 }
+            }
+          },
+          {
+            "id": "prt_07f1efc15001WqWaoWVogSKsPG",
+            "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf",
+            "messageID": "msg_07f1ef3710018RFWrK6CUzfaJy",
+            "type": "step-finish",
+            "reason": "tool-calls",
+            "cost": 0.000510268,
+            "tokens": { "total": 7165, "input": 298, "output": 83, "reasoning": 0, "cache": { "write": 0, "read": 6784 } }
+          }
+        ]
+      },
+      {
+        "info": {
+          "parentID": "msg_ralph_a7439ea788f86139dabe65cb15ed5e870e9bd381",
+          "role": "assistant",
+          "mode": "build",
+          "agent": "build",
+          "path": { "cwd": "/fixture/project", "root": "/fixture/root" },
+          "cost": 0.00039248,
+          "tokens": { "total": 7254, "input": 141, "output": 73, "reasoning": 0, "cache": { "write": 0, "read": 7040 } },
+          "modelID": "deepseek-v4-pro",
+          "providerID": "opencode-go",
+          "time": { "created": 1788839132191, "completed": 1788839134289 },
+          "finish": "tool-calls",
+          "id": "msg_07f1efc1f001F36DOwJovdFCM5",
+          "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf"
+        },
+        "parts": [
+          { "id": "prt_07f1eff0d0011Wy5O9UphbfIWd", "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf", "messageID": "msg_07f1efc1f001F36DOwJovdFCM5", "type": "step-start" },
+          {
+            "id": "prt_07f1f02560016NqQn42vNQogUR",
+            "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf",
+            "messageID": "msg_07f1efc1f001F36DOwJovdFCM5",
+            "type": "tool",
+            "callID": "call_00_ET_B8eknw4zU8IjALtEdKKb7487",
+            "tool": "bash",
+            "state": {
+              "status": "completed",
+              "input": { "command": "node fixture-check.js" },
+              "output": "ready\n",
+              "title": "Validate fixture",
+              "metadata": { "exit": 0, "output": "ready\n", "truncated": false },
+              "time": { "start": 1788839134238, "end": 1788839134282 }
+            }
+          },
+          {
+            "id": "prt_07f1f044c001CBMkf6DBGpOY4o",
+            "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf",
+            "messageID": "msg_07f1efc1f001F36DOwJovdFCM5",
+            "type": "step-finish",
+            "reason": "tool-calls",
+            "cost": 0.00039248,
+            "tokens": { "total": 7254, "input": 141, "output": 73, "reasoning": 0, "cache": { "write": 0, "read": 7040 } }
+          }
+        ]
+      },
+      {
+        "info": {
+          "parentID": "msg_ralph_a7439ea788f86139dabe65cb15ed5e870e9bd381",
+          "role": "assistant",
+          "mode": "build",
+          "agent": "build",
+          "path": { "cwd": "/fixture/project", "root": "/fixture/root" },
+          "cost": 0.000265276,
+          "tokens": { "total": 7289, "input": 100, "output": 21, "reasoning": 0, "cache": { "write": 0, "read": 7168 } },
+          "modelID": "deepseek-v4-pro",
+          "providerID": "opencode-go",
+          "time": { "created": 1788839134292, "completed": 1788839136091 },
+          "finish": "stop",
+          "id": "msg_07f1f0454001dLgLiNdVbF8oUX",
+          "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf"
+        },
+        "parts": [
+          { "id": "prt_07f1f0737001PMZeO8pbmHkaZc", "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf", "messageID": "msg_07f1f0454001dLgLiNdVbF8oUX", "type": "step-start" },
+          { "id": "prt_07f1f0a31001UPgx3oYMmyvT5h", "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf", "messageID": "msg_07f1f0454001dLgLiNdVbF8oUX", "type": "text", "text": "The fixture change is complete.", "time": { "start": 1788839135793, "end": 1788839136050 } },
+          {
+            "id": "prt_07f1f0b55001SkAfmPmxJiV6NF",
+            "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf",
+            "messageID": "msg_07f1f0454001dLgLiNdVbF8oUX",
+            "type": "step-finish",
+            "reason": "stop",
+            "cost": 0.000265276,
+            "tokens": { "total": 7289, "input": 100, "output": 21, "reasoning": 0, "cache": { "write": 0, "read": 7168 } }
+          }
+        ]
+      }
+    ]
+  },
+  "sanitized": {
+    "info": {
+      "id": "ses_f80e11c17ffePBoHPiPJeH1wxf",
+      "slug": "nimble-planet",
+      "projectID": "global",
+      "directory": "[redacted:session-directory:ses_f80e11c17ffePBoHPiPJeH1wxf]",
+      "title": "[redacted:session-title:ses_f80e11c17ffePBoHPiPJeH1wxf]",
+      "agent": "build",
+      "model": { "id": "deepseek-v4-pro", "providerID": "opencode-go" },
+      "version": "1.18.29",
+      "summary": { "additions": 0, "deletions": 0, "files": 0 },
+      "cost": 0.005804524,
+      "tokens": { "input": 7378, "output": 239, "reasoning": 0, "cache": { "read": 20992, "write": 0 } },
+      "time": { "created": 1788839125992, "updated": 1788839136099 }
+    },
+    "messages": [
+      {
+        "info": {
+          "role": "user",
+          "time": { "created": 1788839126109 },
+          "agent": "build",
+          "model": { "providerID": "opencode-go", "modelID": "deepseek-v4-pro" },
+          "summary": { "diffs": [] },
+          "id": "msg_ralph_a7439ea788f86139dabe65cb15ed5e870e9bd381",
+          "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf"
+        },
+        "parts": [
+          {
+            "id": "prt_07f1ee4600017QNBai1S8vLSa1",
+            "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf",
+            "messageID": "msg_ralph_a7439ea788f86139dabe65cb15ed5e870e9bd381",
+            "type": "text",
+            "text": "[redacted:text:prt_07f1ee4600017QNBai1S8vLSa1]"
+          }
+        ]
+      },
+      {
+        "info": {
+          "parentID": "msg_ralph_a7439ea788f86139dabe65cb15ed5e870e9bd381",
+          "role": "assistant",
+          "mode": "build",
+          "agent": "build",
+          "path": { "cwd": "[redacted:cwd:msg_07f1ee6a5001YFuy5yKi34Q7lD]", "root": "[redacted:root:msg_07f1ee6a5001YFuy5yKi34Q7lD]" },
+          "cost": 0.0046365,
+          "tokens": { "total": 6901, "input": 6839, "output": 62, "reasoning": 0, "cache": { "write": 0, "read": 0 } },
+          "modelID": "deepseek-v4-pro",
+          "providerID": "opencode-go",
+          "time": { "created": 1788839126694, "completed": 1788839129960 },
+          "finish": "tool-calls",
+          "id": "msg_07f1ee6a5001YFuy5yKi34Q7lD",
+          "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf"
+        },
+        "parts": [
+          { "id": "prt_07f1eec9b001fa6lpzKwhS5WMP", "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf", "messageID": "msg_07f1ee6a5001YFuy5yKi34Q7lD", "type": "step-start" },
+          {
+            "id": "prt_07f1ef1b5001Vpv0S2wDKA9Fkd",
+            "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf",
+            "messageID": "msg_07f1ee6a5001YFuy5yKi34Q7lD",
+            "type": "tool",
+            "callID": "call_00_ET_Xbx9HfCYXBQNLyyfwxQo6251",
+            "tool": "bash",
+            "state": {
+              "status": "completed",
+              "input": { "redacted": "tool-input:prt_07f1ef1b5001Vpv0S2wDKA9Fkd" },
+              "output": "[redacted:tool-output:prt_07f1ef1b5001Vpv0S2wDKA9Fkd]",
+              "title": "[redacted:tool-title:prt_07f1ef1b5001Vpv0S2wDKA9Fkd]",
+              "metadata": { "redacted": "tool-state-metadata:prt_07f1ef1b5001Vpv0S2wDKA9Fkd" },
+              "time": { "start": 1788839129812, "end": 1788839129943 }
+            }
+          },
+          {
+            "id": "prt_07f1ef35f0011e8gSKuAoIW1ND",
+            "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf",
+            "messageID": "msg_07f1ee6a5001YFuy5yKi34Q7lD",
+            "type": "step-finish",
+            "reason": "tool-calls",
+            "cost": 0.0046365,
+            "tokens": { "total": 6901, "input": 6839, "output": 62, "reasoning": 0, "cache": { "write": 0, "read": 0 } }
+          }
+        ]
+      },
+      {
+        "info": {
+          "parentID": "msg_ralph_a7439ea788f86139dabe65cb15ed5e870e9bd381",
+          "role": "assistant",
+          "mode": "build",
+          "agent": "build",
+          "path": { "cwd": "[redacted:cwd:msg_07f1ef3710018RFWrK6CUzfaJy]", "root": "[redacted:root:msg_07f1ef3710018RFWrK6CUzfaJy]" },
+          "cost": 0.000510268,
+          "tokens": { "total": 7165, "input": 298, "output": 83, "reasoning": 0, "cache": { "write": 0, "read": 6784 } },
+          "modelID": "deepseek-v4-pro",
+          "providerID": "opencode-go",
+          "time": { "created": 1788839129969, "completed": 1788839132187 },
+          "finish": "tool-calls",
+          "id": "msg_07f1ef3710018RFWrK6CUzfaJy",
+          "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf"
+        },
+        "parts": [
+          { "id": "prt_07f1ef6f400198HOefVFhc5IHg", "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf", "messageID": "msg_07f1ef3710018RFWrK6CUzfaJy", "type": "step-start" },
+          {
+            "id": "prt_07f1ef9f30013QR141JACv2oyC",
+            "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf",
+            "messageID": "msg_07f1ef3710018RFWrK6CUzfaJy",
+            "type": "tool",
+            "callID": "call_00_ET_d2f4pnDr6fwHEs7IGpDZ1398",
+            "tool": "write",
+            "state": {
+              "status": "completed",
+              "input": { "redacted": "tool-input:prt_07f1ef9f30013QR141JACv2oyC" },
+              "output": "[redacted:tool-output:prt_07f1ef9f30013QR141JACv2oyC]",
+              "title": "[redacted:tool-title:prt_07f1ef9f30013QR141JACv2oyC]",
+              "metadata": { "redacted": "tool-state-metadata:prt_07f1ef9f30013QR141JACv2oyC" },
+              "time": { "start": 1788839132109, "end": 1788839132132 }
+            }
+          },
+          {
+            "id": "prt_07f1efc15001WqWaoWVogSKsPG",
+            "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf",
+            "messageID": "msg_07f1ef3710018RFWrK6CUzfaJy",
+            "type": "step-finish",
+            "reason": "tool-calls",
+            "cost": 0.000510268,
+            "tokens": { "total": 7165, "input": 298, "output": 83, "reasoning": 0, "cache": { "write": 0, "read": 6784 } }
+          }
+        ]
+      },
+      {
+        "info": {
+          "parentID": "msg_ralph_a7439ea788f86139dabe65cb15ed5e870e9bd381",
+          "role": "assistant",
+          "mode": "build",
+          "agent": "build",
+          "path": { "cwd": "[redacted:cwd:msg_07f1efc1f001F36DOwJovdFCM5]", "root": "[redacted:root:msg_07f1efc1f001F36DOwJovdFCM5]" },
+          "cost": 0.00039248,
+          "tokens": { "total": 7254, "input": 141, "output": 73, "reasoning": 0, "cache": { "write": 0, "read": 7040 } },
+          "modelID": "deepseek-v4-pro",
+          "providerID": "opencode-go",
+          "time": { "created": 1788839132191, "completed": 1788839134289 },
+          "finish": "tool-calls",
+          "id": "msg_07f1efc1f001F36DOwJovdFCM5",
+          "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf"
+        },
+        "parts": [
+          { "id": "prt_07f1eff0d0011Wy5O9UphbfIWd", "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf", "messageID": "msg_07f1efc1f001F36DOwJovdFCM5", "type": "step-start" },
+          {
+            "id": "prt_07f1f02560016NqQn42vNQogUR",
+            "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf",
+            "messageID": "msg_07f1efc1f001F36DOwJovdFCM5",
+            "type": "tool",
+            "callID": "call_00_ET_B8eknw4zU8IjALtEdKKb7487",
+            "tool": "bash",
+            "state": {
+              "status": "completed",
+              "input": { "redacted": "tool-input:prt_07f1f02560016NqQn42vNQogUR" },
+              "output": "[redacted:tool-output:prt_07f1f02560016NqQn42vNQogUR]",
+              "title": "[redacted:tool-title:prt_07f1f02560016NqQn42vNQogUR]",
+              "metadata": { "redacted": "tool-state-metadata:prt_07f1f02560016NqQn42vNQogUR" },
+              "time": { "start": 1788839134238, "end": 1788839134282 }
+            }
+          },
+          {
+            "id": "prt_07f1f044c001CBMkf6DBGpOY4o",
+            "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf",
+            "messageID": "msg_07f1efc1f001F36DOwJovdFCM5",
+            "type": "step-finish",
+            "reason": "tool-calls",
+            "cost": 0.00039248,
+            "tokens": { "total": 7254, "input": 141, "output": 73, "reasoning": 0, "cache": { "write": 0, "read": 7040 } }
+          }
+        ]
+      },
+      {
+        "info": {
+          "parentID": "msg_ralph_a7439ea788f86139dabe65cb15ed5e870e9bd381",
+          "role": "assistant",
+          "mode": "build",
+          "agent": "build",
+          "path": { "cwd": "[redacted:cwd:msg_07f1f0454001dLgLiNdVbF8oUX]", "root": "[redacted:root:msg_07f1f0454001dLgLiNdVbF8oUX]" },
+          "cost": 0.000265276,
+          "tokens": { "total": 7289, "input": 100, "output": 21, "reasoning": 0, "cache": { "write": 0, "read": 7168 } },
+          "modelID": "deepseek-v4-pro",
+          "providerID": "opencode-go",
+          "time": { "created": 1788839134292, "completed": 1788839136091 },
+          "finish": "stop",
+          "id": "msg_07f1f0454001dLgLiNdVbF8oUX",
+          "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf"
+        },
+        "parts": [
+          { "id": "prt_07f1f0737001PMZeO8pbmHkaZc", "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf", "messageID": "msg_07f1f0454001dLgLiNdVbF8oUX", "type": "step-start" },
+          { "id": "prt_07f1f0a31001UPgx3oYMmyvT5h", "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf", "messageID": "msg_07f1f0454001dLgLiNdVbF8oUX", "type": "text", "text": "[redacted:text:prt_07f1f0a31001UPgx3oYMmyvT5h]", "time": { "start": 1788839135793, "end": 1788839136050 } },
+          {
+            "id": "prt_07f1f0b55001SkAfmPmxJiV6NF",
+            "sessionID": "ses_f80e11c17ffePBoHPiPJeH1wxf",
+            "messageID": "msg_07f1f0454001dLgLiNdVbF8oUX",
+            "type": "step-finish",
+            "reason": "stop",
+            "cost": 0.000265276,
+            "tokens": { "total": 7289, "input": 100, "output": 21, "reasoning": 0, "cache": { "write": 0, "read": 7168 } }
+          }
+        ]
+      }
+    ]
+  }
+}

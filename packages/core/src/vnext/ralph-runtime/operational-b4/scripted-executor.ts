@@ -13,6 +13,10 @@ import {
   type CancelRequestReceiptV2,
   type ExecutorInvocationReceiptV2,
 } from "./executor-runtime.js";
+import {
+  isTrustedOpenCodeCliExecutorV2,
+  type OpenCodeCliExecutorV2,
+} from "./opencode-cli-executor.js";
 
 export const SCRIPTED_SCENARIO_KINDS = [
   "SUCCESS",
@@ -392,16 +396,17 @@ export class ScriptedExecutor extends ExecutorRuntimeV2 {
   }
 }
 
-/** The only M2 trusted runtime capability type. */
-export type TrustedExecutorRuntimeV2 = ScriptedExecutor;
+/** Explicit union of the only nominal Executor capabilities trusted by Core. */
+export type TrustedExecutorRuntimeV2 = ScriptedExecutor | OpenCodeCliExecutorV2;
 
 export function isTrustedExecutorRuntimeV2(value: unknown): value is TrustedExecutorRuntimeV2 {
-  return typeof value === "object" && value !== null && trustedExecutorRuntimeMembers.has(value as ScriptedExecutor);
+  return typeof value === "object" && value !== null
+    && (trustedExecutorRuntimeMembers.has(value as ScriptedExecutor) || isTrustedOpenCodeCliExecutorV2(value));
 }
 
 export function assertTrustedExecutorRuntimeV2(value: unknown): asserts value is TrustedExecutorRuntimeV2 {
   if (!isTrustedExecutorRuntimeV2(value)) {
-    throw new ExecutorRuntimeError("B4_EXECUTOR_AUTHORIZATION_REQUIRED", "B4_EXECUTOR_AUTHORIZATION_REQUIRED: trusted ScriptedExecutor runtime is required");
+    throw new ExecutorRuntimeError("B4_EXECUTOR_AUTHORIZATION_REQUIRED", "B4_EXECUTOR_AUTHORIZATION_REQUIRED: genuine ScriptedExecutor or OpenCodeCliExecutorV2 runtime is required");
   }
 }
 

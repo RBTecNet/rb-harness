@@ -94,5 +94,27 @@ export type {
   ProviderProcessTreeInspectorV2,
   ProviderProcessTreeStateV2,
 } from "./opencode-cli-observer.js";
+export {
+  M4B_ERROR_CODES,
+  M4B_TIMEOUT_POLICY_SCHEMA_V2,
+  OPENCODE_CLI_EXECUTOR_MODEL_ID_V2,
+  OPENCODE_CLI_EXECUTOR_MODEL_V2,
+  OPENCODE_CLI_EXECUTOR_PATH_V2,
+  OPENCODE_CLI_EXECUTOR_PROFILE_V2,
+  OPENCODE_CLI_EXECUTOR_PROVIDER_V2,
+  OPENCODE_CLI_EXECUTOR_TRANSPORT_VERSION_V2,
+  RalphM4BError,
+  createM4BTimeoutPolicyV2,
+  validateM4BTimeoutPolicyV2,
+} from "./opencode-cli-contract.js";
+export type { M4BErrorCode, M4BTimeoutPolicyV2 } from "./opencode-cli-contract.js";
+export {
+  OpenCodeCliExecutorV2,
+  assertTrustedOpenCodeCliExecutorV2,
+  createOpenCodeCliExecutorV2,
+  isTrustedOpenCodeCliExecutorV2,
+  loadExactConformanceRecordV2,
+} from "./opencode-cli-executor.js";
+export type { CreateOpenCodeCliExecutorV2Input } from "./opencode-cli-executor.js";
 export * from "./scripted-executor.js";
 export * from "./workspace-manifest.js";

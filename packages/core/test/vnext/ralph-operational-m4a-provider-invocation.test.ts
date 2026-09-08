@@ -1,6 +1,8 @@
 import { lstat, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import type { OpenCodeProcess } from "../../src/vnext/providers/opencode/cli-adapter.js";
 import type { RuntimeEntityRef } from "../../src/vnext/ralph-runtime/contracts.js";
 import type { ExecutionDocument, Phase, Task } from "../../src/types.js";
 import {
@@ -59,12 +61,27 @@ import { createWorkspacePolicy, fingerprintWorkspace } from "../../src/vnext/ral
 import { canonicalJson } from "../../src/vnext/ralph-runtime/canonical-json.js";
 import { sha256, sha256Canonical } from "../../src/vnext/ralph-runtime/hashing.js";
 import { createCorrectionContextV2, persistCorrectionContextV2 } from "../../src/vnext/ralph-runtime/operational-f/index.js";
+import {
+  createOpenCodePromptArtifactV2,
+  createOpenCodeProviderResultV2,
+  openCodeProviderResultRefV2,
+  persistOpenCodePromptArtifactV2,
+  persistOpenCodeProviderResultV2,
+} from "../../src/vnext/ralph-runtime/operational-b4/opencode-cli-result.js";
+import {
+  SupportedOpenCodeCliSessionInspectorV2,
+  parseExactAssistantTurnV2,
+} from "../../src/vnext/ralph-runtime/operational-b4/opencode-cli-session-inspector.js";
+import { validateOpenCodeSessionExportTransportV2 } from "../../src/vnext/ralph-runtime/operational-b4/opencode-cli-transport-safety.js";
 
 const MODEL_SELECTOR = "opencode-go/deepseek-v4-pro";
 const PROFILE_ID = `opencode:cli:${MODEL_SELECTOR}`;
 const TEST_MAX_TASK_ATTEMPTS = 2;
 const TEST_VALIDATION_INFRA_RETRIES = 1;
 const OPENCODE_EXECUTABLE = "/home/bruno/.opencode/bin/opencode";
+const DUAL_VIEW_SESSION = "ses_f80e11c17ffePBoHPiPJeH1wxf";
+const DUAL_VIEW_USER = "msg_ralph_a7439ea788f86139dabe65cb15ed5e870e9bd381";
+const DUAL_VIEW_FIXTURE = resolve(dirname(fileURLToPath(import.meta.url)), "fixtures/opencode-cli-1.18.29-dual-view-turn.json");
 const MATCHING_EXECUTABLE: OpenCodeCliExecutableIdentityInputV2 = Object.freeze({
   executablePath: OPENCODE_EXECUTABLE,
   executableVersion: "1.18.29",
@@ -242,13 +259,48 @@ async function persistDescriptorAndIntent(value: Fixture): Promise<{ readonly de
   return { descriptor: descriptorValue, intent };
 }
 
-async function persistWorkerAndSession(value: Fixture): Promise<DurableChain> {
+async function persistWorkerAndSession(value: Fixture, openCodeSessionId = "ses_m4aDedicatedSession0001"): Promise<DurableChain> {
   const { descriptor: descriptorValue, intent } = await persistDescriptorAndIntent(value);
   const worker = createProviderWorkerReceiptV2({ descriptor: descriptorValue, dispatchIntent: intent, processIdentity: WORKER_IDENTITY, processGroupId: 64001, startedAt: "2026-09-07T12:00:06.000Z" });
   await persistProviderWorkerReceiptV2(value.store, worker, "m4a-worker");
-  const session = createProviderSessionBindingV2({ descriptor: descriptorValue, dispatchIntent: intent, workerReceipt: worker, openCodeSessionId: "ses_m4aDedicatedSession0001", boundAt: "2026-09-07T12:00:07.000Z" });
+  const session = createProviderSessionBindingV2({ descriptor: descriptorValue, dispatchIntent: intent, workerReceipt: worker, openCodeSessionId, boundAt: "2026-09-07T12:00:07.000Z" });
   await persistProviderSessionBindingV2(value.store, session, "m4a-session");
   return { descriptor: descriptorValue, intent, worker, session };
+}
+
+async function dualViewFixture(): Promise<{ readonly live: Record<string, unknown>; readonly sanitized: Record<string, unknown> }> {
+  const value = JSON.parse(await readFile(DUAL_VIEW_FIXTURE, "utf8")) as Record<string, unknown>;
+  return { live: value.live as Record<string, unknown>, sanitized: value.sanitized as Record<string, unknown> };
+}
+
+function exportProcess(value: unknown, options: { readonly exitCode?: number; readonly malformed?: boolean } = {}): OpenCodeProcess {
+  return {
+    run: async () => ({
+      stdout: options.malformed ? "{" : JSON.stringify(value),
+      exitCode: options.exitCode ?? 0,
+      startedAt: "2026-09-07T12:00:15.000Z",
+      completedAt: "2026-09-07T12:00:16.000Z",
+      cancelled: false,
+      timedOut: false,
+      outputLimitExceeded: false,
+      settlement: {
+        observed: true,
+        quiescent: true,
+        verified: true,
+        survivors: [],
+        containment: { kind: "cgroup2", structural: true, reason: "deterministic fixture" },
+      },
+    }),
+  };
+}
+
+function bindFixtureUser(value: Record<string, unknown>, userMessageId: string): Record<string, unknown> {
+  const fixture = structuredClone(value);
+  const messages = fixture.messages as Array<Record<string, unknown>>;
+  (messages[0]!.info as Record<string, unknown>).id = userMessageId;
+  for (const part of messages[0]!.parts as Array<Record<string, unknown>>) part.messageID = userMessageId;
+  for (const message of messages.slice(1)) (message.info as Record<string, unknown>).parentID = userMessageId;
+  return fixture;
 }
 
 function processProvider(result: ProcessIdentityInspection): ProcessIdentityProvider {
@@ -445,6 +497,138 @@ describe("Ralph M4-A — durable OpenCode CLI provider invocation authority", ()
       expect((await observer(value, { process: "ABSENT", tree: "QUIESCENT", session: wrongResult }).observe(value.authorizedInvocation)).state).toBe("UNKNOWN");
       const wrongMessage = sessionObservation({ userMessageIdentity: "MISMATCH", observedUserMessageId: "msg_foreign", resultIdentity: "MATCH", observedResultRef: resultRef, observedResultDigest: resultDigest });
       expect((await observer(value, { process: "ABSENT", tree: "QUIESCENT", session: wrongMessage }).observe(value.authorizedInvocation)).state).toBe("UNKNOWN");
+    });
+  });
+
+  it("M4B-17..20: real supported inspector rebinds the paired sanitized view and drives M4-A terminal authority", async () => {
+    await withFixture("m4b-supported-session-inspector", async (value) => {
+      const pair = await dualViewFixture();
+      const chain = await persistWorkerAndSession(value, DUAL_VIEW_SESSION);
+      const liveFixture = bindFixtureUser(pair.live, chain.intent.openCodeUserMessageId);
+      const sanitizedFixture = bindFixtureUser(pair.sanitized, chain.intent.openCodeUserMessageId);
+      const liveTransport = validateOpenCodeSessionExportTransportV2(liveFixture);
+      const sanitizedTransport = validateOpenCodeSessionExportTransportV2(sanitizedFixture);
+      const live = parseExactAssistantTurnV2(liveTransport.messages, DUAL_VIEW_SESSION, chain.intent.openCodeUserMessageId);
+      const sanitized = parseExactAssistantTurnV2(sanitizedTransport.messages, DUAL_VIEW_SESSION, chain.intent.openCodeUserMessageId);
+      expect(live.observableTurnDigest).toBe(sanitized.observableTurnDigest);
+      expect(live.responseDigest).not.toBe(sanitized.responseDigest);
+
+      const prompt = createOpenCodePromptArtifactV2({
+        runId: chain.descriptor.runId, phaseId: chain.descriptor.phaseId, taskId: chain.descriptor.taskId,
+        attemptId: chain.descriptor.attemptId, invocationId: chain.descriptor.invocationId,
+        descriptorDigest: chain.descriptor.descriptorDigest, dispatchIntentDigest: chain.intent.intentDigest,
+        sessionBindingDigest: chain.session.bindingDigest, openCodeSessionId: chain.session.openCodeSessionId,
+        openCodeUserMessageId: chain.intent.openCodeUserMessageId, modelSelector: chain.descriptor.modelSelector,
+        promptDigest: sha256("m4b-inspector-prompt"), promptBytes: 128, preparedAt: "2026-09-07T12:00:08.000Z",
+      });
+      await persistOpenCodePromptArtifactV2(value.store, prompt, "m4b-inspector-prompt");
+      const result = createOpenCodeProviderResultV2({
+        runId: chain.descriptor.runId, phaseId: chain.descriptor.phaseId, taskId: chain.descriptor.taskId,
+        attemptId: chain.descriptor.attemptId, invocationId: chain.descriptor.invocationId,
+        descriptorDigest: chain.descriptor.descriptorDigest, dispatchIntentDigest: chain.intent.intentDigest,
+        sessionBindingDigest: chain.session.bindingDigest, promptArtifactDigest: prompt.artifactDigest,
+        openCodeSessionId: chain.session.openCodeSessionId, openCodeUserMessageId: chain.intent.openCodeUserMessageId,
+        assistantMessageId: live.assistantMessageId, observedModelSelector: live.modelSelector, classification: live.classification,
+        assistantContentDigest: live.assistantContentDigest, responseDigest: live.responseDigest,
+        observableTurnDigest: live.observableTurnDigest, startedAt: chain.worker.startedAt, finishedAt: "2026-09-07T12:00:10.000Z",
+      });
+      await persistOpenCodeProviderResultV2(value.store, result, "m4b-inspector-result");
+      const terminal = createProviderTerminalArtifactV2({
+        descriptor: chain.descriptor, dispatchIntent: chain.intent, workerReceipt: chain.worker, sessionBinding: chain.session,
+        status: "SUCCEEDED", termination: "NORMAL", exitCode: 0, signal: null, timedOut: false, cancelled: false,
+        resultRef: openCodeProviderResultRefV2(chain.descriptor.attemptId), resultDigest: result.resultDigest,
+        finishedAt: result.finishedAt,
+        quiescence: { workerProcessState: "ABSENT", processTreeState: "QUIESCENT", observedAt: "2026-09-07T12:00:11.000Z" },
+      });
+      await persistProviderTerminalArtifactV2(value.store, terminal, "m4b-inspector-terminal");
+      const input = { descriptor: chain.descriptor, dispatchIntent: chain.intent, sessionBinding: chain.session, terminal };
+      const inspect = async (transport: unknown, options: { readonly exitCode?: number; readonly malformed?: boolean } = {}) => {
+        const inspector = new SupportedOpenCodeCliSessionInspectorV2({
+          store: new RalphEventStoreV2({ projectRoot: value.root, runId: value.store.runId }),
+          projectRoot: value.root,
+          executablePath: OPENCODE_EXECUTABLE,
+          deadlineMs: 5_000,
+          processClient: exportProcess(transport, options),
+        });
+        return inspector.inspect(input);
+      };
+
+      const matching = await inspect(sanitizedFixture);
+      expect(matching).toMatchObject({
+        sessionIdentity: "MATCH", userMessageIdentity: "MATCH", modelIdentity: "MATCH", resultIdentity: "MATCH",
+        observedResultRef: terminal.resultRef, observedResultDigest: terminal.resultDigest,
+      });
+
+      const wrongTerminal = structuredClone(sanitizedFixture);
+      const wrongTerminalMessage = (wrongTerminal.messages as Array<Record<string, unknown>>).at(-1)!;
+      (wrongTerminalMessage.info as Record<string, unknown>).id = "msg_foreign_terminal_observation_001";
+      for (const part of wrongTerminalMessage.parts as Array<Record<string, unknown>>) part.messageID = "msg_foreign_terminal_observation_001";
+      expect((await inspect(wrongTerminal)).resultIdentity).toBe("MISMATCH");
+
+      const wrongUser = structuredClone(sanitizedFixture);
+      const wrongUserMessages = wrongUser.messages as Array<Record<string, unknown>>;
+      const wrongUserId = "msg_foreign_core_user_observation_001";
+      (wrongUserMessages[0]!.info as Record<string, unknown>).id = wrongUserId;
+      for (const part of wrongUserMessages[0]!.parts as Array<Record<string, unknown>>) part.messageID = wrongUserId;
+      for (const message of wrongUserMessages.slice(1)) (message.info as Record<string, unknown>).parentID = wrongUserId;
+      expect(await inspect(wrongUser)).toMatchObject({ userMessageIdentity: "MISMATCH", resultIdentity: "ABSENT" });
+
+      const wrongSession = structuredClone(sanitizedFixture);
+      (wrongSession.info as Record<string, unknown>).id = "ses_foreignObservationSession001";
+      expect(await inspect(wrongSession)).toMatchObject({ sessionIdentity: "FOREIGN", resultIdentity: "UNKNOWN" });
+
+      const wrongModel = structuredClone(sanitizedFixture);
+      (((wrongModel.messages as Array<Record<string, unknown>>).at(-1)!.info) as Record<string, unknown>).modelID = "foreign-model";
+      expect(await inspect(wrongModel)).toMatchObject({ modelIdentity: "MISMATCH", resultIdentity: "ABSENT" });
+
+      const structuralMismatch = structuredClone(sanitizedFixture);
+      const structuralTool = ((structuralMismatch.messages as Array<Record<string, unknown>>)[1]!.parts as Array<Record<string, unknown>>)
+        .find((part) => part.type === "tool")!;
+      structuralTool.callID = "call_foreign_observation_001";
+      expect((await inspect(structuralMismatch)).resultIdentity).toBe("MISMATCH");
+
+      const missingResult = structuredClone(sanitizedFixture);
+      (missingResult.messages as unknown[]).pop();
+      expect((await inspect(missingResult)).resultIdentity).toBe("ABSENT");
+      expect(await inspect({}, { malformed: true })).toMatchObject({ sessionIdentity: "UNKNOWN", resultIdentity: "UNKNOWN" });
+
+      const unsafe = structuredClone(sanitizedFixture);
+      const unsafeTerminal = (unsafe.messages as Array<Record<string, unknown>>).at(-1)!;
+      ((unsafeTerminal.parts as Array<Record<string, unknown>>).find((part) => part.type === "text")!).text = "Authorization: Bearer sk-forbidden-material";
+      expect(await inspect(unsafe)).toMatchObject({ sessionIdentity: "UNKNOWN", resultIdentity: "UNKNOWN" });
+
+      const twoTerminals = structuredClone(sanitizedFixture);
+      const injected = structuredClone((twoTerminals.messages as Array<Record<string, unknown>>).at(-1)!);
+      (injected.info as Record<string, unknown>).id = "msg_injected_terminal_observation_002";
+      for (const [index, part] of (injected.parts as Array<Record<string, unknown>>).entries()) {
+        part.id = `prt_injected_observation_${index}`;
+        part.messageID = "msg_injected_terminal_observation_002";
+      }
+      (twoTerminals.messages as Array<Record<string, unknown>>).push(injected);
+      expect((await inspect(twoTerminals)).resultIdentity).toBe("ABSENT");
+      expect(await inspect(sanitizedFixture, { exitCode: 1 })).toMatchObject({ sessionIdentity: "UNKNOWN", resultIdentity: "UNKNOWN" });
+
+      const realInspector = new SupportedOpenCodeCliSessionInspectorV2({
+        store: new RalphEventStoreV2({ projectRoot: value.root, runId: value.store.runId }), projectRoot: value.root,
+        executablePath: OPENCODE_EXECUTABLE, deadlineMs: 5_000, processClient: exportProcess(sanitizedFixture),
+      });
+      const freshObserver = new OpenCodeCliInvocationObserverV2({
+        store: new RalphEventStoreV2({ projectRoot: value.root, runId: value.store.runId }), executable: MATCHING_EXECUTABLE,
+        processIdentityProvider: processProvider("ABSENT"), processTreeInspector: { inspect: () => "QUIESCENT" }, sessionInspector: realInspector,
+        clock: () => "2026-09-07T12:00:20.000Z", observationIdFactory: () => "supported-inspector-match",
+      });
+      expect(await freshObserver.observe(value.authorizedInvocation)).toMatchObject({ state: "TERMINATED_QUIESCENT", status: "SUCCEEDED" });
+
+      const mismatchingInspector = new SupportedOpenCodeCliSessionInspectorV2({
+        store: new RalphEventStoreV2({ projectRoot: value.root, runId: value.store.runId }), projectRoot: value.root,
+        executablePath: OPENCODE_EXECUTABLE, deadlineMs: 5_000, processClient: exportProcess(structuralMismatch),
+      });
+      const mismatchingObserver = new OpenCodeCliInvocationObserverV2({
+        store: new RalphEventStoreV2({ projectRoot: value.root, runId: value.store.runId }), executable: MATCHING_EXECUTABLE,
+        processIdentityProvider: processProvider("ABSENT"), processTreeInspector: { inspect: () => "QUIESCENT" }, sessionInspector: mismatchingInspector,
+        clock: () => "2026-09-07T12:00:20.000Z", observationIdFactory: () => "supported-inspector-mismatch",
+      });
+      expect((await mismatchingObserver.observe(value.authorizedInvocation)).state).toBe("UNKNOWN");
     });
   });
 
