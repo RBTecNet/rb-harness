@@ -116,5 +116,28 @@ export {
   loadExactConformanceRecordV2,
 } from "./opencode-cli-executor.js";
 export type { CreateOpenCodeCliExecutorV2Input } from "./opencode-cli-executor.js";
+export {
+  M4C_ERROR_CODES,
+  RalphM4CError,
+  authoritativeOpenFindingsForTaskV2,
+  authoritativeRejectedAttemptsForTaskV2,
+  buildExactCorrectionContextV2,
+  deriveDurableCorrectionAuthorityV2,
+  validateExactCorrectionContextForDispatchV2,
+} from "./opencode-cli-correction.js";
+export type {
+  BuildExactCorrectionContextV2Input,
+  DurableAttemptFactsV2,
+  DurableCorrectionAuthorityV2,
+  M4CErrorCode,
+  ValidateExactCorrectionContextV2Input,
+} from "./opencode-cli-correction.js";
+export {
+  MAX_OPENCODE_CORRECTION_FINDINGS_V2,
+  MAX_OPENCODE_EXECUTOR_PROMPT_BYTES_V2,
+  projectCorrectionSectionV2,
+  projectWorkUnitToOpenCodePromptV2,
+} from "./opencode-cli-prompt.js";
+export type { OpenCodeCliExecutorPromptV2 } from "./opencode-cli-prompt.js";
 export * from "./scripted-executor.js";
 export * from "./workspace-manifest.js";

@@ -46,6 +46,11 @@ import {
 } from "./opencode-cli-contract.js";
 import { projectWorkUnitToOpenCodePromptV2 } from "./opencode-cli-prompt.js";
 import {
+  RalphM4CError,
+  validateExactCorrectionContextForDispatchV2,
+} from "./opencode-cli-correction.js";
+import type { CorrectionContextV2 } from "../operational-f/correction-context.js";
+import {
   createOpenCodePromptArtifactV2,
   createOpenCodeProviderResultV2,
   openCodePromptRefV2,
@@ -137,7 +142,11 @@ export class OpenCodeCliExecutorV2 extends ExecutorRuntimeV2 {
     if (existing.dispatchIntent) throw new RalphM4BError("M4B_REDISPATCH_FORBIDDEN");
 
     const descriptor = await createProviderInvocationDescriptorV2({ store: internal.store, authorizedInvocation, executable: internal.executable });
-    if (descriptor.correctionContextRef !== null) throw new RalphM4BError("M4B_CORRECTION_CONTEXT_NOT_SUPPORTED");
+    // M4-C: a CorrectionContext is admitted only after every binding, digest
+    // and Finding is proven against the durable Core authority. An invalid
+    // context fails here, before the descriptor becomes durable, so a refused
+    // correction leaves no descriptor, no session and no prompt behind.
+    const correctionContext = await validateExactCorrectionContextForDispatchV2({ store: internal.store, descriptor });
     if (descriptor.conformanceState !== "MATCH") throw new RalphM4BError("M4B_CONFORMANCE_REQUIRED");
     if (descriptor.executorProfileIdentity !== OPENCODE_CLI_EXECUTOR_PROFILE_V2 || descriptor.modelSelector !== OPENCODE_CLI_EXECUTOR_MODEL_V2) throw new RalphM4BError("M4B_PROFILE_BINDING_INVALID");
     if (authorizedInvocation.workUnit.timeoutPolicyDigest !== internal.timeoutPolicy.policyDigest) throw new RalphM4BError("M4B_TIMEOUT_POLICY_INVALID");
@@ -171,7 +180,7 @@ export class OpenCodeCliExecutorV2 extends ExecutorRuntimeV2 {
       const session = createProviderSessionBindingV2({ descriptor, dispatchIntent: intent, workerReceipt, openCodeSessionId: sessionRecord.id, boundAt: internal.clock() });
       await persistProviderSessionBindingV2(internal.store, session, internal.nonceFactory());
 
-      const projected = projectWorkUnitToOpenCodePromptV2(authorizedInvocation.workUnit);
+      const projected = projectWorkUnitToOpenCodePromptV2(authorizedInvocation.workUnit, correctionContext);
       const promptArtifact = createOpenCodePromptArtifactV2({
         runId: descriptor.runId, phaseId: descriptor.phaseId, taskId: descriptor.taskId, attemptId: descriptor.attemptId, invocationId,
         descriptorDigest: descriptor.descriptorDigest, dispatchIntentDigest: intent.intentDigest, sessionBindingDigest: session.bindingDigest,
@@ -179,7 +188,7 @@ export class OpenCodeCliExecutorV2 extends ExecutorRuntimeV2 {
         modelSelector: descriptor.modelSelector, promptDigest: projected.promptDigest, promptBytes: projected.byteLength, preparedAt: internal.clock(),
       });
       await persistOpenCodePromptArtifactV2(internal.store, promptArtifact, internal.nonceFactory());
-      await assertPrePromptDurability(internal.store, descriptor, intent, workerReceipt, session, promptArtifact.artifactDigest);
+      await assertPrePromptDurability(internal.store, descriptor, intent, workerReceipt, session, promptArtifact.artifactDigest, correctionContext);
       const reboundSession = await client.getSession(session.openCodeSessionId);
       if (reboundSession.id !== session.openCodeSessionId || reboundSession.modelSelector !== descriptor.modelSelector) throw new RalphM4BError("M4B_SESSION_BINDING_INVALID");
 
@@ -365,6 +374,7 @@ async function assertPrePromptDurability(
   worker: ProviderWorkerReceiptV2,
   session: ProviderSessionBindingV2,
   promptArtifactDigest: string,
+  correctionContext: CorrectionContextV2 | undefined,
 ): Promise<void> {
   const facts = await readProviderInvocationArtifactSetV2(store, descriptor.attemptId);
   const prompt = await readOpenCodePromptArtifactV2(store, descriptor.attemptId);
@@ -372,6 +382,13 @@ async function assertPrePromptDurability(
     || facts.workerReceipt?.receiptDigest !== worker.receiptDigest || facts.sessionBinding?.bindingDigest !== session.bindingDigest
     || prompt?.artifactDigest !== promptArtifactDigest || prompt.openCodeUserMessageId !== intent.openCodeUserMessageId) {
     throw new RalphM4BError("M4B_PROMPT_ORDER_INVALID");
+  }
+  // M4-C exact revalidation: the correction authority admitted before the
+  // descriptor must still be exactly the same durable authority immediately
+  // before the single model-bearing crossing.
+  const revalidated = await validateExactCorrectionContextForDispatchV2({ store, descriptor });
+  if (canonicalJson(revalidated ?? null) !== canonicalJson(correctionContext ?? null)) {
+    throw new RalphM4CError("M4C_CORRECTION_CONTEXT_INVALID", "M4C_CORRECTION_CONTEXT_INVALID: correction authority changed before dispatch");
   }
   const snapshot = await store.verifyRunSnapshot();
   const workspace = await fingerprintWorkspace(store.projectRoot, snapshot.workspacePolicy);

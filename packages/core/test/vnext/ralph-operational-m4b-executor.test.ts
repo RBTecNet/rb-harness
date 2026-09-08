@@ -432,9 +432,12 @@ describe("Ralph M4-B — nominal OpenCode CLI Executor through real B4 authority
     });
   });
 
-  it("M4B-7: rejects a genuine CorrectionContext before descriptor, intent, session or prompt", async () => {
+  it("M4B-7/M4C: refuses a CorrectionContext no OPEN Finding authorizes, before descriptor, intent, session or prompt", async () => {
     await withFixture("m4b-correction", async (value) => {
       const core = value.authorizedInvocation.descriptor;
+      // M4-C replaced the blanket M4-B refusal with exact durable verification.
+      // A context carrying no authoritative OPEN Finding still fails closed at
+      // exactly the same point: nothing physical happens.
       const context = createCorrectionContextV2({
         runId: core.runId, phaseId: core.phaseId, taskId: core.taskId, currentAttemptId: core.attemptId,
         sourceRejectedAttempts: [], openFindingRefs: [], openFindings: [], baseWorkspaceFingerprint: core.attemptBaseFingerprint,
@@ -442,7 +445,7 @@ describe("Ralph M4-B — nominal OpenCode CLI Executor through real B4 authority
       });
       await persistCorrectionContextV2(value.store, context, "m4b-correction-context");
       const runtime = await createOpenCodeCliExecutorV2({ store: value.store, authorizedInvocation: value.authorizedInvocation, timeoutPolicy: value.timeoutPolicy });
-      await expect(runtime.invoke(value.authorizedInvocation)).rejects.toMatchObject({ m4bCode: "M4B_CORRECTION_CONTEXT_NOT_SUPPORTED" });
+      await expect(runtime.invoke(value.authorizedInvocation)).rejects.toMatchObject({ m4cCode: "M4C_CORRECTION_FINDING_SET_INCOMPLETE" });
       expect(await readProviderInvocationArtifactSetV2(value.store, core.attemptId)).toEqual({});
       expect(transport).toMatchObject({ promptCalls: 0, sessionCreates: 0, serverStarts: 0 });
     });

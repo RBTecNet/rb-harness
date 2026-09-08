@@ -999,6 +999,11 @@ describe("Ralph Operational Core V2 — B4 scripted executor", () => {
         "validateProviderDispatchIntentV2", "validateProviderInvocationDescriptorV2", "validateProviderSessionBindingV2", "validateProviderTerminalArtifactV2",
         "validateM4BTimeoutPolicyV2", "validateProviderWorkerReceiptV2", "validateWorkspaceManifestV2", "workspaceAfterRefV2", "workspaceBeforeRefV2",
         "workspaceManifestCoreJson", "workspaceManifestEntries",
+        // M4-C correction admission and the correction-aware prompt projection.
+        "M4C_ERROR_CODES", "MAX_OPENCODE_CORRECTION_FINDINGS_V2", "MAX_OPENCODE_EXECUTOR_PROMPT_BYTES_V2", "RalphM4CError",
+        "authoritativeOpenFindingsForTaskV2", "authoritativeRejectedAttemptsForTaskV2", "buildExactCorrectionContextV2",
+        "deriveDurableCorrectionAuthorityV2", "projectCorrectionSectionV2", "projectWorkUnitToOpenCodePromptV2",
+        "validateExactCorrectionContextForDispatchV2",
       ],
       b4Execution: [
         "B4_EXECUTION_ERROR_CODES", "RalphB4ExecutionError", "assertNotInvokedProofV2", "assertTrustedExecutorObservationV2", "deriveNotInvokedProofV2",
@@ -1068,6 +1073,11 @@ describe("Ralph Operational Core V2 — B4 scripted executor", () => {
         "validateProviderSessionBindingV2", "validateProviderTerminalArtifactV2", "validateProviderWorkerReceiptV2", "validateRalphEvent", "validateRalphResume", "validateRalphRunId",
         "validateM4BTimeoutPolicyV2", "validateRunSnapshot", "validateSnapshotAgainstLedger", "validateWorkspaceManifestV2", "workspaceAfterRefV2", "workspaceBeforeRefV2",
         "workspaceManifestCoreJson", "workspaceManifestEntries", "writeAtomicRuntimeFile", "writeExclusiveRuntimeFile",
+        // M4-C correction admission and the correction-aware prompt projection.
+        "M4C_ERROR_CODES", "MAX_OPENCODE_CORRECTION_FINDINGS_V2", "MAX_OPENCODE_EXECUTOR_PROMPT_BYTES_V2", "RalphM4CError",
+        "authoritativeOpenFindingsForTaskV2", "authoritativeRejectedAttemptsForTaskV2", "buildExactCorrectionContextV2",
+        "deriveDurableCorrectionAuthorityV2", "projectCorrectionSectionV2", "projectWorkUnitToOpenCodePromptV2",
+        "validateExactCorrectionContextForDispatchV2",
       ],
     };
     for (const [surface, module] of Object.entries(surfaces)) {
