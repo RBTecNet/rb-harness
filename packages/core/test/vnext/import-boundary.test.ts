@@ -9,6 +9,12 @@ const LEGACY_ALLOWLIST = new Set([
   "credential-store",
   "anthropic-credential",
   "process-tree",
+  // Harness-managed provider runtime installation: node-builtins only, and
+  // the single authority for where a pinned external runtime lives on disk.
+  // vNext provider Executors must resolve their runtime through it rather
+  // than through PATH, npm or nvm, so a global upgrade cannot reach a frozen
+  // Executor.
+  "managed-stock-codex-runtime",
   // Dependency-free presentation art: the canonical RB Harness capybara, shared
   // so the Progressive Dashboard cannot drift into a different mascot.
   "harness-mascot",

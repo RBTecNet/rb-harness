@@ -57,6 +57,21 @@ export class LinuxProcessIdentityProvider implements ProcessIdentityProvider {
     }
   }
 
+  /**
+   * Identity of a process this host owns right now, by PID.  A child spawned
+   * without an IPC channel cannot report its own identity, so the parent
+   * reads it from procfs.  An unreadable process is an error, never a guess.
+   */
+  async identify(pid: number): Promise<ProcessIdentity> {
+    if (process.platform !== "linux") throw new ProcessIdentityError("PROCESS_IDENTITY_UNSUPPORTED_PLATFORM");
+    try {
+      return await readLinuxProcessIdentity(pid, this.fileSystem);
+    } catch (error) {
+      if (error instanceof ProcessIdentityError) throw error;
+      throw new ProcessIdentityError("PROCESS_IDENTITY_UNAVAILABLE", "PROCESS_IDENTITY_UNAVAILABLE", error);
+    }
+  }
+
   async inspect(identity: ProcessIdentity): Promise<ProcessIdentityInspection> {
     if (process.platform !== "linux") return "UNKNOWN";
     if (!isProcessIdentity(identity)) return "UNKNOWN";

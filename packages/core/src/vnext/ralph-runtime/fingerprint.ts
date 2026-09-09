@@ -75,6 +75,23 @@ export interface WorkspaceFingerprint {
   readonly fingerprintDigest: string;
 }
 
+/**
+ * The single control-plane/forbidden path authority.  Every later layer that
+ * needs to know which roots Core owns (for example the M5-B provider
+ * workspace projection) derives its exclusion set from these, so a second
+ * inconsistent protected-path list can never appear.
+ */
+export const WORKSPACE_CONTROL_PLANE_ROOT = CONTROL_ROOT;
+export const WORKSPACE_FORBIDDEN_ROOTS: readonly string[] = FORBIDDEN_ROOTS;
+
+export function isWorkspaceControlPlanePath(path: string): boolean {
+  return isControlPath(path);
+}
+
+export function isWorkspaceForbiddenPath(path: string): boolean {
+  return isForbiddenPath(path);
+}
+
 export function createWorkspacePolicy(input: WorkspaceFingerprintPolicyInput = {}): WorkspacePolicy {
   const scopePaths = normalizePatterns(input.scopePaths ?? []);
   const coversPaths = normalizePatterns(input.coversPaths ?? []);
