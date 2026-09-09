@@ -70,10 +70,12 @@ import {
 } from "../operational-d/artifacts.js";
 import {
   assertAuditorResultEnvelopeV2,
-  assertTrustedAuditorRuntimeV2,
   type AuditorResultEnvelopeV2,
-  type TrustedAuditorRuntimeV2,
 } from "./auditor-runtime.js";
+import {
+  assertTrustedAuditorRuntimeV2,
+  type TrustedAuditorRuntimeV2,
+} from "./auditor-trust.js";
 import {
   auditInvocationIdV2,
   createAuditInvocationDescriptorV2,

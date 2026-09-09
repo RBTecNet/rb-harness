@@ -121,13 +121,19 @@ export async function startOpenCodeCliWorkerV2(input: {
   readonly deadlineMs: number;
   readonly processIdentityProvider?: ProcessIdentityProvider;
   readonly clock?: () => string;
+  /**
+   * Role-neutral seam. Omitting it keeps the frozen M4-B Executor child
+   * environment byte for byte; the M4-D Auditor supplies its own read-only
+   * environment so a physically unprivileged worker is started instead.
+   */
+  readonly environment?: NodeJS.ProcessEnv;
 }): Promise<OpenCodeCliWorkerV2> {
   if (process.platform === "win32") throw new RalphM4BError("M4B_PROCESS_IDENTITY_INVALID");
   if (resolve(input.projectRoot) !== input.projectRoot || !Number.isSafeInteger(input.deadlineMs) || input.deadlineMs < 1) throw new RalphM4BError("M4B_WORKSPACE_BINDING_INVALID");
   const workerPath = await resolveOpenCodeCliWorkerPathV2();
   const handle = spawnProcessTree(process.execPath, [workerPath], {
     cwd: input.projectRoot,
-    env: openCodeM4BChildEnvironment(),
+    env: input.environment ?? openCodeM4BChildEnvironment(),
     stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
   const startedAt = (input.clock ?? (() => new Date().toISOString()))();

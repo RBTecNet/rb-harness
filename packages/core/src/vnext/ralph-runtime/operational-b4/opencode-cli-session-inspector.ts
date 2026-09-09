@@ -30,6 +30,12 @@ import {
 
 export const MAX_OPENCODE_HTTP_RESPONSE_BYTES_V2 = 2 * 1024 * 1024;
 
+/** Frozen M4-B Executor tool grants. Unchanged; now named rather than inline. */
+export const OPENCODE_M4B_EXECUTOR_PROMPT_TOOLS_V2: Readonly<Record<string, boolean>> = Object.freeze({
+  read: true, glob: true, grep: true, list: true, edit: true, write: true, apply_patch: true, bash: true,
+  task: false, webfetch: false, websearch: false,
+});
+
 export interface OpenCodeSessionRecordV2 {
   readonly id: string;
   readonly directory: string;
@@ -56,19 +62,42 @@ export interface ReadSanitizedOpenCodeSessionExportOptionsV2 {
   readonly deadlineMs: number;
   readonly processClient?: OpenCodeProcess;
   readonly signal?: AbortSignal;
+  /** Role-neutral seam; omitting it keeps the frozen M4-B child environment. */
+  readonly environment?: NodeJS.ProcessEnv;
 }
+
+/** Tool grants sent with one OpenCode prompt. */
+export type OpenCodeCliPromptToolsV2 = Readonly<Record<string, boolean>>;
+
+/** Session-scoped OpenCode permission rules, last matching rule wins. */
+export type OpenCodeCliSessionPermissionV2 = readonly Readonly<Record<string, string>>[];
 
 export class OpenCodeCliHttpClientV2 {
   private readonly baseUrl: string;
   private readonly projectRoot: string;
   private readonly deadlineMs: number;
+  private readonly sessionPermission: OpenCodeCliSessionPermissionV2;
+  private readonly promptTools: OpenCodeCliPromptToolsV2;
 
-  constructor(input: { readonly baseUrl: string; readonly projectRoot: string; readonly deadlineMs: number }) {
+  constructor(input: {
+    readonly baseUrl: string;
+    readonly projectRoot: string;
+    readonly deadlineMs: number;
+    /**
+     * Role-neutral seam. Omitting either field keeps the frozen M4-B Executor
+     * permission and tool payloads byte for byte; the M4-D Auditor supplies a
+     * physically read-only policy instead of trusting prompt text.
+     */
+    readonly sessionPermission?: OpenCodeCliSessionPermissionV2;
+    readonly promptTools?: OpenCodeCliPromptToolsV2;
+  }) {
     if (!/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(input.baseUrl)) throw new RalphM4BError("M4B_SERVER_START_FAILED");
     if (resolve(input.projectRoot) !== input.projectRoot || !Number.isSafeInteger(input.deadlineMs) || input.deadlineMs < 1) throw new RalphM4BError("M4B_WORKSPACE_BINDING_INVALID");
     this.baseUrl = input.baseUrl;
     this.projectRoot = input.projectRoot;
     this.deadlineMs = input.deadlineMs;
+    this.sessionPermission = input.sessionPermission ?? openCodeM4BPermissionRulesV2();
+    this.promptTools = input.promptTools ?? OPENCODE_M4B_EXECUTOR_PROMPT_TOOLS_V2;
     Object.freeze(this);
   }
 
@@ -83,7 +112,7 @@ export class OpenCodeCliHttpClientV2 {
       title: input.title,
       agent: "build",
       model: { providerID: OPENCODE_CLI_EXECUTOR_PROVIDER_V2, id: OPENCODE_CLI_EXECUTOR_MODEL_ID_V2 },
-      permission: openCodeM4BPermissionRulesV2(),
+      permission: this.sessionPermission,
     }, signal);
     return parseSession(value, this.projectRoot);
   }
@@ -107,7 +136,7 @@ export class OpenCodeCliHttpClientV2 {
       messageID: input.userMessageId,
       model: { providerID: OPENCODE_CLI_EXECUTOR_PROVIDER_V2, modelID: OPENCODE_CLI_EXECUTOR_MODEL_ID_V2 },
       agent: "build",
-      tools: { read: true, glob: true, grep: true, list: true, edit: true, write: true, apply_patch: true, bash: true, task: false, webfetch: false, websearch: false },
+      tools: this.promptTools,
       parts: [{ type: "text", text: input.prompt }],
     }, signal);
     return parseAssistantResult(value, input.sessionId, input.userMessageId);
@@ -240,7 +269,7 @@ export async function readSanitizedOpenCodeSessionExportV2(
     args: ["export", sessionId, "--sanitize", "--pure"],
     stdin: "",
     cwd: options.projectRoot,
-    env: openCodeM4BChildEnvironment(),
+    env: options.environment ?? openCodeM4BChildEnvironment(),
     signal: options.signal ?? controller.signal,
     deadlineMs: options.deadlineMs,
   });

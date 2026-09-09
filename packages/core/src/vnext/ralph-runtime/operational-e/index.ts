@@ -3,16 +3,19 @@ export * from "./artifacts.js";
 export {
   AuditorRuntimeV2,
   ScriptedAuditor,
-  isTrustedAuditorRuntimeV2,
-  assertTrustedAuditorRuntimeV2,
+  isGenuineScriptedAuditorV2,
   assertAuditorResultEnvelopeV2,
 } from "./auditor-runtime.js";
 export type {
   AuditorResultEnvelopeV2,
   ScriptedAuditorDecisionV2,
   ScriptedAuditorOptionsV2,
-  TrustedAuditorRuntimeV2,
 } from "./auditor-runtime.js";
+export {
+  isTrustedAuditorRuntimeV2,
+  assertTrustedAuditorRuntimeV2,
+} from "./auditor-trust.js";
+export type { TrustedAuditorRuntimeV2 } from "./auditor-trust.js";
 export {
   E_AUDIT_ERROR_CODES,
   RalphEAuditError,

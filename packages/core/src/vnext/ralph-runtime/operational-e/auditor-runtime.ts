@@ -100,14 +100,13 @@ export class ScriptedAuditor extends AuditorRuntimeV2 {
   get totalInvocations(): number { return scriptedAuditorState.get(this)?.invocationCount ?? 0; }
 }
 
-export type TrustedAuditorRuntimeV2 = ScriptedAuditor;
-
-export function isTrustedAuditorRuntimeV2(value: unknown): value is TrustedAuditorRuntimeV2 {
+/**
+ * Sole membership authority for the scripted Auditor. The explicit trust-root
+ * union lives in `auditor-trust.ts`; this module owns only the ScriptedAuditor
+ * half of it and exposes no registration surface.
+ */
+export function isGenuineScriptedAuditorV2(value: unknown): value is ScriptedAuditor {
   return typeof value === "object" && value !== null && trustedScriptedAuditors.has(value as ScriptedAuditor);
-}
-
-export function assertTrustedAuditorRuntimeV2(value: unknown): asserts value is TrustedAuditorRuntimeV2 {
-  if (!isTrustedAuditorRuntimeV2(value)) throw new Error("RALPH_AUDITOR_AUTHORITY_REQUIRED: trusted ScriptedAuditor runtime is required");
 }
 
 export function assertAuditorResultEnvelopeV2(value: unknown): asserts value is AuditorResultEnvelopeV2 {
