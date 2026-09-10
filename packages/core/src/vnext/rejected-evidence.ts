@@ -13,15 +13,18 @@ export interface RejectedFindingEvidence {
   readonly value?: unknown;
   readonly valueSha256?: string;
   readonly valueTruncated?: true;
+  readonly valueMissing?: true;
   readonly observed?: { readonly count: number };
 }
 
 function redactSecrets(value: string): string {
+  // Balanced quoted values are consumed atomically; any remaining quote-prefixed value fails safe
+  // through the diagnostic remainder. Unquoted values retain delimiters; malformed over-redaction is intentional.
   return value
     .replace(/\b(?:x-api-key|authorization)\s*[:=]\s*(?:Bearer\s+)?[^\s,;]+/gi, "[REDACTED_HEADER]")
     .replace(/\bBearer\s+[^\s,;]+/gi, "[REDACTED_TOKEN]")
     .replace(/\bsk-ant-[A-Za-z0-9_-]+\b/gi, "[REDACTED]")
-    .replace(/\b[A-Z][A-Z0-9_]*(?:API_KEY|AUTH_TOKEN|ACCESS_TOKEN|SECRET|PASSWORD)\s*=\s*[^\s,;]+/g, "[REDACTED_ENV_SECRET]")
+    .replace(/\b(?:[A-Z][A-Z0-9_]*)?(?:API_KEY|AUTH_TOKEN|ACCESS_TOKEN|SECRET|PASSWORD)\s*=\s*(?:"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|["'][\s\S]*$|(?!["'])[^\s,;]+)/gi, "[REDACTED_ENV_SECRET]")
     .replace(/\/home\/[^/\s]+\//g, "/home/[REDACTED]/");
 }
 
@@ -61,12 +64,38 @@ function withFinding(finding: WireFinding, extracted: Omit<RejectedFindingEviden
 export function rejectedIntentFindingEvidence(
   candidate: IntentWire,
   findings: readonly WireFinding[],
+  payload?: unknown,
 ): readonly RejectedFindingEvidence[] {
   return findings.flatMap((finding) => {
-    const match = finding.pointer.match(/^\/qualityCommands\/(\d+)\/command$/);
+    let match = finding.pointer.match(/^\/qualityCommands\/(\d+)\/command$/);
+    if (match) {
+      const command = candidate.qualityCommands[Number(match[1])]?.command;
+      return command === undefined ? [] : [withFinding(finding, boundedString(command))];
+    }
+
+    match = finding.pointer.match(/^\/(determinations|proposedProtectedPaths)\/(\d+)\/evidence$/);
     if (!match) return [];
-    const command = candidate.qualityCommands[Number(match[1])]?.command;
-    return command === undefined ? [] : [withFinding(finding, boundedString(command))];
+    const root = payload !== null && typeof payload === "object" && !Array.isArray(payload)
+      ? payload as Record<string, unknown>
+      : undefined;
+    const collection = root?.[match[1]!];
+    const raw = Array.isArray(collection) ? collection[Number(match[2])] : undefined;
+    if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
+      const record = raw as Record<string, unknown>;
+      if (!Object.hasOwn(record, "evidence")) return [withFinding(finding, { valueMissing: true })];
+      if (typeof record.evidence === "string") return [withFinding(finding, boundedString(record.evidence))];
+      return [withFinding(finding, { value: `[NON_STRING:${typeof record.evidence}]`, valueSha256: sha256Text(`[NON_STRING:${typeof record.evidence}]`) })];
+    }
+
+    const fallback = match[1] === "determinations"
+      ? candidate.determinations[Number(match[2])]?.source
+      : candidate.proposedProtectedPaths[Number(match[2])]?.source;
+    if (fallback?.kind === "request") {
+      return fallback.evidence === ""
+        ? [withFinding(finding, { valueMissing: true })]
+        : [withFinding(finding, boundedString(fallback.evidence))];
+    }
+    return [withFinding(finding, { valueMissing: true })];
   }).slice(0, REJECTED_EVIDENCE_ENTRY_LIMIT);
 }
 

@@ -24,7 +24,7 @@ import {
   type ValidationIntent,
 } from "./ir.js";
 import type { Finding, IrInvariantId, Outcome } from "./result.js";
-import { acceptedRecommendationIsVerified, canonicalEvidenceText, requestEvidenceIsVerified, userAnswerIsVerified } from "./provenance.js";
+import { acceptedRecommendationIsVerified, requestEvidenceIsVerified, userAnswerIsVerified } from "./provenance.js";
 
 function finding(
   invariant: IrInvariantId,
@@ -72,12 +72,11 @@ function verifiedSource(
 ): DeterminationSource | undefined {
   if (source.kind === "model-default" || source.kind === "developer") return source;
   if (source.kind === "request") {
-    const evidence = canonicalEvidenceText(source.evidence);
-    if (!requestEvidenceIsVerified(context.originalRequest, evidence)) {
-      findings.push(finding("I-17", "Request provenance evidence is not a meaningful exact phrase in the original request", pointer, [source.evidence]));
+    if (!requestEvidenceIsVerified(context.originalRequest, source.evidence)) {
+      findings.push(finding("I-17", "Request provenance evidence is not an exact Core-owned request evidence candidate", pointer, [source.evidence]));
       return undefined;
     }
-    return { kind: "request", evidence };
+    return { kind: "request", evidence: source.evidence };
   }
   const key = semanticKey(source.questionKey);
   const verified = source.kind === "user-answer"

@@ -44,7 +44,7 @@ import {
   TASK_REQUIRED_SEMANTIC_FIELDS,
   taskStructuralRule,
 } from "../../src/vnext/task-contract.js";
-import { decodeIntentWire, decodeWorkWire, deriveWorkSchema, INIT_INTENT_SCHEMA, type WireOutcome } from "../../src/vnext/wire.js";
+import { decodeIntentWire, decodeWorkWire, deriveIntentSchema, deriveWorkSchema, type WireOutcome } from "../../src/vnext/wire.js";
 
 const INVENTORY_REQUEST = "Build me a simple inventory system.";
 const HELLO_REQUEST = "Create a Node.js command-line program named hello with named and default greetings and automated tests.";
@@ -178,7 +178,7 @@ function inventoryIntent(questions = true): unknown {
         materiality: "product",
         rigidity: "RIGID",
         sourceKind: "request",
-        evidence: "simple inventory system",
+        evidence: INVENTORY_REQUEST,
       },
       {
         key: "small-codebase",
@@ -187,7 +187,6 @@ function inventoryIntent(questions = true): unknown {
         materiality: "implementation",
         rigidity: "FLEXIBLE",
         sourceKind: "model-default",
-        evidence: "",
       },
     ],
     requirements: [
@@ -237,7 +236,7 @@ function helloIntent(): unknown {
       materiality: "architecture",
       rigidity: "RIGID",
       sourceKind: "request",
-      evidence: "Node.js command-line program named hello",
+      evidence: HELLO_REQUEST,
     }],
     requirements: [
       { key: "named-greeting", statement: "Running hello with a name prints the named greeting." },
@@ -349,7 +348,7 @@ describe("Phase 3 semantic vnext init", () => {
   });
 
   it("uses the authoritative SemanticKey grammar in intent and work provider schemas", () => {
-    const intentSchema = JSON.stringify(INIT_INTENT_SCHEMA);
+    const intentSchema = JSON.stringify(deriveIntentSchema(INVENTORY_REQUEST));
     const workSchema = JSON.stringify(deriveWorkSchema(inventoryIntent(false) as any));
     for (const schema of [intentSchema, workSchema]) {
       expect(schema).toContain('"pattern":"^[a-z][a-z0-9-]{1,47}$"');
@@ -361,10 +360,10 @@ describe("Phase 3 semantic vnext init", () => {
   });
 
   it("keeps canonical developer provenance unreachable from the provider wire", () => {
-    const schema = INIT_INTENT_SCHEMA as any;
-    const sourceKind = schema.properties.determinations.items.properties.sourceKind;
-    expect(sourceKind.enum).toEqual(["request", "model-default"]);
-    expect(JSON.stringify(INIT_INTENT_SCHEMA)).not.toContain('"developer"');
+    const schema = deriveIntentSchema(INVENTORY_REQUEST) as any;
+    const sourceKinds = schema.properties.determinations.items.oneOf.flatMap((branch: any) => branch.properties.sourceKind.enum);
+    expect(sourceKinds).toEqual(["request", "model-default"]);
+    expect(JSON.stringify(schema)).not.toContain('"developer"');
 
     const forgedKind = structuredClone(inventoryIntent(false)) as any;
     forgedKind.determinations[0].sourceKind = "developer";

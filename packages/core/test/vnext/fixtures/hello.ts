@@ -16,7 +16,7 @@ export const HELLO_SEMANTIC_FIXTURE: SemanticInitProject = {
       rationale: "The requested runtime and product surface are explicit.",
       materiality: "architecture",
       rigidity: "RIGID",
-      source: { kind: "request", evidence: "Node.js command-line program named `hello`" },
+      source: { kind: "request", evidence: HELLO_REQUEST },
     },
     {
       key: "automated-tests",
@@ -24,7 +24,7 @@ export const HELLO_SEMANTIC_FIXTURE: SemanticInitProject = {
       rationale: "Automated regression coverage is explicitly requested.",
       materiality: "implementation",
       rigidity: "RIGID",
-      source: { kind: "request", evidence: "Include automated tests." },
+      source: { kind: "request", evidence: HELLO_REQUEST },
     },
     {
       key: "minimal-layout",
@@ -84,4 +84,3 @@ export const HELLO_SEMANTIC_FIXTURE: SemanticInitProject = {
     },
   ],
 };
-

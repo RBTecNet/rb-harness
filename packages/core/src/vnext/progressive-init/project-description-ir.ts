@@ -8,7 +8,7 @@ import {
   verifyInterviewEvidence,
 } from "../interview.js";
 import type { Materiality, QualityCommandKind, Rigidity } from "../ir.js";
-import { requestEvidenceIsVerified } from "../provenance.js";
+import { legacyRequestEvidenceIsVerified } from "../provenance.js";
 import type { JsonSchemaDocument } from "../providers/contract.js";
 import { qualityCommandSafetyIssue, semanticSingleLineIsValid } from "../validate.js";
 
@@ -304,7 +304,7 @@ export function projectDescriptionForPersistence(value: ProjectDescription): Pro
 
 /** Request authority starts with a meaningful contiguous span selected from the authoritative request. */
 export function progressiveRequestEvidenceIsVerified(originalRequest: string, evidence: string): boolean {
-  return requestEvidenceIsVerified(originalRequest, evidence);
+  return legacyRequestEvidenceIsVerified(originalRequest, evidence);
 }
 
 /** Core, not the provider, owns the authority-bearing request fact resolved from verified evidence. */

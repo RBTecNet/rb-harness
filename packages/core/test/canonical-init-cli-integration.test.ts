@@ -18,7 +18,7 @@ const fixture = vi.hoisted(() => {
     project: { name: "hello", objective: "Deliver a tested Node.js command-line greeting program with named and default output." },
     determinations: [{
       key: "node-cli", statement: "The product is a Node.js command-line program named hello.", rationale: "The requested runtime and product surface are explicit.",
-      materiality: "architecture", rigidity: "RIGID", sourceKind: "request", evidence: "Node.js command-line program named hello",
+      materiality: "architecture", rigidity: "RIGID", sourceKind: "request", evidence: "Create a Node.js command-line program named hello with named and default greetings and automated tests.",
     }],
     requirements: [
       { key: "named-greeting", statement: "Running hello with a name prints the named greeting." },

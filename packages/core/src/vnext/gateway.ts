@@ -46,7 +46,10 @@ export interface GenerateSemanticSlice<T> {
   readonly schemaName: string;
   readonly instructions: string;
   readonly input: string;
-  readonly correctiveInput: (findings: readonly WireFinding[]) => CorrectiveSemanticInput;
+  readonly correctiveInput: (
+    findings: readonly WireFinding[],
+    rejectedFindings: readonly RejectedFindingEvidence[],
+  ) => CorrectiveSemanticInput;
   readonly decode: (payload: unknown) => SemanticDecodeOutcome<T>;
   readonly signal: AbortSignal;
   readonly deadlineMs: number;
@@ -199,11 +202,12 @@ export class SemanticGateway {
   async generate<T>(operation: GenerateSemanticSlice<T>): Promise<T> {
     let corrective = false;
     let findings: readonly WireFinding[] = [];
+    let rejectedFindings: readonly RejectedFindingEvidence[] = [];
     const reasoning = semanticReasoningForProfile(this.profile);
     while (true) {
       const ordinal = this.beginOperation(operation.slice, corrective);
       const attemptIndex = this.attempts.length;
-      const correctiveInput = corrective ? operation.correctiveInput(findings) : undefined;
+      const correctiveInput = corrective ? operation.correctiveInput(findings, rejectedFindings) : undefined;
       this.attempts.push({
         slice: operation.slice,
         ordinal,
@@ -245,7 +249,7 @@ export class SemanticGateway {
         return decoded.value;
       }
       findings = decoded.findings;
-      const rejectedFindings = "rejectedFindings" in decoded ? decoded.rejectedFindings : [];
+      rejectedFindings = "rejectedFindings" in decoded ? decoded.rejectedFindings : [];
       this.attempts[attemptIndex] = {
         ...this.attempts[attemptIndex]!,
         status: "semantic-invalid",

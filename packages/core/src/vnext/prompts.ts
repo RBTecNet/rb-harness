@@ -1,6 +1,8 @@
 import { sha256Text } from "../hash.js";
 import type { InterviewQuestionEvidence } from "./interview.js";
 import type { SemanticProtectedPathInput } from "./ir.js";
+import { requestEvidenceCatalog } from "./provenance.js";
+import type { RejectedFindingEvidence } from "./rejected-evidence.js";
 import { modelFacingRecoveryContext } from "./recovery-findings.js";
 import type { CorrectiveSemanticInput, RecoveryInputAuditEvidence, RecoveryScopeEvidence } from "./run-state.js";
 import type { IntentWire, WireFinding } from "./wire.js";
@@ -10,10 +12,10 @@ export const INTENT_INSTRUCTIONS = [
   "Set format to rb-init-intent/v1 and include every required top-level array, using an empty array when there are no entries.",
   "Use stable symbolic semantic keys in lower-case kebab-case, such as api-client, parse-input, or web-interface. Keys are semantic references, not execution IDs.",
   "Do not assign machine IDs, artifact paths, hashes, timestamps, phase/task IDs, acceptance IDs, or document syntax.",
-  "Ground request-sourced decisions in an exact meaningful phrase from the request.",
-  "For request-sourced decisions put that phrase in evidence; omit evidence for model-default decisions.",
+  "For every determination with sourceKind request, evidence is REQUIRED and must be exactly one complete value from requestEvidenceCandidates. Copy/select it exactly: do not shorten, combine, paraphrase, rewrite, or invent evidence.",
+  "For every determination with sourceKind model-default, omit evidence and do not claim request evidence.",
   "A proposed protected path is an existing or user-owned path that the request explicitly says must not be modified; a requested implementation destination is not protected merely because the request names it.",
-  "For a genuinely protected path, use sourceKind request with the explicit protection evidence, or sourceKind question with the matching questionKey.",
+  "For a genuinely protected path with sourceKind request, evidence is REQUIRED and must select exactly one complete requestEvidenceCandidates value under the same no-shortening, no-combining, no-paraphrasing rule. For sourceKind question, omit evidence and use the exact matching questionKey.",
   "For every material ambiguity, emit a concrete question with exactly one selectable recommended answer and a useful rationale.",
   "Do not silently default a RIGID product or architecture decision; represent it as a question.",
   "Every quality command is a one-shot validation check: it must execute non-interactively, terminate by itself, and return its real exit status.",
@@ -40,6 +42,7 @@ export const WORK_INSTRUCTIONS = [
 ].join("\n");
 
 export function intentInput(originalRequest: string): string {
+  const requestEvidenceCandidates = requestEvidenceCatalog(originalRequest).candidates;
   return JSON.stringify({
     task: "Create the complete rb-init-intent/v1 semantic object for this request.",
     requiredCollections: [
@@ -51,6 +54,7 @@ export function intentInput(originalRequest: string): string {
       "contradictions",
     ],
     originalRequest,
+    requestEvidenceCandidates,
   }, null, 2);
 }
 
@@ -86,9 +90,14 @@ function recoveryAudit(input: {
   };
 }
 
-export function correctiveIntentInput(originalRequest: string, findings: readonly WireFinding[]): CorrectiveSemanticInput {
+export function correctiveIntentInput(
+  originalRequest: string,
+  findings: readonly WireFinding[],
+  rejectedFindings: readonly RejectedFindingEvidence[] = [],
+): CorrectiveSemanticInput {
   const recovery = modelFacingRecoveryContext(findings);
-  const authoritativeInput = { originalRequest };
+  const requestEvidenceCandidates = requestEvidenceCatalog(originalRequest).candidates;
+  const authoritativeInput = { originalRequest, requestEvidenceCandidates };
   const input = JSON.stringify({
     task: "Produce the COMPLETE intent semantic slice again from authoritative input; do not patch previous fields or return a fragment.",
     recoveryScope: {
@@ -96,8 +105,10 @@ export function correctiveIntentInput(originalRequest: string, findings: readonl
       instruction: "Violated rules apply to the entire regenerated slice, not only the prior locations. Specific pointers are evidence from the previous attempt, not patch targets. Rebuild the whole slice while satisfying every listed rule globally.",
     },
     originalRequest,
+    requestEvidenceCandidates,
     violatedRules: recovery.violatedRules,
     specificPreviousFindings: recovery.specificPreviousFindings,
+    previousRejectedEvidence: rejectedFindings,
   }, null, 2);
   return { input, audit: recoveryAudit({ originalRequest, authoritativeInput, recovery, correctiveInput: input }) };
 }
@@ -164,7 +175,11 @@ export function workInput(authority: ResolvedIntentPromptAuthority): string {
   }, null, 2);
 }
 
-export function correctiveWorkInput(authority: ResolvedIntentPromptAuthority, findings: readonly WireFinding[]): CorrectiveSemanticInput {
+export function correctiveWorkInput(
+  authority: ResolvedIntentPromptAuthority,
+  findings: readonly WireFinding[],
+  rejectedFindings: readonly RejectedFindingEvidence[] = [],
+): CorrectiveSemanticInput {
   const recovery = modelFacingRecoveryContext(findings);
   const input = JSON.stringify({
     task: "Produce the COMPLETE work semantic slice again from resolved authority; do not patch previous fields, preserve invalid locations mechanically, or return a fragment.",
@@ -175,6 +190,7 @@ export function correctiveWorkInput(authority: ResolvedIntentPromptAuthority, fi
     resolvedIntent: authority,
     violatedRules: recovery.violatedRules,
     specificPreviousFindings: recovery.specificPreviousFindings,
+    previousRejectedEvidence: rejectedFindings,
   }, null, 2);
   return {
     input,

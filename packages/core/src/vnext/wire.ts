@@ -13,7 +13,7 @@ import type {
 } from "./ir.js";
 import type { JsonSchemaDocument } from "./providers/contract.js";
 import { PROJECT_RELATIVE_PATH_PATTERN, projectRelativePathSyntaxIsSafe } from "./path-contract.js";
-import { requestEvidenceIsVerified } from "./provenance.js";
+import { requestEvidenceCatalog, requestEvidenceIsVerified } from "./provenance.js";
 import {
   TASK_ACCEPTANCE_MAX_ITEMS,
   TASK_REQUIRED_COLLECTION_MIN_ITEMS,
@@ -67,98 +67,139 @@ const nonEmptyProjectRelativePathArray = {
   minItems: TASK_REQUIRED_COLLECTION_MIN_ITEMS,
 } as const;
 
-export const INIT_INTENT_SCHEMA: JsonSchemaDocument = {
-  type: "object",
-  additionalProperties: false,
-  required: ["format", "project", "determinations", "requirements", "qualityCommands", "proposedProtectedPaths", "questions", "contradictions"],
-  properties: {
-    format: { type: "string", enum: [INIT_INTENT_WIRE_VERSION] },
-    project: {
-      type: "object",
-      additionalProperties: false,
-      required: ["name", "objective"],
-      properties: { name: nonEmptyString, objective: nonEmptyString },
-    },
-    determinations: {
-      type: "array",
-      items: {
+function requestEvidenceSchema(candidates: readonly string[]): JsonSchemaDocument {
+  return { type: "string", enum: candidates };
+}
+
+function determinationProperties() {
+  return {
+    key: semanticKeySchema,
+    statement: nonEmptyString,
+    rationale: nonEmptyString,
+    materiality: { type: "string", enum: ["product", "architecture", "implementation", "preference"] },
+    rigidity: { type: "string", enum: ["RIGID", "FLEXIBLE"] },
+  } as const;
+}
+
+/** Derive the provider schema from the exact Run-owned request authority. */
+export function deriveIntentSchema(originalRequest: string): JsonSchemaDocument {
+  const candidates = requestEvidenceCatalog(originalRequest).candidates;
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["format", "project", "determinations", "requirements", "qualityCommands", "proposedProtectedPaths", "questions", "contradictions"],
+    properties: {
+      format: { type: "string", enum: [INIT_INTENT_WIRE_VERSION] },
+      project: {
         type: "object",
         additionalProperties: false,
-        required: ["key", "statement", "rationale", "materiality", "rigidity", "sourceKind"],
-        properties: {
-          key: semanticKeySchema,
-          statement: nonEmptyString,
-          rationale: nonEmptyString,
-          materiality: { type: "string", enum: ["product", "architecture", "implementation", "preference"] },
-          rigidity: { type: "string", enum: ["RIGID", "FLEXIBLE"] },
-          sourceKind: { type: "string", enum: ["request", "model-default"] },
-          evidence: { type: "string" },
+        required: ["name", "objective"],
+        properties: { name: nonEmptyString, objective: nonEmptyString },
+      },
+      determinations: {
+        type: "array",
+        items: {
+          oneOf: [
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["key", "statement", "rationale", "materiality", "rigidity", "sourceKind", "evidence"],
+              properties: {
+                ...determinationProperties(),
+                sourceKind: { type: "string", enum: ["request"] },
+                evidence: requestEvidenceSchema(candidates),
+              },
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["key", "statement", "rationale", "materiality", "rigidity", "sourceKind"],
+              properties: {
+                ...determinationProperties(),
+                sourceKind: { type: "string", enum: ["model-default"] },
+              },
+            },
+          ],
         },
       },
-    },
-    requirements: {
-      type: "array",
-      minItems: 1,
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["key", "statement"],
-        properties: { key: semanticKeySchema, statement: nonEmptyString },
-      },
-    },
-    qualityCommands: {
-      type: "array",
-      minItems: 1,
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["key", "kind", "command"],
-        properties: {
-          key: semanticKeySchema,
-          kind: { type: "string", enum: ["test", "build", "lint", "typecheck", "run"] },
-          command: nonEmptyString,
+      requirements: {
+        type: "array",
+        minItems: 1,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["key", "statement"],
+          properties: { key: semanticKeySchema, statement: nonEmptyString },
         },
       },
-    },
-    proposedProtectedPaths: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["path", "reason", "sourceKind"],
-        properties: {
-          path: projectRelativePath,
-          reason: nonEmptyString,
-          sourceKind: { type: "string", enum: ["request", "question"] },
-          evidence: { type: "string" },
-          questionKey: semanticKeySchema,
-        },
-      },
-    },
-    questions: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["key", "question", "materiality", "rigidity", "recommendedAnswer"],
-        properties: {
-          key: semanticKeySchema,
-          question: nonEmptyString,
-          materiality: { type: "string", enum: ["product", "architecture", "implementation", "preference"] },
-          rigidity: { type: "string", enum: ["RIGID", "FLEXIBLE"] },
-          recommendedAnswer: {
-            type: "object",
-            additionalProperties: false,
-            required: ["value", "rationale"],
-            properties: { value: nonEmptyString, rationale: nonEmptyString },
+      qualityCommands: {
+        type: "array",
+        minItems: 1,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["key", "kind", "command"],
+          properties: {
+            key: semanticKeySchema,
+            kind: { type: "string", enum: ["test", "build", "lint", "typecheck", "run"] },
+            command: nonEmptyString,
           },
-          alternatives: stringArray,
         },
       },
+      proposedProtectedPaths: {
+        type: "array",
+        items: {
+          oneOf: [
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["path", "reason", "sourceKind", "evidence"],
+              properties: {
+                path: projectRelativePath,
+                reason: nonEmptyString,
+                sourceKind: { type: "string", enum: ["request"] },
+                evidence: requestEvidenceSchema(candidates),
+              },
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["path", "reason", "sourceKind", "questionKey"],
+              properties: {
+                path: projectRelativePath,
+                reason: nonEmptyString,
+                sourceKind: { type: "string", enum: ["question"] },
+                questionKey: semanticKeySchema,
+              },
+            },
+          ],
+        },
+      },
+      questions: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["key", "question", "materiality", "rigidity", "recommendedAnswer"],
+          properties: {
+            key: semanticKeySchema,
+            question: nonEmptyString,
+            materiality: { type: "string", enum: ["product", "architecture", "implementation", "preference"] },
+            rigidity: { type: "string", enum: ["RIGID", "FLEXIBLE"] },
+            recommendedAnswer: {
+              type: "object",
+              additionalProperties: false,
+              required: ["value", "rationale"],
+              properties: { value: nonEmptyString, rationale: nonEmptyString },
+            },
+            alternatives: stringArray,
+          },
+        },
+      },
+      contradictions: stringArray,
     },
-    contradictions: stringArray,
-  },
-};
+  };
+}
 
 function workSchema(requirementKeys: readonly string[], commandKeys: readonly string[]): JsonSchemaDocument {
   const keyArray = (values: readonly string[], minItems?: number) => ({
@@ -261,6 +302,14 @@ function text(value: unknown, pointer: string, findings: WireFinding[], allowEmp
   return value.trim();
 }
 
+function exactEvidence(value: unknown, pointer: string, findings: WireFinding[]): string {
+  if (typeof value !== "string") {
+    findings.push({ code: "wire-shape", pointer, message: "expected string" });
+    return "";
+  }
+  return value;
+}
+
 function list(value: unknown, pointer: string, findings: WireFinding[]): readonly unknown[] {
   if (!Array.isArray(value)) {
     findings.push({ code: "wire-shape", pointer, message: "expected array" });
@@ -344,11 +393,16 @@ export function decodeIntentWire(
     const value = object(raw, `/determinations/${index}`, findings) ?? {};
     exactKeys(value, ["key", "statement", "rationale", "materiality", "rigidity", "sourceKind", "evidence"], `/determinations/${index}`, findings);
     const sourceKind = oneOf(value.sourceKind, ["request", "model-default"] as const, `/determinations/${index}/sourceKind`, findings);
-    const evidence = value.evidence === undefined
-      ? ""
-      : text(value.evidence, `/determinations/${index}/evidence`, findings, true);
-    if (sourceKind === "request" && !requestEvidenceIsVerified(originalRequest, evidence)) {
-      findings.push({ code: "semantic-invalid", pointer: `/determinations/${index}/evidence`, message: "request evidence is not verifiable in the original request" });
+    const evidencePresent = Object.hasOwn(value, "evidence");
+    const evidence = evidencePresent
+      ? exactEvidence(value.evidence, `/determinations/${index}/evidence`, findings)
+      : "";
+    if (sourceKind === "request" && !evidencePresent) {
+      findings.push({ code: "semantic-invalid", pointer: `/determinations/${index}/evidence`, message: "request evidence is required and must select one Core-provided request evidence candidate" });
+    } else if (sourceKind === "request" && !requestEvidenceIsVerified(originalRequest, evidence)) {
+      findings.push({ code: "semantic-invalid", pointer: `/determinations/${index}/evidence`, message: "request evidence must exactly select one Core-provided request evidence candidate" });
+    } else if (sourceKind === "model-default" && evidencePresent) {
+      findings.push({ code: "semantic-invalid", pointer: `/determinations/${index}/evidence`, message: "model-default determination must not claim request evidence" });
     }
     const materiality = oneOf(value.materiality, ["product", "architecture", "implementation", "preference"] as const, `/determinations/${index}/materiality`, findings) as Materiality;
     const rigidity = oneOf(value.rigidity, ["RIGID", "FLEXIBLE"] as const, `/determinations/${index}/rigidity`, findings) as Rigidity;
@@ -418,14 +472,23 @@ export function decodeIntentWire(
     const value = object(raw, `/proposedProtectedPaths/${index}`, findings) ?? {};
     exactKeys(value, ["path", "reason", "sourceKind", "evidence", "questionKey"], `/proposedProtectedPaths/${index}`, findings);
     const sourceKind = oneOf(value.sourceKind, ["request", "question"] as const, `/proposedProtectedPaths/${index}/sourceKind`, findings);
-    const evidence = value.evidence === undefined
-      ? ""
-      : text(value.evidence, `/proposedProtectedPaths/${index}/evidence`, findings, true);
+    const evidencePresent = Object.hasOwn(value, "evidence");
+    const evidence = evidencePresent
+      ? exactEvidence(value.evidence, `/proposedProtectedPaths/${index}/evidence`, findings)
+      : "";
+    const questionKeyPresent = Object.hasOwn(value, "questionKey");
     const questionKey = value.questionKey === undefined
       ? ""
       : text(value.questionKey, `/proposedProtectedPaths/${index}/questionKey`, findings, true);
-    if (sourceKind === "request" && !requestEvidenceIsVerified(originalRequest, evidence)) {
-      findings.push({ code: "semantic-invalid", pointer: `/proposedProtectedPaths/${index}/evidence`, message: "protected-path request evidence is not verifiable" });
+    if (sourceKind === "request" && !evidencePresent) {
+      findings.push({ code: "semantic-invalid", pointer: `/proposedProtectedPaths/${index}/evidence`, message: "protected-path request evidence is required and must select one Core-provided request evidence candidate" });
+    } else if (sourceKind === "request" && !requestEvidenceIsVerified(originalRequest, evidence)) {
+      findings.push({ code: "semantic-invalid", pointer: `/proposedProtectedPaths/${index}/evidence`, message: "protected-path request evidence must exactly select one Core-provided request evidence candidate" });
+    } else if (sourceKind === "question" && evidencePresent) {
+      findings.push({ code: "semantic-invalid", pointer: `/proposedProtectedPaths/${index}/evidence`, message: "question-backed protected path must not claim request evidence" });
+    }
+    if (sourceKind === "request" && questionKeyPresent) {
+      findings.push({ code: "semantic-invalid", pointer: `/proposedProtectedPaths/${index}/questionKey`, message: "request-backed protected path must not claim question authority" });
     }
     if (sourceKind === "question" && !questionKeys.has(questionKey)) {
       findings.push({ code: "semantic-invalid", pointer: `/proposedProtectedPaths/${index}/questionKey`, message: "protected-path question reference is unknown" });

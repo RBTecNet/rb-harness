@@ -275,7 +275,7 @@ const DETERMINATION_CONSUMERS = {
 
 const REQUEST_DETERMINATION_SOURCE_CONSUMERS = {
   kind: { path: "core.determinations[].source.kind", consumer: "authority validation selects the request proof rule" },
-  evidence: { path: "core.determinations[].source.evidence", consumer: "authority validation verifies a meaningful request phrase" },
+  evidence: { path: "core.determinations[].source.evidence", consumer: "authority validation verifies exact Core-owned request evidence catalog membership" },
 } satisfies Record<keyof RequestDeterminationSource, IrConsumerRegistration>;
 const ANSWER_DETERMINATION_SOURCE_CONSUMERS = {
   kind: { path: "core.determinations[].source.kind", consumer: "authority validation selects the answer proof rule" },
@@ -302,7 +302,7 @@ const BUILTIN_PATH_SOURCE_CONSUMERS = {
 } satisfies Record<keyof BuiltInProtectedPathSource, IrConsumerRegistration>;
 const REQUEST_PATH_SOURCE_CONSUMERS = {
   kind: { path: "core.protectedPaths[].source.kind", consumer: "authority validation selects the request proof rule" },
-  evidence: { path: "core.protectedPaths[].source.evidence", consumer: "authority validation verifies a meaningful request phrase" },
+  evidence: { path: "core.protectedPaths[].source.evidence", consumer: "authority validation verifies exact Core-owned request evidence catalog membership" },
 } satisfies Record<keyof RequestProtectedPathSource, IrConsumerRegistration>;
 const ANSWER_PATH_SOURCE_CONSUMERS = {
   kind: { path: "core.protectedPaths[].source.kind", consumer: "authority validation selects the answer proof rule" },

@@ -14,12 +14,13 @@ import {
 } from "../../../src/vnext/providers/openai/profiles.js";
 import type { JsonSchemaDocument, SemanticRequest } from "../../../src/vnext/providers/contract.js";
 import { CONFORMANCE_CASES } from "../../../src/vnext/providers/conformance/fixtures.js";
-import { INIT_INTENT_SCHEMA, decodeIntentWire, deriveWorkSchema } from "../../../src/vnext/wire.js";
+import { decodeIntentWire, deriveIntentSchema, deriveWorkSchema } from "../../../src/vnext/wire.js";
 import { PROJECT_DESCRIPTION_SCHEMA } from "../../../src/vnext/progressive-init/project-description-ir.js";
 import { PROJECT_PHASES_PROPOSAL_SCHEMA } from "../../../src/vnext/progressive-init/project-phases-ir.js";
 import { openAiSse } from "./openai-helpers.js";
 
 const SECRET = "OPENAI_SECRET_SENTINEL_NEVER_LEAK";
+const INTENT_SCHEMA = deriveIntentSchema("authoritative request");
 const credential = { kind: "credential" as const, credential: { id: "openai:test", secret: SECRET, attributes: {} } };
 
 function request(schema: JsonSchemaDocument = {
@@ -53,7 +54,7 @@ describe("OpenAI direct adapter", () => {
 
   it("sends one Responses request with Bearer auth, strict:false, no tools, and the original schema", async () => {
     const calls: OpenAiTransportInput[] = [];
-    const schema = structuredClone(INIT_INTENT_SCHEMA);
+    const schema = structuredClone(INTENT_SCHEMA);
     const before = structuredClone(schema);
     const adapter = new OpenAiAdapter({ async send(input) { calls.push(input); return openAiSse({ value: "ok" }); } });
     expect(await adapter.request(OPENAI_GPT_5_6_SOL_PROFILE, credential, request(schema)))
@@ -75,16 +76,17 @@ describe("OpenAI direct adapter", () => {
       qualityCommands: [{ key: "test", kind: "test", command: "npm test" }],
     });
     const generic = CONFORMANCE_CASES.map((test) => test.request().schema);
-    for (const schema of [INIT_INTENT_SCHEMA, PROJECT_DESCRIPTION_SCHEMA, PROJECT_PHASES_PROPOSAL_SCHEMA, work, ...generic]) {
+    for (const schema of [INTENT_SCHEMA, PROJECT_DESCRIPTION_SCHEMA, PROJECT_PHASES_PROPOSAL_SCHEMA, work, ...generic]) {
       const before = structuredClone(schema);
       const body = openAiRequestBody(OPENAI_GPT_5_6_SOL_PROFILE, request(schema)) as any;
       expect(body.text.format.schema).toEqual(before);
       expect(body.text.format.strict).toBe(false);
       expect(schema).toEqual(before);
     }
-    const intent = (openAiRequestBody(OPENAI_GPT_5_6_SOL_PROFILE, request(INIT_INTENT_SCHEMA)) as any).text.format.schema;
-    expect(intent.properties.determinations.items.properties.evidence).toEqual({ type: "string" });
-    expect(intent.properties.determinations.items.required).not.toContain("evidence");
+    const intent = (openAiRequestBody(OPENAI_GPT_5_6_SOL_PROFILE, request(INTENT_SCHEMA)) as any).text.format.schema;
+    expect(intent.properties.determinations.items.oneOf[0].properties.evidence).toEqual({ type: "string", enum: ["authoritative request"] });
+    expect(intent.properties.determinations.items.oneOf[0].required).toContain("evidence");
+    expect(intent.properties.determinations.items.oneOf[1].properties).not.toHaveProperty("evidence");
     const workBody = (openAiRequestBody(OPENAI_GPT_5_6_SOL_PROFILE, request(work)) as any).text.format.schema;
     expect(workBody.properties.phases.items.properties.tasks.items.properties.validation.items).toHaveProperty("oneOf");
     expect(workBody.properties.phases.items.properties.tasks.items.properties.validation.items).not.toHaveProperty("anyOf");
@@ -102,7 +104,7 @@ describe("OpenAI direct adapter", () => {
   it("returns schema-invalid JSON as unknown payload so Core remains final authority", async () => {
     const invalid = { format: "wrong", unexpected: true };
     const adapter = new OpenAiAdapter({ async send() { return openAiSse(invalid); } });
-    const outcome = await adapter.request(OPENAI_GPT_5_6_SOL_PROFILE, credential, request(INIT_INTENT_SCHEMA));
+    const outcome = await adapter.request(OPENAI_GPT_5_6_SOL_PROFILE, credential, request(INTENT_SCHEMA));
     expect(outcome).toMatchObject({ ok: true, value: { payload: invalid } });
     if (!outcome.ok) throw new Error("expected parsed payload");
     expect(decodeIntentWire(outcome.value.payload, "authoritative request").ok).toBe(false);

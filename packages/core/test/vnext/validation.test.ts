@@ -282,7 +282,8 @@ describe("vNext semantic validation closure", () => {
   it("uses a conservative shared request-evidence verifier", () => {
     expect(requestEvidenceIsVerified(HELLO_REQUEST, "a")).toBe(false);
     expect(requestEvidenceIsVerified(HELLO_REQUEST, "hello")).toBe(false);
-    expect(requestEvidenceIsVerified(HELLO_REQUEST, "Include automated tests.")).toBe(true);
+    expect(requestEvidenceIsVerified(HELLO_REQUEST, HELLO_REQUEST)).toBe(true);
+    expect(requestEvidenceIsVerified(HELLO_REQUEST, "Include automated tests.")).toBe(false);
     expect(requestEvidenceIsVerified(HELLO_REQUEST, "Include integration tests.")).toBe(false);
     expect(userAnswerIsVerified({ "runtime-choice": "Node.js" }, "runtime-choice")).toBe(true);
     expect(userAnswerIsVerified({}, "runtime-choice")).toBe(false);

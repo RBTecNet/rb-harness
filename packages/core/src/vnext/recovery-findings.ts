@@ -15,6 +15,7 @@ export type RecoveryRule =
   | "validation-command-executable"
   | "validation-command-terminating"
   | "task-completeness"
+  | "request-evidence-selection"
   | "rigid-decision-requires-authority"
   | "semantic-key-valid"
   | "dependency-order-valid";
@@ -36,6 +37,7 @@ const RECOVERY_RULE_CONSTRAINTS: Readonly<Record<RecoveryRule, string>> = {
   "validation-command-executable": "Across the complete regenerated slice, executable checks must use command with an exact declared quality-command key; manual is only for a non-command inspection the executor can perform, and human is only for evidence requiring human judgement.",
   "validation-command-terminating": "Every quality command in the complete regenerated slice must terminate and return its real exit status; long-running servers and watchers are not validation commands.",
   "task-completeness": "Every task in the complete regenerated work slice must have concrete change intent, owned project-relative paths, declared requirement coverage, self-contained acceptance, supported validation, and concrete expected evidence.",
+  "request-evidence-selection": "Every request-backed determination and protected path in the COMPLETE regenerated intent slice must select exactly one complete Core-provided requestEvidenceCandidates value. Do not shorten, combine, paraphrase, rewrite, or invent evidence. Model-default determinations and question-backed protected paths must not claim request evidence.",
   "rigid-decision-requires-authority": "Every RIGID product or architecture decision in the complete regenerated intent slice must be represented as a material question with a concrete recommendation unless it is verifiably grounded in the original request.",
   "semantic-key-valid": "Every semantic key and reference in the complete regenerated slice must use the lower-case symbolic key grammar and remain consistent with its declaration.",
   "dependency-order-valid": "Every dependency in the complete regenerated slice must reference declared symbolic work that appears earlier in executable order.",
@@ -52,6 +54,7 @@ function recoveryRule(finding: WireFinding): RecoveryRule | undefined {
   const message = finding.message;
   const pointer = finding.pointer;
   const taskField = TASK_REQUIRED_SEMANTIC_FIELDS.find((field) => pointer.endsWith(`/${field}`));
+  if (/^\/(?:determinations|proposedProtectedPaths)\/\d+\/evidence$/.test(pointer)) return "request-evidence-selection";
   if (taskField && message === taskStructuralRule(taskField).message) return "task-completeness";
   if (message.includes("long-running service or watcher")) return "validation-command-terminating";
   if (message.includes("visual acceptance semantics") || /\/acceptance(?:\/|$)/.test(pointer) && message.includes("visual")) return "acceptance-no-visual-only";
@@ -71,6 +74,17 @@ function semanticGuidance(finding: WireFinding): string {
   const taskField = TASK_REQUIRED_SEMANTIC_FIELDS.find((field) => pointer.endsWith(`/${field}`));
   if (taskField && message === taskStructuralRule(taskField).message) {
     return taskStructuralRule(taskField).guidance;
+  }
+
+  if (/^\/(?:determinations|proposedProtectedPaths)\/\d+\/evidence$/.test(pointer)) {
+    const cause = message.includes("is required")
+      ? "The previous request-evidence value was missing."
+      : message.includes("must exactly select")
+        ? "The previous request-evidence value was not an exact requestEvidenceCandidates selection."
+        : message.includes("must not claim")
+          ? "The previous source kind is forbidden from claiming request evidence."
+          : "The previous request-evidence value was not a valid string selection.";
+    return `${cause} In the complete regenerated intent slice, every request-backed determination and protected path must copy exactly one complete requestEvidenceCandidates value without shortening, combining, paraphrasing, rewriting, or invention; model-default determinations and question-backed protected paths must omit evidence.`;
   }
 
   if (message.includes("long-running service or watcher")) {

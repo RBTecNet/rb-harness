@@ -43,8 +43,8 @@ import {
 import {
   decodeIntentWire,
   decodeWorkWire,
+  deriveIntentSchema,
   deriveWorkSchema,
-  INIT_INTENT_SCHEMA,
   type IntentWire,
   type WireFinding,
   type WireOutcome,
@@ -267,15 +267,15 @@ export async function runSemanticInit(options: RunSemanticInitOptions): Promise<
     await publishState();
     const intent = await gateway.generate({
       slice: "intent",
-      schema: INIT_INTENT_SCHEMA,
+      schema: deriveIntentSchema(originalRequest),
       schemaName: "rb_init_intent_v1",
       instructions: INTENT_INSTRUCTIONS,
       input: intentInput(originalRequest),
-      correctiveInput: (findings) => correctiveIntentInput(originalRequest, findings),
+      correctiveInput: (findings, rejectedFindings) => correctiveIntentInput(originalRequest, findings, rejectedFindings),
       decode: (payload) => {
         let rejectedFindings: readonly RejectedFindingEvidence[] = [];
         const decoded = decodeIntentWire(payload, originalRequest, (candidate, findings) => {
-          rejectedFindings = rejectedIntentFindingEvidence(candidate, findings);
+          rejectedFindings = rejectedIntentFindingEvidence(candidate, findings, payload);
         });
         return !decoded.ok && rejectedFindings.length ? { ...decoded, rejectedFindings } : decoded;
       },
@@ -323,7 +323,7 @@ export async function runSemanticInit(options: RunSemanticInitOptions): Promise<
       schemaName: "rb_init_work_v1",
       instructions: WORK_INSTRUCTIONS,
       input: workInput(promptAuthority),
-      correctiveInput: (findings) => correctiveWorkInput(promptAuthority, findings),
+      correctiveInput: (findings, rejectedFindings) => correctiveWorkInput(promptAuthority, findings, rejectedFindings),
       decode: resolvedWorkDecoder(resolvedIntent),
       signal,
       deadlineMs: options.deadlineMs ?? 120_000,
