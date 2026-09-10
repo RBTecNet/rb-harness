@@ -384,6 +384,12 @@ export interface CodexProcessRunInputV2 {
    * any prompt byte is written.  A durable process receipt is persisted here.
    */
   readonly onSpawned?: (spawned: CodexProcessSpawnV2) => Promise<void>;
+  /**
+   * Optional provider-neutral barrier immediately before stdin is crossed.
+   * M5-D uses it to revalidate the read-only canonical workspace after the
+   * child receipt is durable but before the first model-bearing prompt byte.
+   */
+  readonly onBeforeStdin?: () => Promise<void>;
   readonly cancellation?: { cancelled: boolean };
   /**
    * Bounded stdout notifier used to bind the first public `thread.started`
@@ -488,6 +494,7 @@ export async function runCodexProcessV2(input: CodexProcessRunInputV2): Promise<
         startedAt,
       }));
     }
+    await input.onBeforeStdin?.();
     await writeStdin(handle.child.stdin, input.stdin);
     const outcome = await exited;
     clearTimeout(timer);

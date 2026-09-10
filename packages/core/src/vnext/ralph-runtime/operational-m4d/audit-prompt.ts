@@ -18,12 +18,15 @@ export interface OpenCodeAuditorPromptV2 {
 }
 
 /**
- * Deterministic AuditPackage-only prompt projection. There is no caller seam:
- * every sentence below is a pure function of the immutable durable
- * AuditPackage, so the dispatched prompt can be reconstructed byte for byte
- * from Core authority alone.
+ * Provider-neutral semantic half of the frozen M4-D projection.  Transport
+ * adapters append only their output framing.  Keeping these lines in one
+ * place prevents Codex and OpenCode Auditors from receiving different Core
+ * facts or authority limits.
  */
-export function projectAuditPackageToOpenCodePromptV2(auditPackage: AuditPackageV2): OpenCodeAuditorPromptV2 {
+export function projectAuditPackageSemanticLinesV2(
+  auditPackage: AuditPackageV2,
+  inspectionMode: "READ_TOOLS_ONLY" | "READ_ONLY_COMMANDS" = "READ_TOOLS_ONLY",
+): readonly string[] {
   validateAuditPackageV2(auditPackage);
   const criteria = auditPackage.acceptanceCriteria.length === 0
     ? ["(none)"]
@@ -33,8 +36,7 @@ export function projectAuditPackageToOpenCodePromptV2(auditPackage: AuditPackage
     ? ["(none)"]
     : auditPackage.openFindingRefs.map((finding, index) => `${index + 1}. ${finding.findingId} [status ${finding.status}] [severity ${finding.severity}] [digest ${finding.findingDigest}]`);
   const context = auditPackage.relevantContext.length === 0 ? ["(none)"] : auditPackage.relevantContext.map((entry) => `- ${entry}`);
-
-  const text = [
+  return Object.freeze([
     "You are the independent Auditor for one authorized Ralph Attempt.",
     "You did not implement this work. Judge it against the acceptance criteria below by",
     "independently inspecting the workspace you are running in.",
@@ -77,9 +79,15 @@ export function projectAuditPackageToOpenCodePromptV2(auditPackage: AuditPackage
     "",
     "INSPECTION RULES",
     "- Inspect the current project root, which is your working directory.",
-    "- You are physically read-only: reading, globbing, grepping and listing are your",
-    "  only capabilities. Editing, writing, patching, shell, sub-agents and network",
-    "  access are denied by the transport, not merely by this instruction.",
+    ...(inspectionMode === "READ_TOOLS_ONLY" ? [
+      "- You are physically read-only: reading, globbing, grepping and listing are your",
+      "  only capabilities. Editing, writing, patching, shell, sub-agents and network",
+      "  access are denied by the transport, not merely by this instruction.",
+    ] : [
+      "- You are physically read-only. Read-only shell commands used for inspection are",
+      "  permitted; writes, deletion, rename, credential access and network access are",
+      "  denied by the transport, not merely by this instruction.",
+    ]),
     "- Do not attempt to modify anything, including .rb, .rb-harness and .git.",
     "- Do not execute side effects of any kind.",
     "- Base your verdict on what the workspace actually contains, not on what the",
@@ -90,6 +98,18 @@ export function projectAuditPackageToOpenCodePromptV2(auditPackage: AuditPackage
     "- Finding identities are not yours to choose. Propose the defect; Core mints the id.",
     "- You may not mark any Task, Run, Attempt or Validation complete, passed or resolved.",
     "- Your prose is untrusted. Only the structured response below is read.",
+  ]);
+}
+
+/**
+ * Deterministic AuditPackage-only prompt projection. There is no caller seam:
+ * every sentence below is a pure function of the immutable durable
+ * AuditPackage, so the dispatched prompt can be reconstructed byte for byte
+ * from Core authority alone.
+ */
+export function projectAuditPackageToOpenCodePromptV2(auditPackage: AuditPackageV2): OpenCodeAuditorPromptV2 {
+  const text = [
+    ...projectAuditPackageSemanticLinesV2(auditPackage),
     "",
     "REQUIRED STRUCTURED RESPONSE",
     "End your reply with exactly one block delimited by these markers, and use the",
