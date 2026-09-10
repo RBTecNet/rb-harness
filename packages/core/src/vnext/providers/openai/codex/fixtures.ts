@@ -1,11 +1,13 @@
 import { CONFORMANCE_CASES } from "../../conformance/fixtures.js";
 import type { ConformanceCase } from "../../conformance/suite.js";
+import { semanticReasoningForProfile } from "../../reasoning.js";
+import { CODEX_SUBSCRIPTION_PROFILE } from "./profiles.js";
 
 const shared = CONFORMANCE_CASES
   .filter((test) => test.id !== "reasoning-enabled")
   .map((test): ConformanceCase => ({
     ...test,
-    request: (signal) => ({ ...test.request(signal), reasoning: { mode: "off" } }),
+    request: (signal) => ({ ...test.request(signal), reasoning: semanticReasoningForProfile(CODEX_SUBSCRIPTION_PROFILE) }),
   }));
 
 const baseRequest = shared.find((test) => test.id === "valid-structured-response")!.request;

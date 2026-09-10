@@ -12,6 +12,7 @@ import type {
 import type { WireFinding, WireOutcome } from "./wire.js";
 import type { RejectedFindingEvidence } from "./rejected-evidence.js";
 import { CANONICAL_INIT_RECOVERY_BUDGET } from "./recovery-budget.js";
+import { semanticReasoningForProfile } from "./providers/reasoning.js";
 
 export type SemanticSlice = "intent" | "work";
 
@@ -198,6 +199,7 @@ export class SemanticGateway {
   async generate<T>(operation: GenerateSemanticSlice<T>): Promise<T> {
     let corrective = false;
     let findings: readonly WireFinding[] = [];
+    const reasoning = semanticReasoningForProfile(this.profile);
     while (true) {
       const ordinal = this.beginOperation(operation.slice, corrective);
       const attemptIndex = this.attempts.length;
@@ -220,7 +222,7 @@ export class SemanticGateway {
         schema: operation.schema,
         schemaName: operation.schemaName,
         limits: { maxOutputTokens: operation.maxOutputTokens, deadlineMs: operation.deadlineMs },
-        reasoning: { mode: "on", effort: "low" },
+        reasoning,
         signal: operation.signal,
       };
       let outcome: Awaited<ReturnType<ProviderAdapter["request"]>>;
