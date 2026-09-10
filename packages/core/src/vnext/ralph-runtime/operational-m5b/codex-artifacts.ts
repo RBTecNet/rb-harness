@@ -15,6 +15,8 @@ import { CODEX_OBSERVED_MODEL_STATES_V2 } from "./contract.js";
 import { CODEX_TERMINAL_KINDS_V2, type CodexTerminalKindV2 } from "./codex-jsonl.js";
 import { validateCodexProjectionManifestV2, type CodexProjectionManifestV2 } from "./codex-projection.js";
 import { validateCodexWorkspaceDeltaV2, type CodexWorkspaceDeltaV2 } from "./codex-delta.js";
+import { correctionContextRefV2 } from "../operational-f/correction-context.js";
+import { validateExactCodexCorrectionDescriptorV2 } from "./codex-correction.js";
 
 /**
  * The Codex physical invocation artifact family.
@@ -91,7 +93,9 @@ export interface CodexProviderDescriptorV2 extends CodexCoreBindingV2 {
   readonly parentEnvironmentPolicyDigest: string;
   readonly shellEnvironmentPolicyDigest: string;
   readonly outputSchemaDigest: string;
-  readonly correctionContextSupported: false;
+  readonly correctionContextSupported: boolean;
+  readonly correctionContextRef: string | null;
+  readonly correctionContextDigest: string | null;
   readonly createdAt: string;
   readonly descriptorDigest: string;
 }
@@ -229,7 +233,7 @@ const DESCRIPTOR_KEYS = [
   "stagingRootWritable", "writeRootPlanDigest", "rootSentinelManifestDigest", "sandboxBackendPath", "legacySandboxMode",
   "runtimeIdentity", "projectRootIdentity", "baseWorkspaceFingerprint",
   "argvPolicyDigest", "parentEnvironmentPolicyDigest", "shellEnvironmentPolicyDigest", "outputSchemaDigest",
-  "correctionContextSupported", "createdAt", "descriptorDigest",
+  "correctionContextSupported", "correctionContextRef", "correctionContextDigest", "createdAt", "descriptorDigest",
 ] as const;
 const DISPATCH_KEYS = [
   "schema", "runId", "phaseId", "taskId", "attemptId", "invocationId", "descriptorRef", "descriptorDigest", "dispatchId",
@@ -290,7 +294,17 @@ function assertCodexArtifactShapeV2(value: unknown, schema: string, keys: readon
 
 export function validateCodexProviderDescriptorV2(value: unknown): asserts value is CodexProviderDescriptorV2 {
   assertCodexArtifactShapeV2(value, RALPH_CODEX_PROVIDER_DESCRIPTOR_SCHEMA_V2, DESCRIPTOR_KEYS, "descriptorDigest");
-  if (value.correctionContextSupported !== false) throw new RalphM5BError("M5B_CORRECTION_CONTEXT_NOT_SUPPORTED");
+  if (typeof value.correctionContextSupported !== "boolean") throw new RalphM5BError("M5B_PROVIDER_RESULT_INVALID", "M5C_CORRECTION_DESCRIPTOR_BINDING_INVALID: support flag");
+  const correctionBound = value.correctionContextRef !== null || value.correctionContextDigest !== null;
+  if (correctionBound !== value.correctionContextSupported
+    || (value.correctionContextRef === null) !== (value.correctionContextDigest === null)) {
+    throw new RalphM5BError("M5B_PROVIDER_RESULT_INVALID", "M5C_CORRECTION_DESCRIPTOR_BINDING_INVALID: partial or inconsistent binding");
+  }
+  if (correctionBound) {
+    if (value.correctionContextRef !== correctionContextRefV2(String(value.attemptId)) || !isSha256Digest(value.correctionContextDigest)) {
+      throw new RalphM5BError("M5B_PROVIDER_RESULT_INVALID", "M5C_CORRECTION_DESCRIPTOR_BINDING_INVALID: ref or digest");
+    }
+  }
   if (typeof value.stagingRootWritable !== "boolean") throw new RalphM5BError("M5B_PROVIDER_RESULT_INVALID", "M5B_ARTIFACT_INVALID: stagingRootWritable");
   // A descriptor that claims a writable staging root but carries no sentinel
   // authority would describe an unguarded root-scope dispatch.
@@ -360,18 +374,53 @@ export function validateCodexTerminalArtifactV2(value: unknown): asserts value i
   }
 }
 
-export const persistCodexProviderDescriptorV2 = (store: RalphEventStoreV2, artifact: CodexProviderDescriptorV2, nonce: string): Promise<ArtifactPersistenceResultV2<CodexProviderDescriptorV2>> =>
-  persistImmutableJsonArtifactV2({ store, ref: codexProviderDescriptorRefV2(artifact.attemptId), artifact, validate: validateCodexProviderDescriptorV2, nonce });
+export async function persistCodexProviderDescriptorV2(store: RalphEventStoreV2, artifact: CodexProviderDescriptorV2, nonce: string): Promise<ArtifactPersistenceResultV2<CodexProviderDescriptorV2>> {
+  validateCodexProviderDescriptorV2(artifact);
+  await validateExactCodexCorrectionDescriptorV2({ store, descriptor: artifact });
+  return persistImmutableJsonArtifactV2({ store, ref: codexProviderDescriptorRefV2(artifact.attemptId), artifact, validate: validateCodexProviderDescriptorV2, nonce });
+}
 export const persistCodexDispatchIntentV2 = (store: RalphEventStoreV2, artifact: CodexDispatchIntentV2, nonce: string): Promise<ArtifactPersistenceResultV2<CodexDispatchIntentV2>> =>
   persistImmutableJsonArtifactV2({ store, ref: codexDispatchIntentRefV2(artifact.attemptId), artifact, validate: validateCodexDispatchIntentV2, nonce });
 export const persistCodexProcessReceiptV2 = (store: RalphEventStoreV2, artifact: CodexProcessReceiptV2, nonce: string): Promise<ArtifactPersistenceResultV2<CodexProcessReceiptV2>> =>
   persistImmutableJsonArtifactV2({ store, ref: codexProcessReceiptRefV2(artifact.attemptId), artifact, validate: validateCodexProcessReceiptV2, nonce });
-export const persistCodexThreadBindingV2 = (store: RalphEventStoreV2, artifact: CodexThreadBindingV2, nonce: string): Promise<ArtifactPersistenceResultV2<CodexThreadBindingV2>> =>
-  persistImmutableJsonArtifactV2({ store, ref: codexThreadBindingRefV2(artifact.attemptId), artifact, validate: validateCodexThreadBindingV2, nonce });
+export async function persistCodexThreadBindingV2(store: RalphEventStoreV2, artifact: CodexThreadBindingV2, nonce: string): Promise<ArtifactPersistenceResultV2<CodexThreadBindingV2>> {
+  validateCodexThreadBindingV2(artifact);
+  const priorAttemptIds = [...new Set((await store.inspect()).events
+    .filter((event) => event.eventType === "attempt.started")
+    .map((event) => event.payload.attemptId))]
+    .filter((attemptId) => attemptId !== artifact.attemptId);
+  for (const attemptId of priorAttemptIds) {
+    const prior = await readCodexThreadBindingV2(store, attemptId);
+    if (prior?.threadId === artifact.threadId) {
+      throw new RalphM5BError("M5B_THREAD_BINDING_INVALID", "M5C_FRESH_THREAD_REQUIRED: thread identity was already bound to another Attempt");
+    }
+  }
+  return persistImmutableJsonArtifactV2({ store, ref: codexThreadBindingRefV2(artifact.attemptId), artifact, validate: validateCodexThreadBindingV2, nonce });
+}
 export const persistCodexPromptArtifactV2 = (store: RalphEventStoreV2, artifact: CodexPromptArtifactV2, nonce: string): Promise<ArtifactPersistenceResultV2<CodexPromptArtifactV2>> =>
   persistImmutableJsonArtifactV2({ store, ref: codexPromptRefV2(artifact.attemptId), artifact, validate: validateCodexPromptArtifactV2, nonce });
-export const persistCodexProviderResultV2 = (store: RalphEventStoreV2, artifact: CodexProviderResultV2, nonce: string): Promise<ArtifactPersistenceResultV2<CodexProviderResultV2>> =>
-  persistImmutableJsonArtifactV2({ store, ref: codexProviderResultRefV2(artifact.attemptId), artifact, validate: validateCodexProviderResultV2, nonce });
+export async function persistCodexProviderResultV2(store: RalphEventStoreV2, artifact: CodexProviderResultV2, nonce: string): Promise<ArtifactPersistenceResultV2<CodexProviderResultV2>> {
+  validateCodexProviderResultV2(artifact);
+  const [descriptor, intent, thread] = await Promise.all([
+    readCodexProviderDescriptorV2(store, artifact.attemptId),
+    readCodexDispatchIntentV2(store, artifact.attemptId),
+    readCodexThreadBindingV2(store, artifact.attemptId),
+  ]);
+  const threadBindingValid = thread
+    ? artifact.threadBindingDigest === thread.bindingDigest && artifact.threadId === thread.threadId
+    : artifact.classification !== "SUCCEEDED" && artifact.threadBindingDigest === "" && artifact.threadId === "";
+  if (!descriptor || !intent || !threadBindingValid
+    || artifact.descriptorDigest !== descriptor.descriptorDigest
+    || artifact.dispatchIntentDigest !== intent.intentDigest
+    || artifact.runId !== descriptor.runId
+    || artifact.phaseId !== descriptor.phaseId
+    || artifact.taskId !== descriptor.taskId
+    || artifact.attemptId !== descriptor.attemptId
+    || artifact.invocationId !== descriptor.invocationId) {
+    throw new RalphM5BError("M5B_PROVIDER_RESULT_INVALID", "M5C_ATTEMPT_RESULT_BINDING_INVALID: provider result cannot be reused across Attempts");
+  }
+  return persistImmutableJsonArtifactV2({ store, ref: codexProviderResultRefV2(artifact.attemptId), artifact, validate: validateCodexProviderResultV2, nonce });
+}
 export const persistCodexTerminalArtifactV2 = (store: RalphEventStoreV2, artifact: CodexTerminalArtifactV2, nonce: string): Promise<ArtifactPersistenceResultV2<CodexTerminalArtifactV2>> =>
   persistImmutableJsonArtifactV2({ store, ref: codexTerminalRefV2(artifact.attemptId), artifact, validate: validateCodexTerminalArtifactV2, nonce });
 export const persistCodexProjectionManifestV2 = (store: RalphEventStoreV2, artifact: CodexProjectionManifestV2, nonce: string): Promise<ArtifactPersistenceResultV2<CodexProjectionManifestV2>> =>

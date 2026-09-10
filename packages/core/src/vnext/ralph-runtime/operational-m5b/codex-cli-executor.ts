@@ -8,7 +8,6 @@ import { fingerprintWorkspace } from "../fingerprint.js";
 import type { RalphEventStoreV2 } from "../operational-b1/index.js";
 import { defaultProcessIdentityProvider, type ProcessIdentityProvider } from "../operational-b2/process-identity.js";
 import { assertAuthorizedInvocationV2, type AuthorizedInvocationV2 } from "../operational-b3/index.js";
-import { readCorrectionContextV2 } from "../operational-f/correction-context.js";
 import {
   ExecutorRuntimeError,
   ExecutorRuntimeV2,
@@ -122,6 +121,11 @@ import {
   type CodexThreadBindingV2,
 } from "./codex-artifacts.js";
 import { CodexCliInvocationObserverV2 } from "./codex-observer.js";
+import {
+  resolveExactCodexCorrectionContextV2,
+  validateExactCodexCorrectionDescriptorV2,
+} from "./codex-correction.js";
+import { correctionContextRefV2 } from "../operational-f/correction-context.js";
 
 const CODEX_EXECUTOR_SEAL = Symbol("CodexCliExecutorV2");
 const trustedCodexExecutors = new WeakSet<CodexCliExecutorV2>();
@@ -217,11 +221,13 @@ export class CodexCliExecutorV2 extends ExecutorRuntimeV2 {
     const existing = await readCodexInvocationArtifactSetV2(internal.store, attemptId);
     if (existing.dispatchIntent) throw new RalphM5BError("M5B_REDISPATCH_FORBIDDEN");
 
-    // M5-B proves the ordinary Executor only. A CorrectionContext fails here,
-    // before any descriptor, projection or process exists. M5-C will add
-    // Codex correction through another fresh `codex exec`.
-    const correctionContext = await readCorrectionContextV2(internal.store, attemptId);
-    if (correctionContext) throw new RalphM5BError("M5B_CORRECTION_CONTEXT_NOT_SUPPORTED");
+    // M5-C reuses the exact frozen M4-C durable authority. Invalid, stale,
+    // foreign, missing or incomplete correction input fails here, before a
+    // provider descriptor, staging projection or managed `codex exec` exists.
+    const correctionContext = await resolveExactCodexCorrectionContextV2({
+      store: internal.store,
+      authorizedInvocation,
+    });
 
     if (descriptorBinding.executorProfileIdentity !== CODEX_CLI_EXECUTOR_PROFILE_V2) throw new RalphM5BError("M5B_PROFILE_BINDING_INVALID");
     if (workUnit.timeoutPolicyDigest !== internal.timeoutPolicy.policyDigest) throw new RalphM5BError("M5B_TIMEOUT_POLICY_INVALID");
@@ -343,14 +349,17 @@ export class CodexCliExecutorV2 extends ExecutorRuntimeV2 {
       parentEnvironmentPolicyDigest: sha256Canonical(Object.keys(environment).sort()),
       shellEnvironmentPolicyDigest: sha256Canonical({ inherit: "none", set: codexShellEnvironmentPolicyV2() }),
       outputSchemaDigest: sha256(outputSchemaJson),
-      correctionContextSupported: false as const,
+      correctionContextSupported: correctionContext !== undefined,
+      correctionContextRef: correctionContext ? correctionContextRefV2(attemptId) : null,
+      correctionContextDigest: correctionContext?.contextDigest ?? null,
       createdAt: internal.clock(),
     }, "descriptorDigest");
+    await validateExactCodexCorrectionDescriptorV2({ store: internal.store, descriptor });
     await persistCodexProviderDescriptorV2(internal.store, descriptor, internal.nonceFactory());
 
     await persistCodexProjectionManifestV2(internal.store, projection, internal.nonceFactory());
 
-    const prompt = projectWorkUnitToCodexPromptV2(workUnit);
+    const prompt = projectWorkUnitToCodexPromptV2(workUnit, correctionContext);
     const promptArtifact = sealCodexArtifactV2<CodexPromptArtifactV2>({
       schema: RALPH_CODEX_PROMPT_SCHEMA_V2,
       ...binding,
@@ -713,4 +722,5 @@ async function assertPreDispatchDurabilityV2(
     || facts.prompt?.descriptorDigest !== descriptorDigest) {
     throw new RalphM5BError("M5B_PROVIDER_RESULT_INVALID", "M5B_ARTIFACT_INVALID: pre-dispatch artifacts are not durable");
   }
+  if (facts.descriptor) await validateExactCodexCorrectionDescriptorV2({ store, descriptor: facts.descriptor });
 }

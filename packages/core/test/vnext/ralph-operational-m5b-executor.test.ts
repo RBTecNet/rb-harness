@@ -17,6 +17,7 @@ const transport = vi.hoisted(() => ({
   spawns: 0,
   observedCwds: [] as string[],
   observedArgv: [] as string[][],
+  observedPrompts: [] as string[],
   stagingWrites: [] as { readonly path: string; readonly content: string }[],
   stagingDeletes: [] as string[],
   events: undefined as string[] | undefined,
@@ -128,6 +129,7 @@ vi.mock("../../src/vnext/ralph-runtime/operational-m5b/codex-process.js", async 
       transport.runs += 1;
       transport.observedCwds.push(input.cwd);
       transport.observedArgv.push([...input.argv]);
+      transport.observedPrompts.push(input.stdin);
       const host = await defaultProcessIdentityProvider.current();
       const processIdentity = transport.processAbsent
         ? Object.freeze({ ...host, pid: ABSENT_PID, processStartIdentity: `sha256:${"a".repeat(64)}` })
@@ -267,6 +269,7 @@ beforeEach(() => {
   transport.spawns = 0;
   transport.observedCwds = [];
   transport.observedArgv = [];
+  transport.observedPrompts = [];
   transport.stagingWrites = [{ path: "src/status.js", content: STATUS_SOURCE }];
   transport.stagingDeletes = [];
   transport.events = undefined;
@@ -358,6 +361,8 @@ describe("Ralph M5-B — one fresh exec through the frozen Core", () => {
       observedModelState: "UNAVAILABLE",
       observedModel: null,
       correctionContextSupported: false,
+      correctionContextRef: null,
+      correctionContextDigest: null,
     });
     expect(artifacts.threadBinding?.threadId).toBe(transport.threadId);
     expect(artifacts.processReceipt?.processGroupId).toBeGreaterThan(0);
@@ -621,7 +626,7 @@ describe("Ralph M5-B — dispatch ordering, ambiguity and redispatch", () => {
     expect(transport.runs).toBe(1);
   }, 60_000);
 
-  it("refuses a CorrectionContext before any descriptor, projection or process exists", async () => {
+  it("refuses a non-authoritative CorrectionContext before any descriptor, projection or process exists", async () => {
     const current = await fixture();
     const { admitted } = await admitM5BAttemptV2(current);
     const fingerprint = await fingerprintWorkspace(current.projectRoot, current.snapshot.workspacePolicy);
@@ -643,7 +648,7 @@ describe("Ralph M5-B — dispatch ordering, ambiguity and redispatch", () => {
       timeoutPolicy: current.timeoutPolicy,
       stagingBase: current.stagingBase,
     });
-    await expect(executor.invoke(admitted.authorizedInvocation)).rejects.toThrow(/M5B_CORRECTION_CONTEXT_NOT_SUPPORTED/);
+    await expect(executor.invoke(admitted.authorizedInvocation)).rejects.toThrow(/M4C_CORRECTION_FINDING_SET_INCOMPLETE/);
     expect(await readCodexProviderDescriptorV2(current.store, current.attemptId)).toBeUndefined();
     expect((await executor.observe(admitted.authorizedInvocation.descriptor.invocationId)).state).toBe("NOT_INVOKED");
     expect(transport.runs).toBe(0);
