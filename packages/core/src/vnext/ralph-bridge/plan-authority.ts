@@ -8,14 +8,13 @@ import { deriveExecutionDocument } from "../render/execution.js";
 import { executionWithoutLocations, selectReadyExecutionPlan } from "../ralph-fidelity.js";
 import { databaseSchemaUpstreamProjection, databaseSchemaUpstreamProjectionSha256 } from "../progressive-init/database-schema-ir.js";
 import { loadDatabaseSchema } from "../progressive-init/database-schema-store.js";
-import { compileProjectPhasesToSemanticInitProject } from "../progressive-init/project-phases-compiler.js";
+import { validateCompiledProjectPhases } from "../progressive-init/project-phases-compiler.js";
 import { projectPhasesUpstreamProjection, type ProjectPhases, type ProjectPhasesUpstreamProjection } from "../progressive-init/project-phases-ir.js";
 import { loadProjectPhases } from "../progressive-init/project-phases-store.js";
 import { loadProjectDescription } from "../progressive-init/project-description-store.js";
 import { inspectProgressiveRalphReadiness, type ProgressiveRalphReadiness } from "../progressive-init/readiness.js";
 import { userStoriesUpstreamProjection, userStoriesUpstreamProjectionSha256 } from "../progressive-init/user-stories-ir.js";
 import { loadUserStories } from "../progressive-init/user-stories-store.js";
-import { resolveInitProject } from "../resolve.js";
 import { sha256, sha256Canonical } from "../ralph-runtime/hashing.js";
 
 export const RALPH_BRIDGE_AUTHORITY_SCHEMA_V1 = "rb-ralph-progressive-authority/v1" as const;
@@ -76,27 +75,45 @@ export async function loadProgressiveExecutionAuthority(projectRoot: string): Pr
   }
   const parsed = parseExecutionMarkdown(selectedSource);
   const progressive = await loadProgressiveAuthority(root);
-  const compiled = compileProjectPhasesToSemanticInitProject(progressive.upstream, progressive.projectPhases);
-  const resolved = resolveInitProject(compiled, {
-    originalRequest: progressive.originalRequest,
-    runId: "ralph-authority-projection",
-    generatedAt: "2000-01-01T00:00:00.000Z",
-  });
-  if (!resolved.ok) throw new RalphBridgeAuthorityError("RALPH_BRIDGE_PROGRESSIVE_PROJECTION_INVALID");
-  const expected = deriveExecutionDocument(resolved.value);
-  if (JSON.stringify(executionWithoutLocations(parsed)) !== JSON.stringify(executionWithoutLocations(expected))) {
-    throw new RalphBridgeAuthorityError("RALPH_BRIDGE_PLAN_PROGRESSIVE_BINDING_MISMATCH");
+  let compiled: ReturnType<typeof validateCompiledProjectPhases>;
+  try {
+    compiled = validateCompiledProjectPhases(progressive.upstream, progressive.projectPhases, {
+      originalRequest: progressive.originalRequest,
+      runId: "ralph-authority-projection",
+      generatedAt: "2000-01-01T00:00:00.000Z",
+    });
+  } catch (error) {
+    throw new RalphBridgeAuthorityError(
+      "RALPH_BRIDGE_PROGRESSIVE_PROJECTION_INVALID",
+      error instanceof Error ? error.message : String(error),
+    );
   }
+  if (!compiled.ok) {
+    throw new RalphBridgeAuthorityError(
+      "RALPH_BRIDGE_PROGRESSIVE_PROJECTION_INVALID",
+      compiled.findings.map((entry) => `${entry.pointer}: ${entry.invariant} ${entry.message}`).join("; "),
+    );
+  }
+  const expected = deriveExecutionDocument(compiled.model);
+  assertExactProgressivePlanBinding(parsed, expected);
 
   const ownedPathsByTask: Record<string, readonly string[]> = {};
-  let taskIndex = 0;
-  const progressiveTasks = progressive.projectPhases.phases.flatMap((phase) => phase.tasks);
+  const parsedStructure = parsed.phases.map((phase) => ({ phaseId: phase.id, taskIds: phase.tasks.map((task) => task.id) }));
+  const canonicalStructure = compiled.model.phases.map((phase) => ({ phaseId: phase.id, taskIds: phase.tasks.map((task) => task.id) }));
+  if (JSON.stringify(parsedStructure) !== JSON.stringify(canonicalStructure)) {
+    throw new RalphBridgeAuthorityError("RALPH_BRIDGE_TASK_AUTHORITY_MISMATCH");
+  }
+  const canonicalTasks = compiled.model.phases.flatMap((phase) => phase.tasks);
+  const canonicalTasksById = new Map(canonicalTasks.map((task) => [task.id as string, task] as const));
+  if (canonicalTasksById.size !== canonicalTasks.length) {
+    throw new RalphBridgeAuthorityError("RALPH_BRIDGE_TASK_AUTHORITY_MISMATCH");
+  }
   const operationalPlan: ExecutionDocument = {
     ...parsed,
     phases: parsed.phases.map((phase) => ({
       ...phase,
       tasks: phase.tasks.map((task) => {
-        const authorityTask = progressiveTasks[taskIndex++];
+        const authorityTask = canonicalTasksById.get(task.id);
         if (!authorityTask) throw new RalphBridgeAuthorityError("RALPH_BRIDGE_TASK_AUTHORITY_MISMATCH");
         const parsedPaths = taskScopeTokens(task.scope);
         if (JSON.stringify(parsedPaths) !== JSON.stringify(authorityTask.ownedPaths)) {
@@ -136,6 +153,13 @@ export async function loadProgressiveExecutionAuthority(projectRoot: string): Pr
     upstream: progressive.upstream,
     ownedPathsByTask: Object.freeze(ownedPathsByTask),
   });
+}
+
+/** Safety-critical exact binding between persisted READY PHASES and canonical Progressive execution semantics. */
+export function assertExactProgressivePlanBinding(actual: ExecutionDocument, expected: ExecutionDocument): void {
+  if (JSON.stringify(executionWithoutLocations(actual)) !== JSON.stringify(executionWithoutLocations(expected))) {
+    throw new RalphBridgeAuthorityError("RALPH_BRIDGE_PLAN_PROGRESSIVE_BINDING_MISMATCH");
+  }
 }
 
 export function selectExactReadyExecutionPlan(manifest: ArtifactManifest, phasesSource: string): ArtifactRecord {

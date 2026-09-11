@@ -2,6 +2,8 @@ import { appendFile, mkdir, readFile, readdir, rm, symlink, unlink, writeFile } 
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { assertRalphRootCliArgs, harnessCommandSurface } from "../../src/cli-program.js";
+import { parseExecutionMarkdown } from "../../src/execution-contract.js";
+import { assertExactProgressivePlanBinding } from "../../src/vnext/ralph-bridge/plan-authority.js";
 import {
   createIsolatedRalphWorkspace,
   genesisFor,
@@ -34,7 +36,11 @@ import {
 } from "../../src/vnext/ralph-runtime/operational-d/index.js";
 import { ScriptedAuditor, type ScriptedAuditorDecisionV2 } from "../../src/vnext/ralph-runtime/operational-e/index.js";
 import type { AuditPackageV2 } from "../../src/vnext/ralph-runtime/operational-d/index.js";
-import { BRIDGE_FIXTURE_REQUEST, createReadyBridgeFixture } from "./fixtures/progressive-ready-bridge-fixture.js";
+import {
+  BRIDGE_FIXTURE_REQUEST,
+  createReadyBridgeFixture,
+  loadReadyBridgeFixtureProjectPhases,
+} from "./fixtures/progressive-ready-bridge-fixture.js";
 
 const roots: string[] = [];
 
@@ -71,6 +77,41 @@ describe("Progressive READY -> Ralph execution bridge V1", () => {
     expect(initialized.genesisState.taskIds).toEqual(["T001", "T002"]);
     expect(initialized.genesisState.tasks.T002?.dependsOn).toEqual(["T001"]);
     expect(initialized.descriptor.publicationSemantic).toBe("ACCEPTED_TASK_DELTA");
+  }, 30_000);
+
+  it("consumes the canonical P4 execution projection when declarations use non-canonical ordering", async () => {
+    const fixture = await ready({ taskCount: 4, nonCanonicalDeclarationOrder: true });
+    const projectPhases = await loadReadyBridgeFixtureProjectPhases(fixture.root);
+    const rawTasks = projectPhases.phases.flatMap((phase) => phase.tasks);
+    const rawFirst = rawTasks.find((task) => task.key === "write-first")!;
+    const rawFourth = rawTasks.find((task) => task.key === "write-fourth")!;
+    expect(rawFirst.ownedPaths).not.toEqual([...rawFirst.ownedPaths].sort());
+    expect(rawFirst.coverageKeys).not.toEqual([...rawFirst.coverageKeys].sort());
+    expect(rawFourth.dependsOn).not.toEqual([...rawFourth.dependsOn].sort());
+
+    const authority = await loadProgressiveExecutionAuthority(fixture.root);
+    const tasks = authority.operationalPlan.phases.flatMap((phase) => phase.tasks);
+    expect(tasks.map((task) => task.id)).toEqual(["T001", "T002", "T003", "T004"]);
+    expect(tasks.find((task) => task.id === "T001")?.scope).toBe("src/alpha.txt, src/first.txt, src/zeta.txt");
+    expect(authority.ownedPathsByTask.T001).toEqual(["src/alpha.txt", "src/first.txt", "src/zeta.txt"]);
+    expect(tasks.find((task) => task.id === "T004")?.dependsOn).toEqual(["T001", "T002", "T003"]);
+    const covers = tasks.find((task) => task.id === "T001")?.covers.split(", ") ?? [];
+    expect(covers.length).toBeGreaterThan(1);
+    expect(covers).toEqual([...covers].sort());
+  }, 30_000);
+
+  it("retains exact fail-closed Progressive binding for semantic PHASES tampering", async () => {
+    const fixture = await ready({ taskCount: 4, nonCanonicalDeclarationOrder: true });
+    const authority = await loadProgressiveExecutionAuthority(fixture.root);
+    const canonical = parseExecutionMarkdown(authority.selectedPlanSource);
+    const tamperedSource = authority.selectedPlanSource.replace(
+      "Create the first deterministic implementation file for the approved task workflow.",
+      "Create the first altered deterministic implementation file for the approved task workflow.",
+    );
+    expect(tamperedSource).not.toBe(authority.selectedPlanSource);
+    const tampered = parseExecutionMarkdown(tamperedSource);
+    expect(() => assertExactProgressivePlanBinding(tampered, canonical))
+      .toThrow("RALPH_BRIDGE_PLAN_PROGRESSIVE_BINDING_MISMATCH");
   }, 30_000);
 
   it("executes dependencies in plan order, audits exact work units, commits durably, and publishes accepted task deltas", async () => {

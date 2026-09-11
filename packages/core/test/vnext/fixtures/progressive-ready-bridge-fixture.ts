@@ -6,6 +6,7 @@ import { runProgressiveInit } from "../../../src/vnext/progressive-init/coordina
 import { databaseSchemaUpstreamProjection, enumerateStoryPersistenceSubjects } from "../../../src/vnext/progressive-init/database-schema-ir.js";
 import { loadDatabaseSchema } from "../../../src/vnext/progressive-init/database-schema-store.js";
 import { deriveImplementationSubjects, projectPhasesUpstreamProjection, type ProjectPhasesProposalWire, type ProjectPhasesUpstreamProjection } from "../../../src/vnext/progressive-init/project-phases-ir.js";
+import { loadProjectPhases } from "../../../src/vnext/progressive-init/project-phases-store.js";
 import { loadProjectDescription } from "../../../src/vnext/progressive-init/project-description-store.js";
 import { userStoriesUpstreamProjection, userStoriesUpstreamProjectionSha256 } from "../../../src/vnext/progressive-init/user-stories-ir.js";
 import { loadUserStories } from "../../../src/vnext/progressive-init/user-stories-store.js";
@@ -88,6 +89,7 @@ export async function createReadyBridgeFixture(options: {
   readonly taskCount?: 1 | 2 | 4;
   readonly humanValidation?: boolean;
   readonly humanValidationTask?: number;
+  readonly nonCanonicalDeclarationOrder?: boolean;
 } = {}): Promise<ReadyBridgeFixture> {
   const taskCount = options.taskCount ?? 2;
   const root = await mkdtemp(resolve(tmpdir(), "rb-progressive-ralph-bridge-"));
@@ -146,11 +148,21 @@ export async function createReadyBridgeFixture(options: {
     originalRequest: BRIDGE_FIXTURE_REQUEST,
     selectedStage: "project-phases",
     profile,
-    adapter: new FixtureAdapter([projectPhasesPayload(p4, taskCount, options.humanValidationTask ?? (options.humanValidation ? 1 : undefined))]),
+    adapter: new FixtureAdapter([projectPhasesPayload(p4, taskCount, {
+      humanValidationTask: options.humanValidationTask ?? (options.humanValidation ? 1 : undefined),
+      nonCanonicalDeclarationOrder: options.nonCanonicalDeclarationOrder,
+    })]),
     auth,
     interview: { kind: "interactive", answer: async () => "approve" },
   });
   return { root, taskCount };
+}
+
+export async function loadReadyBridgeFixtureProjectPhases(root: string) {
+  const upstream = await currentP4Upstream(root);
+  const loaded = await loadProjectPhases(root, upstream);
+  if (!loaded) throw new Error("missing P4 fixture authority");
+  return loaded.document.value;
 }
 
 async function currentP4Upstream(root: string): Promise<ProjectPhasesUpstreamProjection> {
@@ -209,13 +221,17 @@ function userStoriesPayload() {
   };
 }
 
-function projectPhasesPayload(authority: ProjectPhasesUpstreamProjection, taskCount: 1 | 2 | 4, humanValidationTask?: number): ProjectPhasesProposalWire {
+function projectPhasesPayload(
+  authority: ProjectPhasesUpstreamProjection,
+  taskCount: 1 | 2 | 4,
+  options: { readonly humanValidationTask?: number; readonly nonCanonicalDeclarationOrder?: boolean },
+): ProjectPhasesProposalWire {
   const subjects = deriveImplementationSubjects(authority).map((subject) => subject.key);
   const words = ["first", "second", "third", "fourth"] as const;
   const tasks: Array<ProjectPhasesProposalWire["phases"][number]["tasks"][number]> = [];
   for (let index = 0; index < taskCount; index += 1) {
     const word = words[index]!;
-    const human = humanValidationTask === index + 1;
+    const human = options.humanValidationTask === index + 1;
     tasks.push({
       key: `write-${word}`,
       title: `Write ${word} implementation slice`,
@@ -229,6 +245,18 @@ function projectPhasesPayload(authority: ProjectPhasesUpstreamProjection, taskCo
         : [{ kind: "command", commandKey: "tests" }],
       expectedEvidence: human ? "An exact-bound operator Human decision." : "Passing output from the approved tests command.",
     });
+  }
+  if (options.nonCanonicalDeclarationOrder) {
+    if (tasks.length !== 4 || subjects.length < 2) throw new Error("non-canonical bridge fixture requires four tasks and multiple coverage subjects");
+    tasks[0] = {
+      ...tasks[0]!,
+      ownedPaths: ["src/zeta.txt", "src/alpha.txt", "src/first.txt"],
+      coverageKeys: [...subjects].reverse(),
+    };
+    tasks[3] = {
+      ...tasks[3]!,
+      dependsOn: ["write-third", "write-first", "write-second"],
+    };
   }
   return {
     phases: [{
