@@ -436,7 +436,7 @@ describe("Ralph Operational Core V2 — C EvidenceCapture", () => {
         const { resultDigest: _ignored, ...base } = { ...persisted, [field]: value };
         await writeFile(resultPath, canonicalJson({ ...base, resultDigest: sha256Canonical(base) }));
         await expect(executeAuthorizedInvocationV2({ leasedRun: execution.leasedRun, plan: fixture.document, runtime: execution.runtime, nonceFactory: nonce, eventIdFactory: () => `c-event-${++nonceOrdinal}` }))
-          .rejects.toMatchObject({ code: "B4_RESULT_IMMUTABLE_CONFLICT" });
+          .rejects.toMatchObject({ code: "B4_OBSERVATION_RECEIPT_INVALID" });
         await expect(captureEvidenceV2({ leasedRun: execution.leasedRun, plan: fixture.document, observation: execution.executed.observation, nonceFactory: nonce, eventIdFactory: () => `c-event-${++nonceOrdinal}` }))
           .rejects.toMatchObject({ code: "C_RESULT_ARTIFACT_REQUIRED" });
         const events = (await fixture.store.inspect()).events;

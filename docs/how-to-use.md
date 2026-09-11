@@ -1,8 +1,8 @@
 # How to Use RB Harness
 
-RB Harness generates provider-neutral project documentation. It does not
-implement application code: its output can be reviewed and then handed to any
-capable coding CLI/model or consumed by RB Ralph.
+RB Harness generates provider-neutral project documentation. Once Progressive
+Init is fully READY, its Ralph bridge can execute that frozen authority in an
+isolated workspace and publish only accepted implementation deltas.
 
 ## Before the first use
 
@@ -36,6 +36,16 @@ The direct commands are:
 | Whole-product audit | `rb-harness review` |
 | Evolve existing behavior | `rb-harness evolve` |
 | Feature, fix, refactor, or migration | `rb-harness plan` |
+| Execute a Progressive READY project | `rb-harness --ralph --project <root>` |
+
+`--ralph` never runs Init, repairs stale authority, or accepts a PHASES path.
+Use `rb-harness status --project <root>` to see Progressive readiness and the
+latest Ralph run before execution. Non-complete Ralph outcomes use distinct
+`FAILED`, `BLOCKED`, `NEEDS_HUMAN`, or `INCOMPLETE_RESUMABLE` statuses and print
+the durable evidence path. After performing a printed Human check, continue
+the same run with `--human-decision pass` or `--human-decision fail`; provider
+output cannot supply that evidence. See [the V1 bridge contract](ralph-progressive-bridge-v1.md)
+for identity, isolation, publication, and resume semantics.
 
 The former Codex skills and Claude namespaced commands remain legacy adapters
 for compatibility. They are not required by the executable and should not be

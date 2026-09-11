@@ -41,6 +41,7 @@ export const ADMISSION_ERROR_CODES = [
   "B3_DURABILITY_UNKNOWN_REQUIRES_INSPECTION",
   "B3_LEASE_REQUIRED",
   "B3_AUTHORIZED_INVOCATION_REQUIRED",
+  "B3_POST_EXECUTOR_OBSERVATION_AUTHORIZATION_REQUIRED",
 ] as const;
 export type AdmissionErrorCode = typeof ADMISSION_ERROR_CODES[number];
 
@@ -106,6 +107,74 @@ export class AuthorizedInvocationV2 {
   toJSON(): Readonly<Record<string, unknown>> {
     return { kind: this.kind, descriptor: this.descriptor, workUnit: this.workUnit };
   }
+}
+
+export const POST_EXECUTOR_OBSERVATION_STAGES_V2 = [
+  "POST_EXECUTOR_CAPTURE",
+  "EVIDENCE_CAPTURING",
+  "VALIDATING",
+  "AWAITING_HUMAN",
+  "AWAITING_AUDIT",
+  "AUDITING",
+] as const;
+export type PostExecutorObservationStageV2 = typeof POST_EXECUTOR_OBSERVATION_STAGES_V2[number];
+
+export interface PostExecutorObservationAuthorizationRecordV2 {
+  readonly kind: "POST_EXECUTOR_OBSERVATION_AUTHORIZATION";
+  readonly runId: string;
+  readonly phaseId: string;
+  readonly taskId: string;
+  readonly attemptId: string;
+  readonly invocationId: string;
+  readonly stage: PostExecutorObservationStageV2;
+  readonly planIdentity: string;
+  readonly planDigest: string;
+  readonly workUnitId: string;
+  readonly workUnitDigest: string;
+  readonly snapshotDigest: string;
+}
+
+const postExecutorObservationAuthorizationInternals = new WeakMap<PostExecutorObservationAuthorizationV2, PostExecutorObservationAuthorizationRecordV2>();
+const POST_EXECUTOR_OBSERVATION_AUTHORIZATION_SEAL = Symbol("PostExecutorObservationAuthorizationV2");
+
+/**
+ * Observation-only authority for one already-finished invocation. It is
+ * deliberately unrelated to AuthorizedInvocationV2 and carries no invoke()
+ * capability.
+ */
+export class PostExecutorObservationAuthorizationV2 {
+  readonly kind = "POST_EXECUTOR_OBSERVATION_AUTHORIZATION" as const;
+
+  constructor(record: PostExecutorObservationAuthorizationRecordV2, seal: symbol) {
+    if (seal !== POST_EXECUTOR_OBSERVATION_AUTHORIZATION_SEAL) {
+      throw new RalphAdmissionError("B3_POST_EXECUTOR_OBSERVATION_AUTHORIZATION_REQUIRED");
+    }
+    postExecutorObservationAuthorizationInternals.set(this, freezeDeep(record));
+    Object.freeze(this);
+  }
+
+  get record(): PostExecutorObservationAuthorizationRecordV2 {
+    return requirePostExecutorObservationAuthorization(this);
+  }
+}
+
+export function isPostExecutorObservationAuthorizationV2(value: unknown): value is PostExecutorObservationAuthorizationV2 {
+  return typeof value === "object" && value !== null
+    && postExecutorObservationAuthorizationInternals.has(value as PostExecutorObservationAuthorizationV2);
+}
+
+export function assertPostExecutorObservationAuthorizationV2(
+  value: unknown,
+): asserts value is PostExecutorObservationAuthorizationV2 {
+  if (!isPostExecutorObservationAuthorizationV2(value)) {
+    throw new RalphAdmissionError("B3_POST_EXECUTOR_OBSERVATION_AUTHORIZATION_REQUIRED");
+  }
+}
+
+export function postExecutorObservationAuthorizationRecordV2(
+  value: PostExecutorObservationAuthorizationV2,
+): PostExecutorObservationAuthorizationRecordV2 {
+  return requirePostExecutorObservationAuthorization(value);
 }
 
 export function isAuthorizedInvocationV2(value: unknown): value is AuthorizedInvocationV2 {
@@ -469,6 +538,77 @@ export interface ReopenedAuthorizedInvocationV2 {
   readonly authorizedInvocation: AuthorizedInvocationV2;
 }
 
+export interface AuthorizePostExecutorObservationV2Input {
+  readonly leasedRun: LeasedRunV2;
+  readonly plan: ExecutionDocument;
+  readonly attemptId?: string;
+  readonly planIdentity?: string;
+  readonly planDigest?: string;
+}
+
+/**
+ * Revalidates durable B3 authority for observation recovery only. This never
+ * constructs or returns AuthorizedInvocationV2, and it is unavailable while
+ * physical executor dispatch remains legal.
+ */
+export async function authorizePostExecutorObservationV2(
+  input: AuthorizePostExecutorObservationV2Input,
+): Promise<PostExecutorObservationAuthorizationV2> {
+  assertLeasedRunV2(input.leasedRun);
+  if (!input.plan) throw new RalphAdmissionError("B3_PLAN_IDENTITY_MISMATCH", "B3_PLAN_IDENTITY_MISMATCH: plan is required");
+  await refreshLeasedRunV2(input.leasedRun);
+  const attempt = input.attemptId === undefined ? onlyOpenAttempt(input.leasedRun.state) : input.leasedRun.state.attempts[input.attemptId];
+  if (!attempt || attempt.disposition !== "OPEN"
+    || !POST_EXECUTOR_OBSERVATION_STAGES_V2.includes(attempt.stage as PostExecutorObservationStageV2)
+    || !attempt.invocation || !attempt.executorFinished
+    || attempt.executorFinished.invocationId !== attempt.invocation.invocationId) {
+    throw new RalphAdmissionError(
+      "B3_POST_EXECUTOR_OBSERVATION_AUTHORIZATION_REQUIRED",
+      "B3_POST_EXECUTOR_OBSERVATION_AUTHORIZATION_REQUIRED: exact durable post-executor state is required",
+    );
+  }
+  const phase = input.plan.phases.find((candidate) => candidate.id === attempt.phaseId);
+  const task = phase?.tasks.find((candidate) => candidate.id === attempt.taskId);
+  if (!phase || !task) throw new RalphAdmissionError("B3_ATTEMPT_RECONCILIATION_REQUIRED");
+  const planIdentity = input.planIdentity ?? input.plan.artifactId;
+  const planDigest = sha256Canonical(input.plan);
+  if (input.planDigest !== undefined && input.planDigest !== planDigest) throw new RalphAdmissionError("B3_PLAN_IDENTITY_MISMATCH");
+  assertPlanIdentity(input.leasedRun, input.plan, planIdentity, planDigest);
+  const binding: ArtifactBindingInputV2 = {
+    runId: input.leasedRun.runId,
+    phase,
+    task,
+    attempt,
+    planIdentity,
+    planDigest,
+    snapshot: input.leasedRun.snapshot,
+  };
+  const runSnapshotDigest = sha256Canonical(input.leasedRun.snapshot);
+  const expectedWorkUnit = createWorkUnitV2(binding);
+  const artifacts = await loadAndValidateAuthorizedArtifacts(input.leasedRun, binding, expectedWorkUnit);
+  if (artifacts.invocation.invocationId !== attempt.invocation.invocationId
+    || artifacts.workUnit.workUnitId !== artifacts.invocation.workUnitId
+    || artifacts.workUnit.workUnitDigest !== artifacts.invocation.workUnitDigest) {
+    throw new RalphAdmissionError("B3_ARTIFACT_RECONCILIATION_REQUIRED");
+  }
+  assertRunSnapshotUnchanged(input.leasedRun, runSnapshotDigest);
+  await revalidateLeaseOwnershipV2(input.leasedRun);
+  return new PostExecutorObservationAuthorizationV2({
+    kind: "POST_EXECUTOR_OBSERVATION_AUTHORIZATION",
+    runId: input.leasedRun.runId,
+    phaseId: attempt.phaseId,
+    taskId: attempt.taskId,
+    attemptId: attempt.attemptId,
+    invocationId: attempt.invocation.invocationId,
+    stage: attempt.stage as PostExecutorObservationStageV2,
+    planIdentity,
+    planDigest,
+    workUnitId: artifacts.workUnit.workUnitId,
+    workUnitDigest: artifacts.workUnit.workUnitDigest,
+    snapshotDigest: runSnapshotDigest,
+  }, POST_EXECUTOR_OBSERVATION_AUTHORIZATION_SEAL);
+}
+
 /**
  * Rehydrates a durable B3 authorization without re-running scheduling and
  * without releasing the caller's lease.  B4 uses this to cross the executor
@@ -791,6 +931,14 @@ function requireAuthorizedInvocationInternals(value: AuthorizedInvocationV2): {
 } {
   const internal = authorizedInvocationInternals.get(value);
   if (!internal) throw new RalphAdmissionError("B3_AUTHORIZED_INVOCATION_REQUIRED");
+  return internal;
+}
+
+function requirePostExecutorObservationAuthorization(
+  value: PostExecutorObservationAuthorizationV2,
+): PostExecutorObservationAuthorizationRecordV2 {
+  const internal = postExecutorObservationAuthorizationInternals.get(value);
+  if (!internal) throw new RalphAdmissionError("B3_POST_EXECUTOR_OBSERVATION_AUTHORIZATION_REQUIRED");
   return internal;
 }
 

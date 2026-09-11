@@ -51,8 +51,13 @@ import {
 import { createValidationSetV2, persistValidationRunV2, persistValidationSetV2, readValidationDiagnosticsV2, readValidationRunV2, readValidationSetV2, readAuditPackageV2 } from "../../src/vnext/ralph-runtime/operational-d/artifacts.js";
 import {
   ScriptedHumanValidationAuthorityV2,
+  OperatorHumanValidationAuthorityV2,
+  createHumanValidationRequestV2,
+  createOperatorHumanValidationAuthorityV2,
   humanValidationRequestRefV2,
   isTrustedHumanValidationAuthorityV2,
+  obtainTrustedHumanValidationDecisionV2,
+  persistTrustedHumanValidationDecisionV2,
   readHumanValidationDecisionV2,
 } from "../../src/vnext/ralph-runtime/operational-d/human.js";
 import { createWorkspacePolicy, fingerprintWorkspace } from "../../src/vnext/ralph-runtime/fingerprint.js";
@@ -278,7 +283,64 @@ describe("Ralph Operational Core V2 — D Validation", () => {
       expect(events.find((candidate) => candidate.eventType === "run.hold-cleared")?.payload.proofRef).toBe(humanValidationRequestRefV2(value.store.runId, first.attempt.attemptId, spec.validationSpecId));
       expect(names).not.toContain("attempt.closed");
     } finally { await rm(value.root, { recursive: true, force: true }); }
-  });
+  }, 30_000);
+
+  it("binds nominal OPERATOR_HUMAN authority to one exact request and resumes from a durable decision without asking again", async () => {
+    const value = await fixture(["human: check keyboard and touch flows"]);
+    try {
+      const first = await runD(value);
+      expect(first.kind).toBe("HUMAN_REQUIRED");
+      if (first.kind !== "HUMAN_REQUIRED") throw new Error("Human hold was not reached");
+      const spec = first.attempt.validationSpecs[0]!;
+      const request = createHumanValidationRequestV2({
+        runId: value.store.runId,
+        phaseId: first.attempt.phaseId,
+        taskId: first.attempt.taskId,
+        attemptId: first.attempt.attemptId,
+        validationSpecId: spec.validationSpecId,
+        validationSpecDigest: spec.digest,
+      });
+      const authority = createOperatorHumanValidationAuthorityV2({
+        authorityId: "operator-d-exact",
+        request,
+        decision: "PASS",
+        decidedAt: "2026-09-06T07:00:06.000Z",
+      });
+      expect(isTrustedHumanValidationAuthorityV2(authority)).toBe(true);
+      expect(authority.identity).toMatchObject({ kind: "OPERATOR_HUMAN", authorityId: "operator-d-exact", requestDigest: sha256Canonical(request) });
+      expect(isTrustedHumanValidationAuthorityV2({ identity: authority.identity, decide: authority.decide.bind(authority) })).toBe(false);
+      expect(isTrustedHumanValidationAuthorityV2(JSON.parse(JSON.stringify(authority)))).toBe(false);
+      expect(() => new OperatorHumanValidationAuthorityV2({ authorityId: "provider-lookalike", request, decision: "PASS", decidedAt: "2026-09-06T07:00:06.000Z" }, {}))
+        .toThrow("D_HUMAN_AUTHORITY_TRUST_REQUIRED");
+      expect(isTrustedHumanValidationAuthorityV2(Object.create(OperatorHumanValidationAuthorityV2.prototype))).toBe(false);
+      const differentRequest = createHumanValidationRequestV2({
+        runId: request.runId,
+        phaseId: request.phaseId,
+        taskId: request.taskId,
+        attemptId: request.attemptId,
+        validationSpecId: request.validationSpecId,
+        validationSpecDigest: sha256("different-spec"),
+      });
+      await expect(obtainTrustedHumanValidationDecisionV2(authority, differentRequest))
+        .rejects.toThrow("D_HUMAN_AUTHORITY_REQUEST_MISMATCH");
+      expect(await readHumanValidationDecisionV2(value.store, request.attemptId, request.validationSpecId)).toBeUndefined();
+
+      // Persisting the trusted decision models a crash before hold clearing.
+      const decision = await obtainTrustedHumanValidationDecisionV2(authority, request);
+      await persistTrustedHumanValidationDecisionV2(value.store, decision, `d-${++nonceOrdinal}`);
+      await expect(persistTrustedHumanValidationDecisionV2(value.store, JSON.parse(JSON.stringify(decision)), `d-${++nonceOrdinal}`))
+        .rejects.toThrow("D_HUMAN_DECISION_TRUST_REQUIRED");
+      const resumed = await runD(value);
+      expect(resumed.kind).toBe("VALIDATION_READY_FOR_AUDIT");
+      expect(resumed.attempt.attemptId).toBe(first.attempt.attemptId);
+      const persisted = await readHumanValidationDecisionV2(value.store, request.attemptId, request.validationSpecId);
+      expect(persisted).toMatchObject({ decision: "PASS", authority: { kind: "OPERATOR_HUMAN", requestDigest: sha256Canonical(request) } });
+      const events = (await value.store.inspect()).events;
+      expect(events.filter((event) => event.eventType === "attempt.human-required")).toHaveLength(1);
+      expect(events.filter((event) => event.eventType === "run.hold-cleared")).toHaveLength(1);
+      expect(events.filter((event) => event.eventType === "validation.completed")).toHaveLength(1);
+    } finally { await rm(value.root, { recursive: true, force: true }); }
+  }, 30_000);
 
   it("rejects a forged Human PASS and accepts genuine nominal PASS/FAIL controls", async () => {
     const forged = await fixture(["human: operator decision"]);
@@ -335,7 +397,7 @@ describe("Ralph Operational Core V2 — D Validation", () => {
         expect(resumed.attempt.attemptId).toBe(first.attempt.attemptId);
       } finally { await rm(genuine.root, { recursive: true, force: true }); }
     }
-  });
+  }, 30_000);
 
   it("retries infrastructure failure on the same Attempt with a new ValidationRun and never invokes Executor", async () => {
     const value = await fixture(["`test -f src/a.ts`"], undefined, false, { maxTaskAttemptsPerTask: 4, validationInfrastructureRetryLimit: 1 });

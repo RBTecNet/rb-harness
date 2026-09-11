@@ -66,7 +66,9 @@ describe("public CLI compatibility", () => {
     expect(current["rb-harness provider list"]).toBeDefined();
     expect(current["rb-harness provider test"]).toBeDefined();
     expect(current["rb-harness contract validate"]).toEqual(expect.arrayContaining(["--project", "--json"]));
-    expect(current["rb-harness"]).toEqual(expect.arrayContaining(["--init", "--dashboard", "--login", "--list", "--splash", "--no-splash", "--ver", "--version"]));
+    expect(current["rb-harness"]).toEqual(expect.arrayContaining(["--init", "--ralph", "--human-decision", "--dashboard", "--login", "--list", "--splash", "--no-splash", "--ver", "--version"]));
+    expect(current["rb-harness"]).not.toEqual(expect.arrayContaining(["--project", "--json"]));
+    expect(current["rb-harness artifacts verify"]).toEqual(expect.arrayContaining(["--project", "--json"]));
     expect(current["rb-harness resume"]).toEqual(expect.arrayContaining(["--dashboard", "--answers", "--questions"]));
     expect(current["rb-harness vnext conformance"]).toEqual(expect.arrayContaining(["--record", "--verify-runtime-model", "--credential"]));
   });

@@ -1,9 +1,11 @@
 {
   "rb-harness": [
     "--dashboard",
+    "--human-decision",
     "--init",
     "--login",
     "--no-splash",
+    "--ralph",
     "--splash",
     "--ver",
     "--version"

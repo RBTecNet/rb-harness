@@ -86,6 +86,12 @@ import { inspectProgressiveRalphReadiness } from "./vnext/progressive-init/readi
 import { verifyManagedCodexRuntime } from "./managed-codex-runtime.js";
 import { configureCodexRuntimeVerifier } from "./vnext/providers/openai/codex/managed-runtime.js";
 import { CODEX_EXTERNAL_LOGIN_PROVIDER } from "./vnext/providers/openai/codex/login.js";
+import {
+  formatRalphBridgeResultV1,
+  inspectRalphBridgeStatusV1,
+  loadProgressiveExecutionAuthority,
+  runProgressiveRalphBridgeV1,
+} from "./vnext/ralph-bridge/index.js";
 
 configureCodexRuntimeVerifier({ verify: verifyManagedCodexRuntime });
 
@@ -229,6 +235,8 @@ program
   .option("--login", "configure a provider credential interactively; combine with --list for safe metadata")
   .option("--list", "with --login, list credential metadata without decrypting or displaying secrets")
   .option("--init", "select Init; selector-only use opens the interactive Init wizard")
+  .option("--ralph", "execute the one existing Progressive READY plan through Ralph")
+  .option("--human-decision <pass|fail>", "continue the same Ralph run with an explicit operator Human decision")
   .option("--dashboard", "enable dashboard presentation for the selected operation")
   .option("--splash", "play the RB Harness capybara splash and exit")
   .option("--no-splash", "skip the launch splash")
@@ -238,13 +246,23 @@ program
     "Standalone examples:",
     "  rb-harness                         Start the interactive wizard",
     "  rb-harness --init                  Run Progressive Init P1→P4 interactively",
+    "  rb-harness --ralph --project .     Execute the current Progressive READY plan",
     "  rb-harness init --profile anthropic:claude-code-cli:claude-opus-5 --project . \"Build an inventory system\"",
     "  rb-harness plan --file change.md --provider codex --model gpt-5.6-sol --effort high",
     "  rb-harness review --project . --provider claude --model opus --output .rb",
     "  rb-harness provider test          Test a configured API through the guided wizard",
     "  rb-harness artifacts verify       Verify whether generated artifacts are safe for Ralph",
     "  rb-harness status --project .     Summarize existing artifacts and resumable runs",
-  ].join("\n"));
+    "",
+    "Ralph options (valid only with --ralph):",
+    "  --project <path>                  existing Progressive READY project (required)",
+    "  --human-decision <pass|fail>      continue the same run's pending Human validation",
+    "  --json                            emit the Ralph result as JSON",
+  ].join("\n"))
+  .action(async (options: { ralph?: boolean }) => {
+    if (options.ralph) throw new Error("RALPH_CLI_INTERNAL_ROUTING: --ralph must be handled by the dedicated root front door");
+    throw new Error("no root operation was selected");
+  });
 
 const contract = program.command("contract").description("Validate RB execution documents");
 contract
@@ -884,10 +902,23 @@ program
     const projectRoot = resolve(options.project);
     const inventory = await inspectProjectInventory(projectRoot, options.output);
     const runs = await listRunStates(projectRoot);
-    if (options.json) process.stdout.write(`${JSON.stringify({ inventory, runs }, null, 2)}\n`);
+    const readiness = await inspectProgressiveRalphReadiness(projectRoot).catch((error) => ({ ready: false, reasons: [error instanceof Error ? error.message : String(error)], stages: [], closureStatus: undefined }));
+    const selectedPlan = readiness.ready
+      ? await loadProgressiveExecutionAuthority(projectRoot).then((authority) => ({ id: authority.selectedPlan.id, path: authority.selectedPlan.path, sha256: authority.selectedPlan.sha256 })).catch(() => undefined)
+      : undefined;
+    const ralph = await inspectRalphBridgeStatusV1(projectRoot);
+    const progressive = { status: readiness.ready ? "READY" as const : "NOT READY" as const, closureStatus: readiness.closureStatus, reasons: readiness.reasons, selectedPlan };
+    if (options.json) process.stdout.write(`${JSON.stringify({ inventory, runs, progressive, ralph }, null, 2)}\n`);
     else {
       process.stdout.write(`${formatProjectInventory(inventory)}\n\nGerações do Harness: ${runs.length}\n`);
       for (const state of runs.slice(-20)) process.stdout.write(`  ${state.id}\t${state.workflow}\t${state.status}\n`);
+      process.stdout.write(`\nProgressive: ${progressive.status}${progressive.closureStatus ? ` (${progressive.closureStatus})` : ""}\n`);
+      if (selectedPlan) process.stdout.write(`Plano READY: ${selectedPlan.id} (${selectedPlan.path}, ${selectedPlan.sha256})\n`);
+      process.stdout.write(`Ralph: ${ralph.state}${ralph.latestRunId ? ` — ${ralph.latestRunId} / ${ralph.latestStatus}` : ""}\n`);
+      if (ralph.pendingHuman) {
+        process.stdout.write(`Human pendente: ${ralph.pendingHuman.taskId} / ${ralph.pendingHuman.validationSpecId}\n`);
+        process.stdout.write(`Instrução: ${ralph.pendingHuman.instruction}\n`);
+      }
     }
   });
 
@@ -1024,6 +1055,17 @@ artifacts
 
 export async function runHarnessCli(): Promise<void> {
   const args = process.argv.slice(2);
+  if (args.includes("--ralph")) {
+    const input = parseRalphRootCliArgs(args);
+    if (input.help) {
+      program.outputHelp();
+      return;
+    }
+    const result = await runProgressiveRalphBridgeV1(resolve(input.project), {}, input.humanDecision ? { humanDecision: input.humanDecision } : {});
+    process.stdout.write(input.json ? `${JSON.stringify(result, null, 2)}\n` : `${formatRalphBridgeResultV1(result)}\n`);
+    if (result.status !== "COMPLETE") process.exitCode = result.status === "NEEDS_HUMAN" || result.status === "INCOMPLETE_RESUMABLE" ? 2 : 1;
+    return;
+  }
   if (args.includes("--ver")) {
     process.stdout.write(`${HARNESS_VERSION}\n`);
     return;
@@ -1060,6 +1102,48 @@ export async function runHarnessCli(): Promise<void> {
       : "no operation was provided and the terminal is not interactive; use a direct command such as rb-harness init --help");
   }
   await program.parseAsync(process.argv);
+}
+
+/** `--ralph` is a root operation, never a modifier for another workflow. */
+export function assertRalphRootCliArgs(args: readonly string[]): void {
+  parseRalphRootCliArgs(args);
+}
+
+function parseRalphRootCliArgs(args: readonly string[]): { project: string; json: boolean; help: boolean; humanDecision?: "PASS" | "FAIL" } {
+  let project: string | undefined;
+  let json = false;
+  let help = false;
+  let humanDecision: "PASS" | "FAIL" | undefined;
+  for (let index = 0; index < args.length; index += 1) {
+    const value = args[index]!;
+    if (["--ralph", "--no-splash"].includes(value)) continue;
+    if (value === "--json") {
+      json = true;
+      continue;
+    }
+    if (value === "--help") {
+      help = true;
+      continue;
+    }
+    if (value === "--project") {
+      if (!args[index + 1]) throw new Error("RALPH_CLI_PROJECT_REQUIRED: --project requires a path");
+      if (project !== undefined) throw new Error("RALPH_CLI_MODE_CONFLICT: --project may be provided only once with --ralph");
+      project = args[index + 1]!;
+      index += 1;
+      continue;
+    }
+    if (value === "--human-decision") {
+      const decision = args[index + 1];
+      if (decision !== "pass" && decision !== "fail") throw new Error("RALPH_CLI_HUMAN_DECISION_INVALID: --human-decision requires pass or fail");
+      if (humanDecision !== undefined) throw new Error("RALPH_CLI_MODE_CONFLICT: --human-decision may be provided only once with --ralph");
+      humanDecision = decision === "pass" ? "PASS" : "FAIL";
+      index += 1;
+      continue;
+    }
+    throw new Error(`RALPH_CLI_MODE_CONFLICT: --ralph cannot be combined with ${value}`);
+  }
+  if (!help && project === undefined) throw new Error("RALPH_CLI_PROJECT_REQUIRED: --ralph requires --project <path>");
+  return { project: project ?? ".", json, help, ...(humanDecision ? { humanDecision } : {}) };
 }
 
 /**

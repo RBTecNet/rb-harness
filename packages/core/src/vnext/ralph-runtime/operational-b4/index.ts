@@ -9,6 +9,12 @@ export {
   isNotInvokedProofV2,
   assertNotInvokedProofV2,
   deriveNotInvokedProofV2,
+  EXECUTOR_OBSERVATION_RECEIPT_SCHEMA_V2,
+  executorObservationReceiptRefV2,
+  validateExecutorObservationReceiptV2,
+  persistTrustedExecutorObservationReceiptV2,
+  readExecutorObservationReceiptV2,
+  rehydrateTrustedExecutorObservationV2,
   executeAuthorizedInvocationV2,
   runAuthorizedInvocationV2,
   executeScriptedInvocationV2,
@@ -17,6 +23,7 @@ export type {
   B4ExecutionErrorCode,
   ExecuteAuthorizedInvocationV2Input,
   ExecuteAuthorizedInvocationV2Result,
+  ExecutorObservationReceiptV2,
 } from "./execution.js";
 export * from "./executor-runtime.js";
 export * from "./invocation-result.js";

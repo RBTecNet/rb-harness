@@ -112,7 +112,7 @@ import {
   readHumanValidationDecisionV2,
   validateHumanValidationDecisionV2,
   type HumanValidationDecisionV2,
-  type ScriptedHumanValidationAuthorityV2,
+  type TrustedHumanValidationAuthorityV2,
 } from "./human.js";
 
 export const D_VALIDATION_ERROR_CODES = [
@@ -160,8 +160,8 @@ export interface ValidateAttemptV2Input extends ValidationRunnerOptionsV2 {
   readonly executorObservation?: TrustedExecutorObservationV2;
   /** Alias retained for callers that name the B4 fact `observation`. */
   readonly observation?: TrustedExecutorObservationV2;
-  /** M3-only nominal Human authority. Plain decision records are never authority. */
-  readonly humanAuthority?: ScriptedHumanValidationAuthorityV2;
+  /** Nominal Core Human authority. Plain decision records are never authority. */
+  readonly humanAuthority?: TrustedHumanValidationAuthorityV2;
   /** Cancellation is an infrastructure fact for COMMAND validation only. */
   readonly validationSignal?: AbortSignal;
   readonly workspaceFingerprintFileSystem?: import("../fingerprint.js").WorkspaceFingerprintFileSystem;
@@ -719,9 +719,6 @@ async function maybeMaterializeHumanDecision(
     attempt = input.leasedRun.state.attempts[attempt.attemptId] ?? attempt;
   }
   if (attempt.stage === "AWAITING_HUMAN") {
-    if (!input.humanAuthority) return { kind: "HUMAN_REQUIRED", attempt };
-    try { assertTrustedHumanValidationAuthorityV2(input.humanAuthority); }
-    catch (error) { throw new RalphDValidationError("D_HUMAN_DECISION_BINDING_INVALID", "D_HUMAN_AUTHORITY_TRUST_REQUIRED", error); }
     const request = createHumanValidationRequestV2({
       runId: input.leasedRun.runId,
       phaseId: attempt.phaseId,
@@ -730,8 +727,16 @@ async function maybeMaterializeHumanDecision(
       validationSpecId: spec.validationSpecId,
       validationSpecDigest: spec.digest,
     });
-    const trustedDecision = await obtainTrustedHumanValidationDecisionV2(input.humanAuthority, request);
-    await persistTrustedHumanValidationDecisionV2(input.leasedRun.store, trustedDecision, nonceFactory());
+    const existingDecision = await readHumanValidationDecisionV2(input.leasedRun.store, attempt.attemptId, spec.validationSpecId);
+    if (existingDecision) {
+      validateHumanDecision(existingDecision, input.leasedRun.runId, attempt, spec);
+    } else {
+      if (!input.humanAuthority) return { kind: "HUMAN_REQUIRED", attempt };
+      try { assertTrustedHumanValidationAuthorityV2(input.humanAuthority); }
+      catch (error) { throw new RalphDValidationError("D_HUMAN_DECISION_BINDING_INVALID", "D_HUMAN_AUTHORITY_TRUST_REQUIRED", error); }
+      const trustedDecision = await obtainTrustedHumanValidationDecisionV2(input.humanAuthority, request);
+      await persistTrustedHumanValidationDecisionV2(input.leasedRun.store, trustedDecision, nonceFactory());
+    }
     await commitHumanHoldClear(input.leasedRun, attempt, spec, clock, nonceFactory, eventIdFactory);
   }
   const decision = await readHumanValidationDecisionV2(input.leasedRun.store, attempt.attemptId, spec.validationSpecId);

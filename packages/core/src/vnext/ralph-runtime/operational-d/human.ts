@@ -29,11 +29,22 @@ export interface ScriptedHumanDecisionEnvelopeV2 {
   readonly decidedAt: string;
 }
 
-export interface HumanValidationAuthorityIdentityV2 {
+export interface ScriptedHumanValidationAuthorityIdentityV2 {
   readonly kind: "SCRIPTED_HUMAN";
   readonly authorityId: string;
   readonly profileDigest: string;
 }
+
+export interface OperatorHumanValidationAuthorityIdentityV2 {
+  readonly kind: "OPERATOR_HUMAN";
+  readonly authorityId: string;
+  readonly requestDigest: string;
+  readonly profileDigest: string;
+}
+
+export type HumanValidationAuthorityIdentityV2 =
+  | ScriptedHumanValidationAuthorityIdentityV2
+  | OperatorHumanValidationAuthorityIdentityV2;
 
 /** Durable observation created only after Core invokes a nominal Human authority. */
 export interface HumanValidationDecisionV2 extends HumanValidationRequestV2 {
@@ -51,15 +62,30 @@ export interface ScriptedHumanValidationAuthorityOptionsV2 {
   readonly clock?: () => string;
 }
 
+export interface OperatorHumanValidationAuthorityOptionsV2 {
+  readonly authorityId: string;
+  readonly request: HumanValidationRequestV2;
+  readonly decision: HumanValidationDecisionValueV2;
+  readonly decidedAt: string;
+}
+
 const trustedAuthorities = new WeakSet<object>();
-const authorityState = new WeakMap<object, Readonly<{
-  readonly identity: HumanValidationAuthorityIdentityV2;
+type HumanAuthorityStateV2 = Readonly<{
+  readonly kind: "SCRIPTED_HUMAN";
+  readonly identity: ScriptedHumanValidationAuthorityIdentityV2;
   readonly defaultDecision?: HumanValidationDecisionValueV2;
   readonly decide?: ScriptedHumanValidationAuthorityOptionsV2["decide"];
   readonly clock: () => string;
-}>>();
+}> | Readonly<{
+  readonly kind: "OPERATOR_HUMAN";
+  readonly identity: OperatorHumanValidationAuthorityIdentityV2;
+  readonly request: HumanValidationRequestV2;
+  readonly envelope: ScriptedHumanDecisionEnvelopeV2;
+}>;
+const authorityState = new WeakMap<object, HumanAuthorityStateV2>();
 const trustedDecisions = new WeakSet<object>();
 const HUMAN_AUTHORITY_CONSTRUCTION_SEAL = Object.freeze({ kind: "scripted-human-authority-construction" });
+const OPERATOR_HUMAN_AUTHORITY_CONSTRUCTION_SEAL = Object.freeze({ kind: "operator-human-authority-construction" });
 
 /** M3-only nominal Human trust root. It cannot append events or write artifacts. */
 export class ScriptedHumanValidationAuthorityV2 {
@@ -71,6 +97,7 @@ export class ScriptedHumanValidationAuthorityV2 {
     const identityCore = { kind: "SCRIPTED_HUMAN" as const, authorityId: options.authorityId };
     const identity = Object.freeze({ ...identityCore, profileDigest: sha256Canonical(identityCore) });
     authorityState.set(this, Object.freeze({
+      kind: "SCRIPTED_HUMAN" as const,
       identity,
       ...(options.defaultDecision === undefined ? {} : { defaultDecision: options.defaultDecision }),
       ...(options.decide === undefined ? {} : { decide: options.decide }),
@@ -80,13 +107,16 @@ export class ScriptedHumanValidationAuthorityV2 {
     Object.freeze(this);
   }
 
-  get identity(): HumanValidationAuthorityIdentityV2 {
-    return requireAuthorityState(this).identity;
+  get identity(): ScriptedHumanValidationAuthorityIdentityV2 {
+    const state = requireAuthorityState(this);
+    if (state.kind !== "SCRIPTED_HUMAN") throw humanError("D_HUMAN_AUTHORITY_TRUST_REQUIRED");
+    return state.identity;
   }
 
   async decide(request: HumanValidationRequestV2): Promise<ScriptedHumanDecisionEnvelopeV2> {
     validateHumanValidationRequestV2(request);
     const state = requireAuthorityState(this);
+    if (state.kind !== "SCRIPTED_HUMAN") throw humanError("D_HUMAN_AUTHORITY_TRUST_REQUIRED");
     const envelope = state.decide
       ? await state.decide(Object.freeze({ ...request }))
       : { decision: state.defaultDecision!, decidedAt: state.clock() };
@@ -95,11 +125,62 @@ export class ScriptedHumanValidationAuthorityV2 {
   }
 }
 
-export function isTrustedHumanValidationAuthorityV2(value: unknown): value is ScriptedHumanValidationAuthorityV2 {
+/** Host-created authority for one exact persisted Human request. */
+export class OperatorHumanValidationAuthorityV2 {
+  constructor(options: OperatorHumanValidationAuthorityOptionsV2, seal: object) {
+    if (new.target !== OperatorHumanValidationAuthorityV2 || seal !== OPERATOR_HUMAN_AUTHORITY_CONSTRUCTION_SEAL) {
+      throw humanError("D_HUMAN_AUTHORITY_TRUST_REQUIRED");
+    }
+    assertSafeIdentity(options.authorityId, "D_HUMAN_AUTHORITY_INVALID");
+    validateHumanValidationRequestV2(options.request);
+    if (!HUMAN_VALIDATION_DECISIONS_V2.includes(options.decision)) throw humanError("D_HUMAN_AUTHORITY_INVALID");
+    assertSafeIdentity(options.decidedAt, "D_HUMAN_AUTHORITY_INVALID");
+    const request = Object.freeze({ ...options.request });
+    const requestDigest = sha256Canonical(request);
+    const identityCore = { kind: "OPERATOR_HUMAN" as const, authorityId: options.authorityId, requestDigest };
+    const identity = Object.freeze({ ...identityCore, profileDigest: sha256Canonical(identityCore) });
+    authorityState.set(this, Object.freeze({
+      kind: "OPERATOR_HUMAN" as const,
+      identity,
+      request,
+      envelope: Object.freeze({ decision: options.decision, decidedAt: options.decidedAt }),
+    }));
+    trustedAuthorities.add(this);
+    Object.freeze(this);
+  }
+
+  get identity(): OperatorHumanValidationAuthorityIdentityV2 {
+    const state = requireAuthorityState(this);
+    if (state.kind !== "OPERATOR_HUMAN") throw humanError("D_HUMAN_AUTHORITY_TRUST_REQUIRED");
+    return state.identity;
+  }
+
+  async decide(request: HumanValidationRequestV2): Promise<ScriptedHumanDecisionEnvelopeV2> {
+    validateHumanValidationRequestV2(request);
+    const state = requireAuthorityState(this);
+    if (state.kind !== "OPERATOR_HUMAN") throw humanError("D_HUMAN_AUTHORITY_TRUST_REQUIRED");
+    if (sha256Canonical(request) !== state.identity.requestDigest || canonicalJson(request) !== canonicalJson(state.request)) {
+      throw humanError("D_HUMAN_AUTHORITY_REQUEST_MISMATCH");
+    }
+    return state.envelope;
+  }
+}
+
+export type TrustedHumanValidationAuthorityV2 =
+  | ScriptedHumanValidationAuthorityV2
+  | OperatorHumanValidationAuthorityV2;
+
+export function createOperatorHumanValidationAuthorityV2(
+  options: OperatorHumanValidationAuthorityOptionsV2,
+): OperatorHumanValidationAuthorityV2 {
+  return new OperatorHumanValidationAuthorityV2(options, OPERATOR_HUMAN_AUTHORITY_CONSTRUCTION_SEAL);
+}
+
+export function isTrustedHumanValidationAuthorityV2(value: unknown): value is TrustedHumanValidationAuthorityV2 {
   return typeof value === "object" && value !== null && trustedAuthorities.has(value) && authorityState.has(value);
 }
 
-export function assertTrustedHumanValidationAuthorityV2(value: unknown): asserts value is ScriptedHumanValidationAuthorityV2 {
+export function assertTrustedHumanValidationAuthorityV2(value: unknown): asserts value is TrustedHumanValidationAuthorityV2 {
   if (!isTrustedHumanValidationAuthorityV2(value)) throw humanError("D_HUMAN_AUTHORITY_TRUST_REQUIRED");
 }
 
@@ -118,7 +199,7 @@ export function createHumanValidationRequestV2(input: Omit<HumanValidationReques
 }
 
 export async function obtainTrustedHumanValidationDecisionV2(
-  authority: ScriptedHumanValidationAuthorityV2,
+  authority: TrustedHumanValidationAuthorityV2,
   request: HumanValidationRequestV2,
 ): Promise<HumanValidationDecisionV2> {
   assertTrustedHumanValidationAuthorityV2(authority);
@@ -171,6 +252,18 @@ export function validateHumanValidationDecisionV2(value: unknown): asserts value
   });
   if (!HUMAN_VALIDATION_DECISIONS_V2.includes(value.decision as HumanValidationDecisionValueV2)) throw humanError("D_HUMAN_DECISION_INVALID");
   validateAuthorityIdentity(value.authority);
+  if (value.authority.kind === "OPERATOR_HUMAN") {
+    const request = {
+      runId: value.runId,
+      phaseId: value.phaseId,
+      taskId: value.taskId,
+      attemptId: value.attemptId,
+      validationSpecId: value.validationSpecId,
+      validationSpecDigest: value.validationSpecDigest,
+      humanRequestRef: value.humanRequestRef,
+    };
+    if (value.authority.requestDigest !== sha256Canonical(request)) throw humanError("D_HUMAN_DECISION_INVALID");
+  }
   assertSafeIdentity(value.decidedAt, "D_HUMAN_DECISION_INVALID");
   if (!isSha256Digest(value.decisionDigest)) throw humanError("D_HUMAN_DECISION_INVALID");
   const { decisionDigest: _ignored, ...base } = value;
@@ -228,10 +321,25 @@ function requireAuthorityState(authority: object) {
 
 function validateAuthorityIdentity(value: unknown): asserts value is HumanValidationAuthorityIdentityV2 {
   if (!isRecord(value)) throw humanError("D_HUMAN_DECISION_INVALID");
-  assertExactKeys(value, ["kind", "authorityId", "profileDigest"], "D_HUMAN_DECISION_INVALID");
-  if (value.kind !== "SCRIPTED_HUMAN") throw humanError("D_HUMAN_DECISION_INVALID");
-  assertSafeIdentity(value.authorityId, "D_HUMAN_DECISION_INVALID");
-  if (!isSha256Digest(value.profileDigest) || value.profileDigest !== sha256Canonical({ kind: value.kind, authorityId: value.authorityId })) throw humanError("D_HUMAN_DECISION_INVALID");
+  if (value.kind === "SCRIPTED_HUMAN") {
+    assertExactKeys(value, ["kind", "authorityId", "profileDigest"], "D_HUMAN_DECISION_INVALID");
+    assertSafeIdentity(value.authorityId, "D_HUMAN_DECISION_INVALID");
+    if (!isSha256Digest(value.profileDigest)
+      || value.profileDigest !== sha256Canonical({ kind: value.kind, authorityId: value.authorityId })) {
+      throw humanError("D_HUMAN_DECISION_INVALID");
+    }
+    return;
+  }
+  if (value.kind === "OPERATOR_HUMAN") {
+    assertExactKeys(value, ["kind", "authorityId", "requestDigest", "profileDigest"], "D_HUMAN_DECISION_INVALID");
+    assertSafeIdentity(value.authorityId, "D_HUMAN_DECISION_INVALID");
+    if (!isSha256Digest(value.requestDigest) || !isSha256Digest(value.profileDigest)
+      || value.profileDigest !== sha256Canonical({ kind: value.kind, authorityId: value.authorityId, requestDigest: value.requestDigest })) {
+      throw humanError("D_HUMAN_DECISION_INVALID");
+    }
+    return;
+  }
+  throw humanError("D_HUMAN_DECISION_INVALID");
 }
 
 function humanError(message: string, cause?: unknown): RalphB4ArtifactError {

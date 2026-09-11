@@ -1044,8 +1044,26 @@ feature directory. It consumes only entries with kind `execution-plan`, status
 hashes, invalid task grammar, unsafe paths, and readiness mismatches fail
 closed before an LLM is started.
 
-With [RB Ralph](https://github.com/RBTecNet/rb-ralph) installed, preview the
-first execution schedule without invoking a provider:
+For the Progressive P1→P4 product path, the supported execution front door is
+now owned by the Harness:
+
+```bash
+rb-harness status --project /path/to/project
+rb-harness --ralph --project /path/to/project
+# after a NEEDS_HUMAN result and the requested operator check:
+rb-harness --ralph --project /path/to/project --human-decision pass
+# or: rb-harness --ralph --project /path/to/project --human-decision fail
+```
+
+The command accepts no request or PHASES override. It revalidates fresh
+Progressive authority, runs the frozen managed Codex Executor/Auditor lifecycle
+inside an isolated workspace, and lets only the host publish accepted,
+task-owned deltas. Human decisions are exact-request-bound operator authority;
+providers cannot supply them, and PASS never bypasses the Auditor. See [the
+bridge V1 contract](docs/ralph-progressive-bridge-v1.md).
+
+The separately installed [RB Ralph](https://github.com/RBTecNet/rb-ralph)
+retains its broader legacy preview surface:
 
 ```bash
 rb-ralph --project /path/to/project --list

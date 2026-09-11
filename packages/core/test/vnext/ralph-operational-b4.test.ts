@@ -40,6 +40,10 @@ import {
   type ProcessIdentityProvider,
 } from "../../src/vnext/ralph-runtime/operational-b2/index.js";
 import {
+  assertAuthorizedInvocationV2,
+  authorizePostExecutorObservationV2,
+  isAuthorizedInvocationV2,
+  isPostExecutorObservationAuthorizationV2,
   prepareNextAuthorizedInvocationV2,
 } from "../../src/vnext/ralph-runtime/operational-b3/index.js";
 import {
@@ -49,6 +53,9 @@ import {
   isTrustedExecutorRuntimeV2,
   isNotInvokedProofV2,
   isTrustedExecutorObservationV2,
+  persistTrustedExecutorObservationReceiptV2,
+  readExecutorObservationReceiptV2,
+  rehydrateTrustedExecutorObservationV2,
   ScriptedExecutor,
   type NotInvokedProofV2,
   type TrustedExecutorObservationV2,
@@ -56,6 +63,7 @@ import {
 import { createInvocationResultV2, persistInvocationResultV2 } from "../../src/vnext/ralph-runtime/operational-b4/invocation-result.js";
 import { createWorkspacePolicy, fingerprintWorkspace } from "../../src/vnext/ralph-runtime/fingerprint.js";
 import { sha256, sha256Canonical } from "../../src/vnext/ralph-runtime/hashing.js";
+import { canonicalJson } from "../../src/vnext/ralph-runtime/canonical-json.js";
 import { nodeRalphRuntimeFileSystem, type RalphRuntimeFileSystem } from "../../src/vnext/ralph-runtime/event-store.js";
 
 const TEST_DIRECTORY = dirname(fileURLToPath(import.meta.url));
@@ -346,8 +354,190 @@ describe("Ralph Operational Core V2 — B4 scripted executor", () => {
       expect(events.find((candidate) => candidate.eventType === "executor.started")!.sequence)
         .toBeLessThan(events.find((candidate) => candidate.eventType === "executor.finished")!.sequence);
       expect(await readFile(join(fixture.store.runDirectory, "attempts", "attempt-b4-001", "invocation-result.json"), "utf8")).toContain("rb-ralph-executor-result/v1");
+      expect(await readFile(join(fixture.store.runDirectory, "attempts", "attempt-b4-001", "executor-observation-receipt.json"), "utf8")).toContain("rb-ralph-executor-observation-receipt/v1");
+      const executionSource = await readFile(resolve(TEST_DIRECTORY, "../../src/vnext/ralph-runtime/operational-b4/execution.ts"), "utf8");
+      expect(executionSource.indexOf("persistTrustedExecutorObservationReceiptV2(input.leasedRun.store, observation"))
+        .toBeLessThan(executionSource.indexOf("persistOrReuseResult(input.leasedRun.store, startedAttempt, observation"));
+      expect(executionSource.indexOf("persistOrReuseResult(input.leasedRun.store, startedAttempt, observation"))
+        .toBeLessThan(executionSource.indexOf("commitFinishedIfNeeded(input, startedAttempt, observation"));
+      expect(executionSource).toContain("assertReceiptAuthorizationBinding(receipt, authorization)");
+      expect(executionSource).toContain("finished.status !== result.status || finished.termination !== result.termination");
+      expect(executionSource).toContain("assertReceiptAuthorizationBinding(receipt, authorization)");
+      expect(executionSource).toContain("finished.status !== result.status || finished.termination !== result.termination");
     } finally {
       await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("rehydrates a terminal observation across a process boundary without recreating dispatch authority", async () => {
+    const fixture = await fixtureRoot("rb-ralph-b4-observation-rehydrate-", "run-b4-observation-rehydrate");
+    try {
+      const authorized = await authorize(fixture);
+      const runtime = new ScriptedExecutor({ runtimeIdentity: "scripted-b4-rehydrate", defaultScenario: { kind: "SUCCESS" } });
+      const finished = await executeAuthorizedInvocationV2({
+        leasedRun: authorized.resumed,
+        plan: fixture.document,
+        runtime,
+        nonceFactory: nonce,
+        eventIdFactory: () => `b4-event-${++nonceOrdinal}`,
+      });
+      expect(finished.kind).toBe("EXECUTOR_FINISHED_READY_FOR_CAPTURE");
+      if (finished.kind !== "EXECUTOR_FINISHED_READY_FOR_CAPTURE") throw new Error("B4 fixture did not finish");
+      const originalObservation = finished.observation;
+      expect(await readExecutorObservationReceiptV2(fixture.store, "attempt-b4-001")).toMatchObject({
+        runId: fixture.store.runId,
+        attemptId: "attempt-b4-001",
+        invocationId: finished.invocationId,
+        observation: { runtimeIdentity: "scripted-b4-rehydrate", state: "TERMINATED_QUIESCENT" },
+      });
+      const proof = await deriveExecutorReleaseProofV2(authorized.resumed, originalObservation, [
+        "attempts/attempt-b4-001/work-unit.json",
+        "attempts/attempt-b4-001/invocation.json",
+        "attempts/attempt-b4-001/executor-observation-receipt.json",
+        "attempts/attempt-b4-001/invocation-result.json",
+      ]);
+      await releaseLeasedRunV2(authorized.resumed, { proof });
+
+      // Fresh store/lease/capability objects model a new CLI process. No
+      // Executor runtime participates in authorization or rehydration.
+      const secondStore = new RalphEventStoreV2({ projectRoot: fixture.root, runId: fixture.store.runId });
+      const secondLease = await acquireLeasedRunV2({
+        projectRoot: fixture.root,
+        runId: fixture.store.runId,
+        genesisState: fixture.genesis,
+        processIdentityProvider: identityProvider(),
+      });
+      const observationAuthorization = await authorizePostExecutorObservationV2({
+        leasedRun: secondLease,
+        plan: fixture.document,
+        planIdentity: fixture.document.artifactId,
+        planDigest: sha256Canonical(fixture.document),
+      });
+      expect(secondStore.runDirectory).toBe(fixture.store.runDirectory);
+      expect(isPostExecutorObservationAuthorizationV2(observationAuthorization)).toBe(true);
+      expect(isAuthorizedInvocationV2(observationAuthorization)).toBe(false);
+      expect(() => assertAuthorizedInvocationV2(observationAuthorization)).toThrow("B3_AUTHORIZED_INVOCATION_REQUIRED");
+      await expect(new ScriptedExecutor().invoke(observationAuthorization as never)).rejects.toMatchObject({ code: "B3_AUTHORIZED_INVOCATION_REQUIRED" });
+      const rehydrated = await rehydrateTrustedExecutorObservationV2({ leasedRun: secondLease, authorization: observationAuthorization });
+      expect(isTrustedExecutorObservationV2(rehydrated)).toBe(true);
+      expect(rehydrated).not.toBe(originalObservation);
+      expect(rehydrated.record).toEqual(originalObservation.record);
+      expect(runtime.getInvocationAttempts(finished.invocationId)).toBe(1);
+      await expect(persistTrustedExecutorObservationReceiptV2(secondStore, JSON.parse(JSON.stringify(originalObservation)) as never, "plain"))
+        .rejects.toThrow("RALPH_EXECUTOR_OBSERVATION_TRUST_REQUIRED");
+      const receiptPath = join(fixture.store.runDirectory, "attempts", "attempt-b4-001", "executor-observation-receipt.json");
+      const receiptSource = await readFile(receiptPath, "utf8");
+      const mutations: Array<(value: any) => void> = [
+        (value) => { value.observation.runtimeIdentity = "tampered-runtime"; },
+        (value) => { value.observation.observationId = "tampered-observation"; },
+        (value) => { value.invocationId = "tampered-invocation"; },
+        (value) => { value.observation.status = "FAILED"; },
+        (value) => { value.observation.termination = "SIGNAL"; },
+        (value) => { value.observation.finishedAt = "2026-09-06T05:00:59.000Z"; },
+        (value) => { value.observation.observationDigest = sha256("tampered-observation"); },
+        (value) => { value.coreBindingDigest = sha256("tampered-core-binding"); },
+        (value) => { value.receiptDigest = sha256("tampered-receipt"); },
+      ];
+      for (const mutate of mutations) {
+        const value = JSON.parse(receiptSource);
+        mutate(value);
+        await writeFile(receiptPath, JSON.stringify(value));
+        await expect(rehydrateTrustedExecutorObservationV2({ leasedRun: secondLease, authorization: observationAuthorization })).rejects.toBeDefined();
+      }
+      const validReceipt = JSON.parse(receiptSource);
+      const { schema: _observationSchema, observationDigest: _observationDigest, ...observationInput } = validReceipt.observation;
+      validReceipt.observation = buildExecutorObservationEnvelopeV2({ ...observationInput, safeMetadata: { durable: "but-mismatched" } });
+      const { receiptDigest: _receiptDigest, ...receiptBase } = validReceipt;
+      validReceipt.receiptDigest = sha256Canonical(receiptBase);
+      await writeFile(receiptPath, canonicalJson(validReceipt));
+      await expect(rehydrateTrustedExecutorObservationV2({ leasedRun: secondLease, authorization: observationAuthorization }))
+        .rejects.toThrow("B4_OBSERVATION_RECEIPT_INVALID");
+      await writeFile(receiptPath, receiptSource);
+
+      const resultPath = join(fixture.store.runDirectory, "attempts", "attempt-b4-001", "invocation-result.json");
+      const resultSource = await readFile(resultPath, "utf8");
+      const tamperedResult = JSON.parse(resultSource);
+      tamperedResult.safeMetadata = { durable: "but-mismatched" };
+      const { resultDigest: _resultDigest, ...resultBase } = tamperedResult;
+      tamperedResult.resultDigest = sha256Canonical(resultBase);
+      await writeFile(resultPath, canonicalJson(tamperedResult));
+      await expect(rehydrateTrustedExecutorObservationV2({ leasedRun: secondLease, authorization: observationAuthorization }))
+        .rejects.toThrow("B4_OBSERVATION_RECEIPT_INVALID");
+      await writeFile(resultPath, resultSource);
+      await rm(receiptPath);
+      await expect(rehydrateTrustedExecutorObservationV2({ leasedRun: secondLease, authorization: observationAuthorization }))
+        .rejects.toMatchObject({ code: "B4_OBSERVATION_RECEIPT_REQUIRED" });
+      await writeFile(receiptPath, receiptSource, { flag: "wx", mode: 0o600 });
+      const release = await deriveExecutorReleaseProofV2(secondLease, rehydrated, [
+        "attempts/attempt-b4-001/work-unit.json",
+        "attempts/attempt-b4-001/invocation.json",
+        "attempts/attempt-b4-001/executor-observation-receipt.json",
+        "attempts/attempt-b4-001/invocation-result.json",
+      ]);
+      await releaseLeasedRunV2(secondLease, { proof: release });
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed without observing or redispatching when a terminal receipt crossed only part of the durable boundary", async () => {
+    for (const persistResult of [false, true]) {
+      const fixture = await fixtureRoot(`rb-ralph-b4-terminal-partial-${persistResult ? "result" : "receipt"}-`, `run-b4-terminal-partial-${persistResult ? "result" : "receipt"}`);
+      try {
+        const authorized = await authorize(fixture);
+        const runtime = new ScriptedExecutor({ runtimeIdentity: `partial-${persistResult ? "result" : "receipt"}`, defaultScenario: { kind: "SUCCESS" } });
+        await runtime.invoke(authorized.result.authorizedInvocation);
+        const deepExecution = await import("../../src/vnext/ralph-runtime/operational-b4/execution.js");
+        const observation = await deepExecution.observeTrustedExecutorInvocationV2(runtime, authorized.result.authorizedInvocation);
+        if (observation.state !== "TERMINATED_QUIESCENT" || !observation.startedAt || !observation.finishedAt
+          || !observation.status || !observation.termination || !observation.resultEnvelopeStatus) {
+          throw new Error("partial terminal fixture did not terminate");
+        }
+        await fixture.store.inspect();
+        await refreshLeasedRunV2(authorized.resumed);
+        await append(fixture.store, authorized.resumed.state, event(authorized.resumed.state, "executor.started", {
+          invocationId: observation.invocationId,
+          startedAt: observation.startedAt,
+        }, { phaseId: "P01", taskId: "T001", attemptId: authorized.result.attempt.attempt.attemptId }), nonce());
+        await refreshLeasedRunV2(authorized.resumed);
+        await persistTrustedExecutorObservationReceiptV2(fixture.store, observation, nonce());
+        if (persistResult) {
+          await persistInvocationResultV2(fixture.store, createInvocationResultV2({
+            runId: fixture.store.runId,
+            phaseId: "P01",
+            taskId: "T001",
+            attemptId: authorized.result.attempt.attempt.attemptId,
+            invocationId: observation.invocationId,
+            resultEnvelopeStatus: observation.resultEnvelopeStatus,
+            status: observation.status,
+            termination: observation.termination,
+            exitCode: observation.exitCode ?? null,
+            signal: observation.signal ?? null,
+            startedAt: observation.startedAt,
+            finishedAt: observation.finishedAt,
+            startedObservationRef: observation.startedObservationId ?? observation.observationId,
+            finishedObservationRef: observation.observationId,
+            diagnosticRefs: [],
+            safeMetadata: observation.safeMetadata,
+          }), nonce());
+        }
+        let observeCalls = 0;
+        let invokeCalls = 0;
+        runtime.observe = async () => { observeCalls += 1; throw new Error("runtime.observe must not run after terminal receipt persistence"); };
+        runtime.invoke = async () => { invokeCalls += 1; throw new Error("runtime.invoke must not run after terminal receipt persistence"); };
+        await expect(executeAuthorizedInvocationV2({
+          leasedRun: authorized.resumed,
+          plan: fixture.document,
+          runtime,
+          nonceFactory: nonce,
+          eventIdFactory: () => `b4-event-${++nonceOrdinal}`,
+        })).rejects.toMatchObject({ code: "B4_EVENT_DURABILITY_UNKNOWN_REQUIRES_INSPECTION" });
+        expect(observeCalls).toBe(0);
+        expect(invokeCalls).toBe(0);
+        expect((await fixture.store.inspect()).events.some((candidate) => candidate.eventType === "executor.finished")).toBe(false);
+      } finally {
+        await rm(fixture.root, { recursive: true, force: true });
+      }
     }
   });
 
@@ -514,6 +704,12 @@ describe("Ralph Operational Core V2 — B4 scripted executor", () => {
 
       await expect(deriveExecutorReleaseProofV2(authorized.resumed, observation, refs))
         .rejects.toMatchObject({ code: "LEASE_RELEASE_PROOF_INVALID" });
+      await expect(authorizePostExecutorObservationV2({
+        leasedRun: authorized.resumed,
+        plan: fixture.document,
+        planIdentity: fixture.document.artifactId,
+        planDigest: sha256Canonical(fixture.document),
+      })).rejects.toMatchObject({ code: "B3_POST_EXECUTOR_OBSERVATION_AUTHORIZATION_REQUIRED" });
       expect((await fixture.store.inspect()).events.some((candidate) => candidate.eventType === "executor.finished")).toBe(false);
 
       const finished = event(authorized.resumed.state, "executor.finished", {
@@ -524,6 +720,15 @@ describe("Ralph Operational Core V2 — B4 scripted executor", () => {
       }, { phaseId: "P01", taskId: "T001", attemptId });
       await append(fixture.store, authorized.resumed.state, finished, nonce());
       await refreshLeasedRunV2(authorized.resumed);
+
+      const recoveryAuthorization = await authorizePostExecutorObservationV2({
+        leasedRun: authorized.resumed,
+        plan: fixture.document,
+        planIdentity: fixture.document.artifactId,
+        planDigest: sha256Canonical(fixture.document),
+      });
+      await expect(rehydrateTrustedExecutorObservationV2({ leasedRun: authorized.resumed, authorization: recoveryAuthorization }))
+        .rejects.toMatchObject({ code: "B4_OBSERVATION_RECEIPT_REQUIRED" });
 
       const proof = await deriveExecutorReleaseProofV2(authorized.resumed, observation, refs);
       expect(proof.record.externalInvocationState).toBe("TERMINATED_QUIESCENT");
@@ -968,19 +1173,19 @@ describe("Ralph Operational Core V2 — B4 scripted executor", () => {
         "revalidateLeasedRunV2", "runLeasePathsV2", "verifyLeasedRunV2",
       ],
       b3: [
-        "ADMISSION_ERROR_CODES", "ARTIFACT_ERROR_CODES", "AuthorizedInvocationV2", "RALPH_INVOCATION_SCHEMA_V2", "RALPH_WORK_UNIT_SCHEMA_V2",
-        "RalphAdmissionError", "RalphArtifactError", "assertAuthorizedInvocationV2", "createInvocationDescriptorV2", "createWorkUnitV2",
-        "invocationBindingV2", "invocationDescriptorPathV2", "invocationIdForBindingV2", "isAuthorizedInvocationV2", "persistInvocationDescriptorV2",
-        "persistWorkUnitV2", "prepareNextAuthorizedInvocationV2", "readInvocationDescriptorV2", "readWorkUnitV2", "reopenAuthorizedInvocationV2",
+        "ADMISSION_ERROR_CODES", "ARTIFACT_ERROR_CODES", "AuthorizedInvocationV2", "POST_EXECUTOR_OBSERVATION_STAGES_V2", "PostExecutorObservationAuthorizationV2", "RALPH_INVOCATION_SCHEMA_V2", "RALPH_WORK_UNIT_SCHEMA_V2",
+        "RalphAdmissionError", "RalphArtifactError", "assertAuthorizedInvocationV2", "assertPostExecutorObservationAuthorizationV2", "authorizePostExecutorObservationV2", "createInvocationDescriptorV2", "createWorkUnitV2",
+        "invocationBindingV2", "invocationDescriptorPathV2", "invocationIdForBindingV2", "isAuthorizedInvocationV2", "isPostExecutorObservationAuthorizationV2", "persistInvocationDescriptorV2",
+        "persistWorkUnitV2", "postExecutorObservationAuthorizationRecordV2", "prepareNextAuthorizedInvocationV2", "readInvocationDescriptorV2", "readWorkUnitV2", "reopenAuthorizedInvocationV2",
         "validateInvocationDescriptorV2", "validateWorkUnitV2", "workUnitPathV2",
       ],
-      b3Admission: ["ADMISSION_ERROR_CODES", "AuthorizedInvocationV2", "RalphAdmissionError", "assertAuthorizedInvocationV2", "isAuthorizedInvocationV2", "prepareNextAuthorizedInvocationV2", "reopenAuthorizedInvocationV2"],
+      b3Admission: ["ADMISSION_ERROR_CODES", "AuthorizedInvocationV2", "POST_EXECUTOR_OBSERVATION_STAGES_V2", "PostExecutorObservationAuthorizationV2", "RalphAdmissionError", "assertAuthorizedInvocationV2", "assertPostExecutorObservationAuthorizationV2", "authorizePostExecutorObservationV2", "isAuthorizedInvocationV2", "isPostExecutorObservationAuthorizationV2", "postExecutorObservationAuthorizationRecordV2", "prepareNextAuthorizedInvocationV2", "reopenAuthorizedInvocationV2"],
       b4: [
         "B4_ARTIFACT_ERROR_CODES", "B4_EXECUTION_ERROR_CODES", "EXECUTOR_BOUNDARY_STATES", "EXECUTOR_OBSERVATION_SCHEMA_V2", "EXECUTOR_OBSERVATION_STATES",
         "EXECUTOR_RESULT_ENVELOPE_STATUSES", "EXECUTOR_RUNTIME_ERROR_CODES", "ExecutorRuntimeError", "ExecutorRuntimeV2", "LEASE_OWNERSHIP_STATES", "M4A_ERROR_CODES", "M4B_ERROR_CODES", "M4B_TIMEOUT_POLICY_SCHEMA_V2",
         "OPENCODE_CLI_CONFORMANCE_STATES_V2", "OPENCODE_CLI_EXECUTOR_MODEL_ID_V2", "OPENCODE_CLI_EXECUTOR_MODEL_V2", "OPENCODE_CLI_EXECUTOR_PATH_V2", "OPENCODE_CLI_EXECUTOR_PROFILE_V2", "OPENCODE_CLI_EXECUTOR_PROVIDER_V2", "OPENCODE_CLI_EXECUTOR_TRANSPORT_VERSION_V2", "OPENCODE_SESSION_ACTIVITY_STATES_V2", "OPENCODE_SESSION_IDENTITY_STATES_V2", "OPENCODE_SESSION_MESSAGE_STATES_V2", "OPENCODE_SESSION_MODEL_STATES_V2",
         "OPENCODE_SESSION_RESULT_STATES_V2", "OpenCodeCliExecutorV2", "OpenCodeCliInvocationObserverV2", "PROVIDER_PROCESS_TREE_STATES_V2", "PROVIDER_TERMINAL_PROCESS_STATES_V2",
-        "RALPH_EXECUTOR_RESULT_SCHEMA_V2", "RALPH_PROVIDER_DISPATCH_INTENT_SCHEMA_V2", "RALPH_PROVIDER_INVOCATION_DESCRIPTOR_SCHEMA_V2",
+        "EXECUTOR_OBSERVATION_RECEIPT_SCHEMA_V2", "RALPH_EXECUTOR_RESULT_SCHEMA_V2", "RALPH_PROVIDER_DISPATCH_INTENT_SCHEMA_V2", "RALPH_PROVIDER_INVOCATION_DESCRIPTOR_SCHEMA_V2",
         "RALPH_PROVIDER_SESSION_BINDING_SCHEMA_V2", "RALPH_PROVIDER_TERMINAL_SCHEMA_V2", "RALPH_PROVIDER_WORKER_RECEIPT_SCHEMA_V2",
         "RALPH_WORKSPACE_MANIFEST_SCHEMA_V2", "RalphB4ArtifactError", "RalphB4ExecutionError", "RalphM4AError", "RalphM4BError", "SCRIPTED_SCENARIO_KINDS",
         "ScriptedExecutor", "assertNotInvokedProofV2", "assertObservationForInvocation", "assertRuntimeObservation", "assertSafeArtifactRefV2",
@@ -988,14 +1193,14 @@ describe("Ralph Operational Core V2 — B4 scripted executor", () => {
         "buildExecutorObservationEnvelopeV2", "canonicalExecutorObservationV2", "createInvocationResultV2", "createProviderDispatchIntentV2",
         "createProviderInvocationDescriptorV2", "createProviderSessionBindingV2", "createProviderTerminalArtifactV2", "createProviderWorkerReceiptV2",
         "createM4BTimeoutPolicyV2", "createOpenCodeCliExecutorV2", "createWorkspaceManifestV2", "deriveNotInvokedProofV2",
-        "ensureAttemptArtifactDirectoryV2", "executeAuthorizedInvocationV2", "executeScriptedInvocationV2", "invocationResultRefV2", "isNotInvokedProofV2",
+        "ensureAttemptArtifactDirectoryV2", "executeAuthorizedInvocationV2", "executeScriptedInvocationV2", "executorObservationReceiptRefV2", "invocationResultRefV2", "isNotInvokedProofV2",
         "isQuiescentObservation", "isTrustedExecutorObservationV2", "isTrustedExecutorRuntimeV2", "isTrustedOpenCodeCliExecutorV2", "isTrustedOpenCodeCliInvocationObserverV2", "loadExactConformanceRecordV2", "observationState", "observeWorkspaceManifestV2",
-        "persistImmutableJsonArtifactV2", "persistInvocationResultV2", "persistProviderDispatchIntentV2", "persistProviderInvocationDescriptorV2",
+        "persistImmutableJsonArtifactV2", "persistInvocationResultV2", "persistProviderDispatchIntentV2", "persistProviderInvocationDescriptorV2", "persistTrustedExecutorObservationReceiptV2",
         "persistProviderSessionBindingV2", "persistProviderTerminalArtifactV2", "persistProviderWorkerReceiptV2", "persistWorkspaceAfterManifestV2", "persistWorkspaceBeforeManifestV2",
         "providerDispatchIntentRefV2", "providerInvocationDescriptorRefV2", "providerSessionBindingRefV2", "providerTerminalRefV2", "providerWorkerReceiptRefV2",
-        "readImmutableJsonArtifactV2", "readInvocationResultV2", "readProviderDispatchIntentV2", "readProviderInvocationArtifactSetV2",
+        "readExecutorObservationReceiptV2", "readImmutableJsonArtifactV2", "readInvocationResultV2", "readProviderDispatchIntentV2", "readProviderInvocationArtifactSetV2",
         "readProviderInvocationDescriptorV2", "readProviderSessionBindingV2", "readProviderTerminalArtifactV2", "readProviderWorkerReceiptV2",
-        "readWorkspaceAfterManifestV2", "readWorkspaceBeforeManifestV2", "runAuthorizedInvocationV2", "validateExecutorObservationEnvelopeV2", "validateInvocationResultV2",
+        "readWorkspaceAfterManifestV2", "readWorkspaceBeforeManifestV2", "rehydrateTrustedExecutorObservationV2", "runAuthorizedInvocationV2", "validateExecutorObservationEnvelopeV2", "validateExecutorObservationReceiptV2", "validateInvocationResultV2",
         "validateProviderDispatchIntentV2", "validateProviderInvocationDescriptorV2", "validateProviderSessionBindingV2", "validateProviderTerminalArtifactV2",
         "validateM4BTimeoutPolicyV2", "validateProviderWorkerReceiptV2", "validateWorkspaceManifestV2", "workspaceAfterRefV2", "workspaceBeforeRefV2",
         "workspaceManifestCoreJson", "workspaceManifestEntries",
@@ -1006,9 +1211,9 @@ describe("Ralph Operational Core V2 — B4 scripted executor", () => {
         "validateExactCorrectionContextForDispatchV2",
       ],
       b4Execution: [
-        "B4_EXECUTION_ERROR_CODES", "RalphB4ExecutionError", "assertNotInvokedProofV2", "assertTrustedExecutorObservationV2", "deriveNotInvokedProofV2",
+        "B4_EXECUTION_ERROR_CODES", "EXECUTOR_OBSERVATION_RECEIPT_SCHEMA_V2", "RalphB4ExecutionError", "assertNotInvokedProofV2", "assertTrustedExecutorObservationV2", "deriveNotInvokedProofV2", "executorObservationReceiptRefV2",
         "executeAuthorizedInvocationV2", "executeScriptedInvocationV2", "isNotInvokedProofV2", "isTrustedExecutorObservationV2",
-        "observeTrustedExecutorInvocationV2", "runAuthorizedInvocationV2",
+        "observeTrustedExecutorInvocationV2", "persistTrustedExecutorObservationReceiptV2", "readExecutorObservationReceiptV2", "rehydrateTrustedExecutorObservationV2", "runAuthorizedInvocationV2", "validateExecutorObservationReceiptV2",
       ],
       b4Observation: [
         "EXECUTOR_BOUNDARY_STATES", "EXECUTOR_OBSERVATION_SCHEMA_V2", "EXECUTOR_OBSERVATION_STATES", "EXECUTOR_RESULT_ENVELOPE_STATUSES",
@@ -1036,7 +1241,7 @@ describe("Ralph Operational Core V2 — B4 scripted executor", () => {
       cEvidence: ["C_EVIDENCE_ERROR_CODES", "EVIDENCE_CAPTURE_SCHEMA_V2", "EVIDENCE_CHANGE_KINDS", "RalphCEvidenceError", "captureEvidenceV2", "createEvidenceCaptureV2", "deriveWorkspaceChangesV2", "evidenceCaptureRefV2", "persistEvidenceCaptureV2", "readEvidenceCaptureV2", "runEvidenceCaptureV2", "validateEvidenceCaptureV2"],
       root: [
         "B4_ARTIFACT_ERROR_CODES", "B4_EXECUTION_ERROR_CODES", "C_EVIDENCE_ERROR_CODES", "EVIDENCE_CAPTURE_SCHEMA_V2", "EVIDENCE_CHANGE_KINDS",
-        "EXECUTOR_BOUNDARY_STATES", "EXECUTOR_OBSERVATION_SCHEMA_V2", "EXECUTOR_OBSERVATION_STATES", "EXECUTOR_RESULT_ENVELOPE_STATUSES",
+        "EXECUTOR_BOUNDARY_STATES", "EXECUTOR_OBSERVATION_RECEIPT_SCHEMA_V2", "EXECUTOR_OBSERVATION_SCHEMA_V2", "EXECUTOR_OBSERVATION_STATES", "EXECUTOR_RESULT_ENVELOPE_STATUSES",
         "EXECUTOR_RUNTIME_ERROR_CODES", "ExecutorRuntimeError", "ExecutorRuntimeV2", "FINDING_STATUSES", "LEASE_OWNERSHIP_STATES", "M4A_ERROR_CODES", "M4B_ERROR_CODES", "M4B_TIMEOUT_POLICY_SCHEMA_V2",
         "OPENCODE_CLI_CONFORMANCE_STATES_V2", "OPENCODE_CLI_EXECUTOR_MODEL_ID_V2", "OPENCODE_CLI_EXECUTOR_MODEL_V2", "OPENCODE_CLI_EXECUTOR_PATH_V2", "OPENCODE_CLI_EXECUTOR_PROFILE_V2", "OPENCODE_CLI_EXECUTOR_PROVIDER_V2", "OPENCODE_CLI_EXECUTOR_TRANSPORT_VERSION_V2", "OPENCODE_SESSION_ACTIVITY_STATES_V2", "OPENCODE_SESSION_IDENTITY_STATES_V2", "OPENCODE_SESSION_MESSAGE_STATES_V2", "OPENCODE_SESSION_MODEL_STATES_V2",
         "OPENCODE_SESSION_RESULT_STATES_V2", "OpenCodeCliExecutorV2", "OpenCodeCliInvocationObserverV2", "PROVIDER_PROCESS_TREE_STATES_V2", "PROVIDER_TERMINAL_PROCESS_STATES_V2", "PHASE_ACTIVITIES",
@@ -1056,20 +1261,20 @@ describe("Ralph Operational Core V2 — B4 scripted executor", () => {
         "createM4BTimeoutPolicyV2", "createOpenCodeCliExecutorV2", "createWorkspaceManifestV2", "createWorkspacePolicy",
         "deriveAllPhases", "deriveBudgetUsage", "deriveLocalBlockingRunHold", "deriveNotInvokedProofV2", "derivePhaseState", "deriveWorkspaceChangesV2",
         "ensureAttemptArtifactDirectoryV2", "ensureRalphRuntimeLayout", "eventFileName", "evidenceCaptureRefV2", "executeAuthorizedInvocationV2",
-        "executeScriptedInvocationV2", "expectedAttemptBaseFingerprint", "fingerprintWorkspace", "inspectRalphResume", "invocationResultRefV2", "isEventFileName",
+        "executeScriptedInvocationV2", "executorObservationReceiptRefV2", "expectedAttemptBaseFingerprint", "fingerprintWorkspace", "inspectRalphResume", "invocationResultRefV2", "isEventFileName",
         "isEventTempFileName", "isNotInvokedProofV2", "isQuiescentObservation", "isSha256Digest", "isTrustedExecutorObservationV2",
         "isTrustedExecutorRuntimeV2", "isTrustedOpenCodeCliExecutorV2", "isTrustedOpenCodeCliInvocationObserverV2", "isWorkspaceControlPlanePath", "isWorkspaceForbiddenPath", "loadExactConformanceRecordV2", "nodeRalphRuntimeFileSystem", "nodeWorkspaceFingerprintFileSystem", "observationState", "observeWorkspaceManifestV2",
         "persistEvidenceCaptureV2", "persistImmutableJsonArtifactV2", "persistImmutableRunSnapshot", "persistInvocationResultV2", "persistProviderDispatchIntentV2",
-        "persistProviderInvocationDescriptorV2", "persistProviderSessionBindingV2", "persistProviderTerminalArtifactV2", "persistProviderWorkerReceiptV2", "persistStateSnapshot",
+        "persistProviderInvocationDescriptorV2", "persistProviderSessionBindingV2", "persistProviderTerminalArtifactV2", "persistProviderWorkerReceiptV2", "persistStateSnapshot", "persistTrustedExecutorObservationReceiptV2",
         "persistWorkspaceAfterManifestV2", "persistWorkspaceBeforeManifestV2", "phaseHasActiveTask", "phaseHasExecutableReadyTask", "phaseProgress",
-        "projectPhase", "projectPhases", "projectRun", "projectTask", "projectTasks", "readEvidenceCaptureV2", "readImmutableJsonArtifactV2",
+        "projectPhase", "projectPhases", "projectRun", "projectTask", "projectTasks", "readEvidenceCaptureV2", "readExecutorObservationReceiptV2", "readImmutableJsonArtifactV2",
         "providerDispatchIntentRefV2", "providerInvocationDescriptorRefV2", "providerSessionBindingRefV2", "providerTerminalRefV2", "providerWorkerReceiptRefV2",
         "readInvocationResultV2", "readProviderDispatchIntentV2", "readProviderInvocationArtifactSetV2", "readProviderInvocationDescriptorV2",
         "readProviderSessionBindingV2", "readProviderTerminalArtifactV2", "readProviderWorkerReceiptV2", "readRunSnapshot", "readRuntimeFile", "readStateSnapshot", "readWorkspaceAfterManifestV2", "readWorkspaceBeforeManifestV2",
-        "recomputePhaseState", "reduceRalphEvent", "replayFromRecords", "replayRalphRuntime", "resolveRalphRunDirectory", "runAuthorizedInvocationV2",
+        "recomputePhaseState", "reduceRalphEvent", "rehydrateTrustedExecutorObservationV2", "replayFromRecords", "replayRalphRuntime", "resolveRalphRunDirectory", "runAuthorizedInvocationV2",
         "runEvidenceCaptureV2", "runHasEligibleWork", "runHasKnownBlockingCondition", "sha256", "sha256Canonical", "taskDependenciesSatisfied",
         "taskIsActive", "taskIsExecutableReady", "transitionFinding", "unsignedEventHash", "validateAuditBinding", "validateEvidenceCaptureV2",
-        "validateExecutorObservationEnvelopeV2", "validateInvocationResultV2", "validateProviderDispatchIntentV2", "validateProviderInvocationDescriptorV2",
+        "validateExecutorObservationEnvelopeV2", "validateExecutorObservationReceiptV2", "validateInvocationResultV2", "validateProviderDispatchIntentV2", "validateProviderInvocationDescriptorV2",
         "validateProviderSessionBindingV2", "validateProviderTerminalArtifactV2", "validateProviderWorkerReceiptV2", "validateRalphEvent", "validateRalphResume", "validateRalphRunId",
         "validateM4BTimeoutPolicyV2", "validateRunSnapshot", "validateSnapshotAgainstLedger", "validateWorkspaceManifestV2", "workspaceAfterRefV2", "workspaceBeforeRefV2",
         "workspaceManifestCoreJson", "workspaceManifestEntries", "writeAtomicRuntimeFile", "writeExclusiveRuntimeFile",

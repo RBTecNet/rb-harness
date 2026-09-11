@@ -19,8 +19,12 @@ import {
 } from "../operational-v2/events.js";
 import {
   assertAuthorizedInvocationV2,
+  assertPostExecutorObservationAuthorizationV2,
+  authorizePostExecutorObservationV2,
+  postExecutorObservationAuthorizationRecordV2,
   reopenAuthorizedInvocationV2,
   type AuthorizedInvocationV2,
+  type PostExecutorObservationAuthorizationV2,
   type ReopenedAuthorizedInvocationV2,
 } from "../operational-b3/index.js";
 import {
@@ -57,7 +61,14 @@ import {
   type WorkspaceManifestV2,
 } from "./workspace-manifest.js";
 import { canonicalJson } from "../canonical-json.js";
-import { sha256Canonical } from "../hashing.js";
+import { isSha256Digest, sha256Canonical } from "../hashing.js";
+import {
+  attemptArtifactRefV2,
+  persistImmutableJsonArtifactV2,
+  readImmutableJsonArtifactV2,
+  type ArtifactPersistenceResultV2,
+  RalphB4ArtifactError,
+} from "./artifacts.js";
 
 export const B4_EXECUTION_ERROR_CODES = [
   "B4_AUTHORIZATION_REQUIRED",
@@ -67,6 +78,8 @@ export const B4_EXECUTION_ERROR_CODES = [
   "B4_STARTED_OBSERVATION_REQUIRED",
   "B4_RESULT_OBSERVATION_INVALID",
   "B4_RESULT_IMMUTABLE_CONFLICT",
+  "B4_OBSERVATION_RECEIPT_REQUIRED",
+  "B4_OBSERVATION_RECEIPT_INVALID",
   "B4_EVENT_DURABILITY_UNKNOWN_REQUIRES_INSPECTION",
 ] as const;
 export type B4ExecutionErrorCode = typeof B4_EXECUTION_ERROR_CODES[number];
@@ -76,6 +89,15 @@ export class RalphB4ExecutionError extends Error {
     super(message);
     this.name = "RalphB4ExecutionError";
   }
+}
+
+export const EXECUTOR_OBSERVATION_RECEIPT_SCHEMA_V2 = "rb-ralph-executor-observation-receipt/v1" as const;
+
+export interface ExecutorObservationReceiptV2 extends ExecutorObservationBindingV2 {
+  readonly schema: typeof EXECUTOR_OBSERVATION_RECEIPT_SCHEMA_V2;
+  readonly coreBindingDigest: string;
+  readonly observation: ExecutorObservationEnvelopeV2;
+  readonly receiptDigest: string;
 }
 
 const trustedObservationInternals = new WeakMap<TrustedExecutorObservationV2, ExecutorObservationRecordV2>();
@@ -173,6 +195,105 @@ export async function observeTrustedExecutorInvocationV2(
   const envelope = await runtime.observe(binding.invocationId);
   assertObservationForInvocation(envelope, binding.invocationId);
   return sealTrustedExecutorObservationV2(envelope, binding, runtime.runtimeIdentity);
+}
+
+export function executorObservationReceiptRefV2(attemptId: string): string {
+  return attemptArtifactRefV2(attemptId, "executor-observation-receipt.json");
+}
+
+export function validateExecutorObservationReceiptV2(value: unknown): asserts value is ExecutorObservationReceiptV2 {
+  if (!isRecord(value)) throw observationReceiptError("B4_OBSERVATION_RECEIPT_INVALID");
+  assertExactReceiptKeys(value, [
+    "schema", "runId", "phaseId", "taskId", "attemptId", "invocationId",
+    "coreBindingDigest", "observation", "receiptDigest",
+  ]);
+  if (value.schema !== EXECUTOR_OBSERVATION_RECEIPT_SCHEMA_V2) throw observationReceiptError("B4_OBSERVATION_RECEIPT_INVALID");
+  const binding = receiptBinding(value);
+  for (const item of Object.values(binding)) assertReceiptIdentity(item);
+  const expectedBindingDigest = sha256Canonical(binding);
+  if (!isSha256Digest(value.coreBindingDigest) || value.coreBindingDigest !== expectedBindingDigest) {
+    throw observationReceiptError("B4_OBSERVATION_RECEIPT_INVALID");
+  }
+  try { validateExecutorObservationEnvelopeV2(value.observation); }
+  catch (error) { throw observationReceiptError("B4_OBSERVATION_RECEIPT_INVALID", error); }
+  if (value.observation.invocationId !== binding.invocationId) throw observationReceiptError("B4_OBSERVATION_RECEIPT_INVALID");
+  if (!isSha256Digest(value.receiptDigest)) throw observationReceiptError("B4_OBSERVATION_RECEIPT_INVALID");
+  const { receiptDigest: _ignored, ...base } = value;
+  if (sha256Canonical(base) !== value.receiptDigest) throw observationReceiptError("B4_OBSERVATION_RECEIPT_INVALID");
+}
+
+/** Persistable only from the process-local nominal observation capability. */
+export async function persistTrustedExecutorObservationReceiptV2(
+  store: RalphEventStoreV2,
+  observation: TrustedExecutorObservationV2,
+  nonce: string,
+): Promise<ArtifactPersistenceResultV2<ExecutorObservationReceiptV2>> {
+  const record = requireTrustedObservation(observation);
+  const binding: ExecutorObservationBindingV2 = {
+    runId: record.runId,
+    phaseId: record.phaseId,
+    taskId: record.taskId,
+    attemptId: record.attemptId,
+    invocationId: record.invocationId,
+  };
+  if (binding.runId !== store.runId) throw observationReceiptError("B4_OBSERVATION_RECEIPT_INVALID");
+  const observationEnvelope = observationEnvelopeFromRecord(record);
+  const base = {
+    schema: EXECUTOR_OBSERVATION_RECEIPT_SCHEMA_V2,
+    ...binding,
+    coreBindingDigest: sha256Canonical(binding),
+    observation: observationEnvelope,
+  } as const;
+  const receipt: ExecutorObservationReceiptV2 = freezeDeep({ ...base, receiptDigest: sha256Canonical(base) });
+  validateExecutorObservationReceiptV2(receipt);
+  return persistImmutableJsonArtifactV2({
+    store,
+    ref: executorObservationReceiptRefV2(receipt.attemptId),
+    artifact: receipt,
+    validate: validateExecutorObservationReceiptV2,
+    nonce,
+  });
+}
+
+export async function readExecutorObservationReceiptV2(
+  store: RalphEventStoreV2,
+  attemptId: string,
+): Promise<ExecutorObservationReceiptV2 | undefined> {
+  return readImmutableJsonArtifactV2({
+    store,
+    ref: executorObservationReceiptRefV2(attemptId),
+    validate: validateExecutorObservationReceiptV2,
+  });
+}
+
+/**
+ * Re-seals a trusted observation exclusively from mutually agreeing durable
+ * Core authorities. No executor runtime is observed or invoked here.
+ */
+export async function rehydrateTrustedExecutorObservationV2(input: {
+  readonly leasedRun: LeasedRunV2;
+  readonly authorization: PostExecutorObservationAuthorizationV2;
+}): Promise<TrustedExecutorObservationV2> {
+  assertPostExecutorObservationAuthorizationV2(input.authorization);
+  await revalidateLeaseOwnershipV2(input.leasedRun);
+  const authorization = postExecutorObservationAuthorizationRecordV2(input.authorization);
+  const attempt = input.leasedRun.state.attempts[authorization.attemptId];
+  if (input.leasedRun.runId !== authorization.runId
+    || !attempt || attempt.disposition !== "OPEN" || attempt.stage !== authorization.stage
+    || !attempt.invocation || !attempt.executorFinished
+    || attempt.phaseId !== authorization.phaseId || attempt.taskId !== authorization.taskId
+    || attempt.invocation.invocationId !== authorization.invocationId
+    || attempt.executorFinished.invocationId !== authorization.invocationId
+    || sha256Canonical(input.leasedRun.snapshot) !== authorization.snapshotDigest) {
+    throw new RalphB4ExecutionError("B4_OBSERVATION_RECEIPT_INVALID");
+  }
+  const receipt = await readExecutorObservationReceiptV2(input.leasedRun.store, authorization.attemptId);
+  if (!receipt) throw new RalphB4ExecutionError("B4_OBSERVATION_RECEIPT_REQUIRED");
+  const result = await readInvocationResultV2(input.leasedRun.store, authorization.attemptId);
+  if (!result) throw new RalphB4ExecutionError("B4_OBSERVATION_RECEIPT_REQUIRED", "B4_OBSERVATION_RECEIPT_REQUIRED: InvocationResult is absent");
+  assertReceiptAuthorizationBinding(receipt, authorization);
+  assertReceiptResultAndAttemptBinding(receipt, result, attempt);
+  return sealTrustedExecutorObservationV2(receipt.observation, receiptBinding(receipt), receipt.observation.runtimeIdentity);
 }
 
 /** Derive NOT_INVOKED authority only from a sealed, exactly bound observation. */
@@ -374,6 +495,16 @@ export async function executeAuthorizedInvocationV2(input: ExecuteAuthorizedInvo
   if (!initialAttempt.invocation) throw new RalphB4ExecutionError("B4_AUTHORIZATION_REQUIRED", "B4_AUTHORIZATION_REQUIRED: invocation descriptor is missing");
   const invocationId = initialAttempt.invocation.invocationId;
 
+  if (initialAttempt.stage === "EXECUTOR_DISPATCH_AUTHORIZED" || initialAttempt.stage === "EXECUTOR_RUNNING") {
+    const terminalReceipt = await readExecutorObservationReceiptV2(input.leasedRun.store, initialAttempt.attemptId);
+    if (terminalReceipt) {
+      throw new RalphB4ExecutionError(
+        "B4_EVENT_DURABILITY_UNKNOWN_REQUIRES_INSPECTION",
+        "B4_EVENT_DURABILITY_UNKNOWN_REQUIRES_INSPECTION: terminal observation receipt exists before executor.finished; Executor recovery must not observe or redispatch",
+      );
+    }
+  }
+
   if (initialAttempt.stage === "POST_EXECUTOR_CAPTURE") {
     return await finishedBoundaryResult(input, invocationId, clock, nonceFactory);
   }
@@ -519,6 +650,10 @@ async function continueFromTrustedObservation(
   await commitStartedIfNeeded(input, currentAttempt, observation, clock, nonceFactory, eventIdFactory);
   const startedAttempt = findAttempt(input.leasedRun.state, currentAttempt.attemptId);
   if (!startedAttempt || startedAttempt.disposition !== "OPEN") throw new RalphB4ExecutionError("B4_EVENT_DURABILITY_UNKNOWN_REQUIRES_INSPECTION");
+  // Crash-safe terminal ordering: trusted receipt, InvocationResult, then the
+  // executor.finished event. A later stage can never exist without both
+  // immutable artifacts unless durable authority was externally damaged.
+  await persistTrustedExecutorObservationReceiptV2(input.leasedRun.store, observation, nonceFactory());
   const result = await persistOrReuseResult(input.leasedRun.store, startedAttempt, observation, nonceFactory);
   await commitFinishedIfNeeded(input, startedAttempt, observation, clock, nonceFactory, eventIdFactory);
   const finishedAttempt = findAttempt(input.leasedRun.state, currentAttempt.attemptId);
@@ -538,24 +673,19 @@ async function continueFromTrustedObservation(
 async function finishedBoundaryResult(
   input: ExecuteAuthorizedInvocationV2Input,
   invocationId: string,
-  clock: () => string,
-  nonceFactory: () => string,
+  _clock: () => string,
+  _nonceFactory: () => string,
 ): Promise<ExecuteAuthorizedInvocationV2Result> {
   const attempt = findAttempt(input.leasedRun.state, input.attemptId);
   if (!attempt || attempt.stage !== "POST_EXECUTOR_CAPTURE" || !attempt.executorFinished) throw new RalphB4ExecutionError("B4_AUTHORIZATION_REQUIRED");
-  const reopened = await reopenAuthorizedInvocationV2({
+  const authorization = await authorizePostExecutorObservationV2({
     leasedRun: input.leasedRun,
     plan: input.plan,
     attemptId: attempt.attemptId,
     planIdentity: input.planIdentity,
     planDigest: input.planDigest,
-    requireBaseFingerprint: false,
   });
-  const observation = await observeTrustedExecutorInvocationV2(input.runtime, reopened.authorizedInvocation);
-  if (observation.state !== "TERMINATED_QUIESCENT") {
-    if (observation.state === "UNKNOWN") return await reconcileUnknown(input, observation, attempt, invocationId, clock, nonceFactory, input.eventIdFactory ?? randomUUID);
-    return await reconcileWithoutObservation(input, attempt, invocationId, "B4_FINISHED_ATTEMPT_OBSERVATION_INCONSISTENT", reopened.authorizedInvocation, clock, nonceFactory, input.eventIdFactory ?? randomUUID);
-  }
+  const observation = await rehydrateTrustedExecutorObservationV2({ leasedRun: input.leasedRun, authorization });
   const result = await readInvocationResultV2(input.leasedRun.store, attempt.attemptId);
   if (!result) throw new RalphB4ExecutionError("B4_BASE_MANIFEST_REQUIRED", "B4_BASE_MANIFEST_REQUIRED: executor result artifact is missing");
   assertResultMatchesFinished(input.leasedRun.runId, attempt, result, observation);
@@ -891,6 +1021,89 @@ function assertResultMatchesFinished(runId: string, attempt: AttemptStateV2, res
     || result.startedAt !== observation.startedAt) {
     throw new RalphB4ExecutionError("B4_RESULT_IMMUTABLE_CONFLICT", "B4_RESULT_IMMUTABLE_CONFLICT: invocation-result and executor.finished disagree");
   }
+}
+
+function observationEnvelopeFromRecord(record: ExecutorObservationRecordV2): ExecutorObservationEnvelopeV2 {
+  const {
+    runId: _runId,
+    phaseId: _phaseId,
+    taskId: _taskId,
+    attemptId: _attemptId,
+    ...envelope
+  } = record;
+  validateExecutorObservationEnvelopeV2(envelope);
+  return freezeDeep(envelope);
+}
+
+function receiptBinding(value: Record<string, unknown> | ExecutorObservationReceiptV2): ExecutorObservationBindingV2 {
+  return {
+    runId: value.runId as string,
+    phaseId: value.phaseId as string,
+    taskId: value.taskId as string,
+    attemptId: value.attemptId as string,
+    invocationId: value.invocationId as string,
+  };
+}
+
+function assertReceiptAuthorizationBinding(
+  receipt: ExecutorObservationReceiptV2,
+  authorization: ReturnType<typeof postExecutorObservationAuthorizationRecordV2>,
+): void {
+  if (receipt.runId !== authorization.runId
+    || receipt.phaseId !== authorization.phaseId
+    || receipt.taskId !== authorization.taskId
+    || receipt.attemptId !== authorization.attemptId
+    || receipt.invocationId !== authorization.invocationId) {
+    throw new RalphB4ExecutionError("B4_OBSERVATION_RECEIPT_INVALID", "B4_OBSERVATION_RECEIPT_INVALID: B3 authorization binding mismatch");
+  }
+}
+
+function assertReceiptResultAndAttemptBinding(
+  receipt: ExecutorObservationReceiptV2,
+  result: InvocationResultV2,
+  attempt: AttemptStateV2,
+): void {
+  validateExecutorObservationReceiptV2(receipt);
+  validateInvocationResultV2(result);
+  const observation = receipt.observation;
+  const finished = attempt.executorFinished;
+  const expectedStartedRef = observation.startedObservationId ?? observation.observationId;
+  if (!finished || observation.state !== "TERMINATED_QUIESCENT"
+    || result.runId !== receipt.runId || result.phaseId !== receipt.phaseId
+    || result.taskId !== receipt.taskId || result.attemptId !== receipt.attemptId
+    || result.invocationId !== receipt.invocationId || observation.invocationId !== receipt.invocationId
+    || result.resultEnvelopeStatus !== observation.resultEnvelopeStatus
+    || result.status !== observation.status || result.termination !== observation.termination
+    || result.exitCode !== (observation.exitCode ?? null) || result.signal !== (observation.signal ?? null)
+    || result.startedAt !== observation.startedAt || result.finishedAt !== observation.finishedAt
+    || result.startedObservationRef !== expectedStartedRef || result.finishedObservationRef !== observation.observationId
+    || canonicalJson(result.safeMetadata) !== canonicalJson(observation.safeMetadata)
+    || finished.invocationId !== receipt.invocationId
+    || finished.status !== result.status || finished.termination !== result.termination
+    || finished.finishedAt !== result.finishedAt) {
+    throw new RalphB4ExecutionError("B4_OBSERVATION_RECEIPT_INVALID", "B4_OBSERVATION_RECEIPT_INVALID: receipt, InvocationResult, and executor.finished disagree");
+  }
+}
+
+function assertExactReceiptKeys(value: object, allowed: readonly string[]): void {
+  const expected = new Set(allowed);
+  if (Object.keys(value).length !== expected.size || Object.keys(value).some((key) => !expected.has(key))) {
+    throw observationReceiptError("B4_OBSERVATION_RECEIPT_INVALID");
+  }
+}
+
+function assertReceiptIdentity(value: unknown): asserts value is string {
+  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/.test(value)) {
+    throw observationReceiptError("B4_OBSERVATION_RECEIPT_INVALID");
+  }
+}
+
+function observationReceiptError(message: string, cause?: unknown): RalphB4ArtifactError {
+  return new RalphB4ArtifactError("B4_ARTIFACT_INVALID", message, cause);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isProtocolFailure(error: unknown): boolean {
