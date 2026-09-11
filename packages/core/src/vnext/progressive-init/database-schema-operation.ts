@@ -28,12 +28,25 @@ import {
   type StoryPersistenceSubject,
 } from "./database-schema-ir.js";
 
+export const DATABASE_SCHEMA_PERSISTENCE_SEMANTICS = Object.freeze({
+  scope: "Classify only whether each User Story requires state represented by the logical relational Database Schema governed by this P3 stage.",
+  options: Object.freeze({
+    persisted: "The User Story requires state represented by this P3 logical relational Database Schema.",
+    notPersisted: "No state from the User Story belongs in this relational Database Schema, even if browser localStorage, IndexedDB, filesystem storage, or an external service provides durability.",
+  }),
+});
+
 export const DATABASE_SCHEMA_PERSISTENCE_INSTRUCTIONS = [
-  "Recommend exactly one Core-owned persistence option for every supplied storyPersistenceSubject.",
+  "This P3 stage governs a logical relational Database Schema. Recommend exactly one Core-owned persistence option for every supplied storyPersistenceSubject within that scope only.",
+  "The persisted option means the User Story requires state represented by this P3 logical relational Database Schema.",
+  "The not-persisted option means no state from the User Story belongs in this relational Database Schema, even if another mechanism provides durability.",
+  "Browser localStorage, IndexedDB, filesystem storage, and external-service state do not by themselves imply relational persistence merely because state survives refresh, restart, or reopening.",
+  "Inspect the upstream authority for the actual persistence mechanism. Recommend persisted only when upstream authority actually places the story state inside the P3 relational schema.",
+  "Explain in every rationale the relevant upstream persistence mechanism or its absence and why it does or does not belong in the P3 relational schema.",
   "Core owns every subject, story identity, option key, structural decision, determination, and authority record.",
   "Return exactly one recommendation for each supplied subject. Do not add, omit, merge, or replace subjects.",
   "Use only the exact Core option keys persisted or not-persisted.",
-  "Question wording and rationale are presentation only and cannot create database structure.",
+  "Recommendation text is non-authoritative and cannot redefine the Core-owned option meanings or create database structure. The developer's interactive selection remains final authority.",
   "Do not author tables, fields, schema, determinations, structural decisions, approval, or Markdown.",
 ].join("\n");
 
@@ -41,7 +54,9 @@ export const DATABASE_SCHEMA_PROPOSAL_INSTRUCTIONS = [
   "Produce one complete non-authoritative logical relational database-schema proposal using only the strict schema-body shape.",
   "The developer-selected story persistence decisions are authoritative. A not-persisted story must have no table mappings.",
   "Every persisted story must map to at least one proposed table, and every proposed table must serve at least one persisted story.",
-  "Use only the supplied logical type vocabulary. Composite primary keys are allowed; foreign keys are single-field only.",
+  "Every proposed table MUST contain one or more fields and at least one primaryKeyFieldKeys entry. Never emit an empty primaryKeyFieldKeys array.",
+  "Every primaryKeyFieldKeys entry MUST exactly reference a field key emitted in that same table. Composite primary keys remain allowed.",
+  "Use only the supplied logical type vocabulary. Foreign keys are single-field only.",
   "Foreign-key targets must be a single-field primary key or a single-field unique constraint and endpoint logical types must match.",
   "Many-to-many semantics require an explicit junction table. Do not emit relationship cardinality.",
   "Do not infer tables or fields by convention. Do not add timestamps, auth, audit, tenant, soft-delete, or generated IDs unless the exact approved upstream story semantics justify them.",
@@ -124,13 +139,22 @@ function persistenceQuestion(
   return {
     ...pendingQuestionEvidence({
       key: subject.key,
-      question: recommendation.question,
+      question: `Should User Story '${subject.storyKey}' have state represented by the logical relational Database Schema governed by P3?`,
       materiality: "architecture",
       rigidity: "RIGID",
       recommendedAnswer: { value: recommended.label, rationale: recommendation.rationale },
       alternatives: [],
     }),
-    choices: subject.options.map((entry) => ({ label: entry.label, details: [`Story: ${subject.storyKey}`, `Option key: ${entry.key}`] })),
+    choices: subject.options.map((entry) => ({
+      label: entry.label,
+      details: [
+        `Story: ${subject.storyKey}`,
+        `Option key: ${entry.key}`,
+        entry.key === "persisted"
+          ? DATABASE_SCHEMA_PERSISTENCE_SEMANTICS.options.persisted
+          : DATABASE_SCHEMA_PERSISTENCE_SEMANTICS.options.notPersisted,
+      ],
+    })),
     recommendedLabel: recommended.label,
     answerPrompt: "Choice (blank accepts recommendation): ",
   };
@@ -167,6 +191,7 @@ async function selectPersistenceAuthority(
     DATABASE_SCHEMA_PERSISTENCE_INSTRUCTIONS,
     {
       task: "Recommend one persistence disposition for every Core-owned User Story subject.",
+      persistenceSemantics: DATABASE_SCHEMA_PERSISTENCE_SEMANTICS,
       upstream: options.upstream,
       storyPersistenceSubjects: requiredSubjects,
       existingDeveloperAuthority: options.existing ?? null,

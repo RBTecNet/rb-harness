@@ -11,6 +11,7 @@ import {
 } from "../../src/vnext/progressive-init/database-schema-document.js";
 import {
   DATABASE_SCHEMA_LOGICAL_TYPES,
+  DATABASE_SCHEMA_PROPOSAL_SCHEMA,
   canonicalizeDatabaseSchema,
   databaseSchemaAcceptedDecisionProjection,
   databaseSchemaAuthoritativeInputSha256,
@@ -29,7 +30,12 @@ import {
   type DatabaseSchemaStoryPersistence,
   type DatabaseSchemaUpstreamProjection,
 } from "../../src/vnext/progressive-init/database-schema-ir.js";
-import { runDatabaseSchemaOperation } from "../../src/vnext/progressive-init/database-schema-operation.js";
+import {
+  DATABASE_SCHEMA_PERSISTENCE_INSTRUCTIONS,
+  DATABASE_SCHEMA_PERSISTENCE_SEMANTICS,
+  DATABASE_SCHEMA_PROPOSAL_INSTRUCTIONS,
+  runDatabaseSchemaOperation,
+} from "../../src/vnext/progressive-init/database-schema-operation.js";
 import { loadDatabaseSchema, writeDatabaseSchemaAtomically } from "../../src/vnext/progressive-init/database-schema-store.js";
 import { parseProjectDescriptionDocument } from "../../src/vnext/progressive-init/project-description-document.js";
 import type { ProjectDescription } from "../../src/vnext/progressive-init/project-description-ir.js";
@@ -204,6 +210,26 @@ function directUpstream(): DatabaseSchemaUpstreamProjection {
   return databaseSchemaUpstreamProjection(stories, "a".repeat(64));
 }
 
+function singleStoryUpstream(
+  storyKey: string,
+  intent: string,
+  outcome: string,
+  acceptance: readonly string[],
+): DatabaseSchemaUpstreamProjection {
+  const base = directUpstream();
+  const story = {
+    ...base.userStories.stories[0]!,
+    key: storyKey as any,
+    intent,
+    outcome,
+    acceptance: [...acceptance],
+  };
+  return databaseSchemaUpstreamProjection(
+    { ...base.userStories, stories: [story] },
+    base.userStoriesUpstreamProjectionSha256,
+  );
+}
+
 function authority(upstream: DatabaseSchemaUpstreamProjection, dispositions: Record<string, "persisted" | "not-persisted">) {
   const subjects = enumerateStoryPersistenceSubjects(upstream);
   const structuralDecisions: DatabaseSchemaStoryPersistence[] = subjects.map((subject) => ({
@@ -261,6 +287,21 @@ const validProposal = () => ({
   foreignKeys: [],
 });
 
+function singleStoryProposal(storyKey: string) {
+  return {
+    storyCoverage: [{ storyKey, tableKeys: ["tasks"] }],
+    tables: [{
+      key: "tasks",
+      name: "tasks",
+      purpose: "Store explicitly approved relational task state.",
+      fields: [{ key: "task-id", name: "task_id", logicalType: "uuid", required: true }],
+      primaryKeyFieldKeys: ["task-id"],
+      uniqueConstraints: [],
+    }],
+    foreignKeys: [],
+  };
+}
+
 function applicableSchema(upstream = directUpstream()): DatabaseSchema {
   const selected = authority(upstream, { "create-issue": "persisted", "read-status": "not-persisted" });
   const decoded = decodeDatabaseSchemaProposalWire(validProposal());
@@ -276,6 +317,127 @@ describe("Progressive Init Phase 3 database-schema", () => {
     expect(subjects.map((entry) => entry.storyKey)).toEqual(["create-issue", "read-status"]);
     expect(subjects.every((entry) => entry.options.map((option) => option.key).join(",") === "persisted,not-persisted")).toBe(true);
     expect(new Set(subjects.map((entry) => entry.key)).size).toBe(2);
+  });
+
+  it("defines localStorage durability outside relational persistence and keeps the visible question Core-owned", async () => {
+    const upstream = singleStoryUpstream(
+      "add-personal-task",
+      "Add a personal task",
+      "The task remains available after refresh through browser localStorage",
+      ["The browser stores and restores the task from localStorage"],
+    );
+    const recommendations: any = persistenceRecommendations(upstream, { "add-personal-task": "not-persisted" });
+    recommendations.recommendations[0].question = "Does this story persist anything at all?";
+    recommendations.recommendations[0].rationale = "Browser localStorage is the upstream durability mechanism and it does not belong in the P3 relational schema.";
+    const adapter = new Adapter([recommendations]);
+    const shown: any[] = [];
+    let answerCalls = 0;
+    const result = await runDatabaseSchemaOperation({
+      upstream, profile, adapter, auth,
+      interview: { kind: "interactive", answer: async () => { answerCalls += 1; return ""; } },
+      onQuestion: (question) => { shown.push(question); },
+      deadlineMs: 10_000,
+    });
+
+    expect(adapter.requests.map((entry) => entry.slice)).toEqual(["database-schema-persistence-questions"]);
+    expect(adapter.requests[0]!.instructions).toBe(DATABASE_SCHEMA_PERSISTENCE_INSTRUCTIONS);
+    expect(adapter.requests[0]!.instructions).toContain("logical relational Database Schema");
+    expect(adapter.requests[0]!.instructions).toContain("localStorage, IndexedDB, filesystem storage, and external-service state");
+    expect(adapter.requests[0]!.instructions).toContain("developer's interactive selection remains final authority");
+    const providerInput = JSON.parse(adapter.requests[0]!.input);
+    expect(providerInput.persistenceSemantics).toEqual(DATABASE_SCHEMA_PERSISTENCE_SEMANTICS);
+    expect(providerInput.persistenceSemantics.options.persisted).toContain("represented by this P3 logical relational Database Schema");
+    expect(providerInput.persistenceSemantics.options.notPersisted).toContain("even if browser localStorage, IndexedDB, filesystem storage, or an external service provides durability");
+    expect(shown).toHaveLength(1);
+    expect(shown[0].question).toContain("logical relational Database Schema governed by P3");
+    expect(shown[0].question).not.toContain("persist anything at all");
+    expect(shown[0].choices[0].details).toContain(DATABASE_SCHEMA_PERSISTENCE_SEMANTICS.options.persisted);
+    expect(shown[0].choices[1].details).toContain(DATABASE_SCHEMA_PERSISTENCE_SEMANTICS.options.notPersisted);
+    expect(answerCalls).toBe(1);
+    expect(result.value).toMatchObject({
+      disposition: "not-applicable",
+      tables: [],
+      foreignKeys: [],
+      structuralDecisions: [{
+        storyKey: "add-personal-task",
+        disposition: "not-persisted",
+        source: { kind: "accepted-recommendation", acceptanceMode: "blank-interactive" },
+      }],
+    });
+    expect(result.semanticOperations).toBe(1);
+  });
+
+  it.each([
+    ["check-server-health", "Check server health", "The current server health is displayed", "No retained state is required"],
+    ["indexed-task-cache", "Cache tasks in IndexedDB", "Tasks remain available through IndexedDB", "IndexedDB provides the durable state"],
+    ["filesystem-export", "Export tasks to a file", "The filesystem contains the export", "Filesystem storage provides durability"],
+    ["external-sync", "Synchronize tasks to an external service", "The external service retains the tasks", "The external service owns the durable state"],
+  ])("keeps non-relational durability out of the P3 schema for %s", async (storyKey, intent, outcome, acceptance) => {
+    const upstream = singleStoryUpstream(storyKey, intent, outcome, [acceptance]);
+    const adapter = new Adapter([persistenceRecommendations(upstream, { [storyKey]: "not-persisted" })]);
+    const result = await runDatabaseSchemaOperation({
+      upstream, profile, adapter, auth,
+      interview: { kind: "interactive", answer: async () => "" },
+      deadlineMs: 10_000,
+    });
+    expect(result.value).toMatchObject({ disposition: "not-applicable", tables: [], foreignKeys: [] });
+    expect(result.value.structuralDecisions[0]).toMatchObject({ storyKey, disposition: "not-persisted" });
+    expect(adapter.requests.map((entry) => entry.slice)).toEqual(["database-schema-persistence-questions"]);
+    expect(JSON.parse(adapter.requests[0]!.input).persistenceSemantics).toEqual(DATABASE_SCHEMA_PERSISTENCE_SEMANTICS);
+  });
+
+  it("materializes explicit relational persistence and enters proposal generation without collapsing durable stories", async () => {
+    const upstream = singleStoryUpstream(
+      "store-relational-task",
+      "Store a task in the application relational database governed by P3",
+      "The relational task record is available to the application",
+      ["The P3 logical relational schema represents the task"],
+    );
+    const adapter = new Adapter([
+      persistenceRecommendations(upstream, { "store-relational-task": "persisted" }),
+      singleStoryProposal("store-relational-task"),
+    ]);
+    const answers = ["", "approve"];
+    const result = await runDatabaseSchemaOperation({
+      upstream, profile, adapter, auth,
+      interview: { kind: "interactive", answer: async () => answers.shift()! },
+      deadlineMs: 10_000,
+    });
+    expect(result.value.disposition).toBe("applicable");
+    expect(result.value.structuralDecisions[0]).toMatchObject({
+      storyKey: "store-relational-task",
+      disposition: "persisted",
+      source: { kind: "accepted-recommendation", acceptanceMode: "blank-interactive" },
+    });
+    expect(result.value.tables[0]?.primaryKeyFieldKeys).toEqual(["task-id"]);
+    expect(adapter.requests.map((entry) => entry.slice)).toEqual([
+      "database-schema-persistence-questions",
+      "database-schema-proposal",
+    ]);
+  });
+
+  it("requires interactive developer authority and permits an explicit override of provider recommendation", async () => {
+    const upstream = singleStoryUpstream("client-cache", "Cache a task", "The task is cached", ["The client cache contains the task"]);
+    const headlessAdapter = new Adapter([persistenceRecommendations(upstream, { "client-cache": "persisted" })]);
+    await expect(runDatabaseSchemaOperation({
+      upstream, profile, adapter: headlessAdapter, auth,
+      interview: { kind: "headless" },
+      deadlineMs: 10_000,
+    })).rejects.toThrow(/DATABASE_SCHEMA_INTERACTIVE_AUTHORITY_REQUIRED/);
+    expect(headlessAdapter.requests).toEqual([]);
+
+    const interactiveAdapter = new Adapter([persistenceRecommendations(upstream, { "client-cache": "persisted" })]);
+    let answerCalls = 0;
+    const result = await runDatabaseSchemaOperation({
+      upstream, profile, adapter: interactiveAdapter, auth,
+      interview: { kind: "interactive", answer: async () => { answerCalls += 1; return "not-persisted"; } },
+      deadlineMs: 10_000,
+    });
+    expect(answerCalls).toBe(1);
+    expect(result.value.structuralDecisions[0]).toMatchObject({
+      disposition: "not-persisted",
+      source: { kind: "user-answer" },
+    });
   });
 
   it("binds persistence authority to every typed story field without invalidating an unrelated story", () => {
@@ -409,6 +571,42 @@ describe("Progressive Init Phase 3 database-schema", () => {
     if (mismatchDecoded.ok) expect(resolveDatabaseSchemaProposal(mismatchDecoded.value, upstream, selected.determinations, selected.structuralDecisions).ok).toBe(false);
   });
 
+  it("keeps the proposal schema and local validator fail-closed for empty and non-local primary-key references", () => {
+    const tablesSchema = DATABASE_SCHEMA_PROPOSAL_SCHEMA.properties.tables;
+    expect(tablesSchema.items.properties.fields.minItems).toBe(1);
+    expect(tablesSchema.items.properties.primaryKeyFieldKeys.minItems).toBe(1);
+    const upstream = directUpstream();
+    const selected = authority(upstream, { "create-issue": "persisted", "read-status": "not-persisted" });
+
+    const empty = validProposal();
+    empty.tables[0]!.primaryKeyFieldKeys = [];
+    const emptyDecoded = decodeDatabaseSchemaProposalWire(empty);
+    expect(emptyDecoded.ok).toBe(true);
+    if (emptyDecoded.ok) {
+      const resolved = resolveDatabaseSchemaProposal(emptyDecoded.value, upstream, selected.determinations, selected.structuralDecisions);
+      expect(resolved).toMatchObject({
+        ok: false,
+        findings: [{
+          pointer: "/tables/0/primaryKeyFieldKeys",
+          message: "table must contain at least one primary-key field",
+        }],
+      });
+    }
+
+    const unknown = validProposal();
+    unknown.tables[0]!.primaryKeyFieldKeys = ["missing"];
+    const unknownDecoded = decodeDatabaseSchemaProposalWire(unknown);
+    expect(unknownDecoded.ok).toBe(true);
+    if (unknownDecoded.ok) {
+      const resolved = resolveDatabaseSchemaProposal(unknownDecoded.value, upstream, selected.determinations, selected.structuralDecisions);
+      expect(resolved.ok).toBe(false);
+      if (!resolved.ok) expect(resolved.findings).toContainEqual(expect.objectContaining({
+        pointer: "/tables/0/primaryKeyFieldKeys/0",
+        message: "unknown primary-key field 'missing'",
+      }));
+    }
+  });
+
   it("round-trips composite primary keys and explicit junction-table many-to-many without cardinality authority", () => {
     const upstream = directUpstream();
     const selected = authority(upstream, { "create-issue": "persisted", "read-status": "not-persisted" });
@@ -442,7 +640,7 @@ describe("Progressive Init Phase 3 database-schema", () => {
   it("uses bounded whole-candidate correction and presents only the final mechanically valid proposal", async () => {
     const upstream = directUpstream();
     const invalid = validProposal();
-    invalid.storyCoverage[0]!.tableKeys = ["missing"];
+    invalid.tables[0]!.primaryKeyFieldKeys = [];
     const shown: string[] = [];
     const answers = ["persisted", "not-persisted", "approve"];
     const adapter = new Adapter([
@@ -465,7 +663,53 @@ describe("Progressive Init Phase 3 database-schema", () => {
     ]);
     expect(shown).toHaveLength(1);
     expect(shown[0]).toContain('"issues"');
-    expect(JSON.parse(adapter.requests[2]!.input).recovery.completeCandidateRegeneration).toBe(true);
+    expect(adapter.requests[1]!.instructions).toBe(DATABASE_SCHEMA_PROPOSAL_INSTRUCTIONS);
+    expect(adapter.requests[2]!.instructions).toBe(DATABASE_SCHEMA_PROPOSAL_INSTRUCTIONS);
+    expect(adapter.requests[2]!.instructions).toContain("Every proposed table MUST contain one or more fields and at least one primaryKeyFieldKeys entry");
+    expect(adapter.requests[2]!.instructions).toContain("Every primaryKeyFieldKeys entry MUST exactly reference a field key emitted in that same table");
+    expect(JSON.parse(adapter.requests[2]!.input).recovery).toEqual({
+      completeCandidateRegeneration: true,
+      immediatelyPrecedingFindings: [{
+        pointer: "/tables/0/primaryKeyFieldKeys",
+        message: "table must contain at least one primary-key field",
+      }],
+    });
+    expect(result.value.tables[0]!.fields.map((entry) => entry.key)).toEqual(["id", "title"]);
+    expect(result.value.tables[0]!.primaryKeyFieldKeys).toEqual(["id"]);
+  });
+
+  it("terminates after one initial and one corrective invalid primary-key proposal without Core synthesis or publication", async () => {
+    const projectRoot = await root();
+    const upstream = await seedUpstream(projectRoot);
+    const invalidFirst = validProposal();
+    invalidFirst.tables[0]!.primaryKeyFieldKeys = [];
+    const invalidSecond = validProposal();
+    invalidSecond.tables[0]!.primaryKeyFieldKeys = [];
+    const adapter = new Adapter([
+      persistenceRecommendations(upstream, { "create-issue": "persisted", "read-status": "not-persisted" }),
+      invalidFirst,
+      invalidSecond,
+    ]);
+    const answers = ["persisted", "not-persisted"];
+    await expect(runProgressiveInit({
+      projectRoot, originalRequest: REQUEST, selectedStage: "database-schema", profile,
+      adapter, auth,
+      interview: { kind: "interactive", answer: async () => answers.shift()! },
+    })).rejects.toThrow(/DATABASE_SCHEMA_PROPOSAL_INVALID_AFTER_RECOVERY: \/tables\/0\/primaryKeyFieldKeys: table must contain at least one primary-key field/);
+    expect(adapter.requests.map((entry) => entry.slice)).toEqual([
+      "database-schema-persistence-questions",
+      "database-schema-proposal",
+      "database-schema-proposal",
+    ]);
+    expect(adapter.requests.filter((entry) => entry.slice === "database-schema-proposal")).toHaveLength(2);
+    expect(JSON.parse(adapter.requests[1]!.input).recovery).toBeUndefined();
+    expect(JSON.parse(adapter.requests[2]!.input).recovery.immediatelyPrecedingFindings).toEqual([{
+      pointer: "/tables/0/primaryKeyFieldKeys",
+      message: "table must contain at least one primary-key field",
+    }]);
+    expect(invalidFirst.tables[0]!.fields.map((entry) => entry.key)).toEqual(["id", "title"]);
+    expect(invalidSecond.tables[0]!.fields.map((entry) => entry.key)).toEqual(["id", "title"]);
+    await expect(readFile(resolve(projectRoot, ".spec", "init", "database-schema.md"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("accepts only persistence ordinals, exact Core keys, and exact displayed Core labels", async () => {
