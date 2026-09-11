@@ -66,7 +66,6 @@ export function deriveCodexWorkspaceDeltaEntriesV2(input: DeriveCodexDeltaInputV
   if (ownership.length === 0) throw new RalphM5BError("M5B_DELTA_OUT_OF_SCOPE", "M5B_DELTA_OUT_OF_SCOPE: the WorkUnit declares no owned path");
   const baselineFiles = fileMap(input.baseline);
   const finalFiles = fileMap(input.final);
-  const baselineDirectories = new Set(input.baseline.filter((entry) => entry.kind === "directory").map((entry) => entry.path));
   const entries: Omit<CodexDeltaEntryV2, "postimageBase64">[] = [];
 
   for (const path of [...new Set([...baselineFiles.keys(), ...finalFiles.keys()])].sort()) {
@@ -87,15 +86,12 @@ export function deriveCodexWorkspaceDeltaEntriesV2(input: DeriveCodexDeltaInputV
     entries.push({ path, operation: "DELETE", preimageDigest: before!.contentHash, postimageDigest: null, mode: null, postimageSize: null });
   }
 
-  // A directory the provider created is only ever implied by a file it
-  // created inside it. An empty new directory is an unsupported mutation
-  // rather than a silently ignored one.
-  for (const entry of input.final) {
-    if (entry.kind !== "directory" || baselineDirectories.has(entry.path)) continue;
-    const covered = entries.some((candidate) => candidate.operation === "CREATE" && candidate.path.startsWith(`${entry.path}/`));
-    if (!covered) throw new RalphM5BError("M5B_DELTA_UNSUPPORTED_MUTATION", `M5B_DELTA_UNSUPPORTED_MUTATION: empty directory ${entry.path}`);
-    assertPublishablePathV2(entry.path, ownership);
-  }
+  // The publication contract is file-authoritative: directories have no
+  // delta operation or sealed bytes. Parents are materialized only as
+  // transport for an independently authorized CREATE file, while empty
+  // directory trees disappear with the disposable provider projection.
+  // Every file above remains checked separately, so a parent never confers
+  // authority on an unowned child or sibling.
 
   if (entries.length > M5B_LIMITS_V2.deltaMaxEntries) throw new RalphM5BError("M5B_DELTA_LIMIT_EXCEEDED", "M5B_DELTA_LIMIT_EXCEEDED: entry count");
   return Object.freeze(entries);

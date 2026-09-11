@@ -744,6 +744,8 @@ describe("Ralph M5-B — crash windows and cold reopen", () => {
  */
 describe("Ralph M5-B — root-level product scope end to end", () => {
   const PACKAGE_JSON = '{\n  "name": "rb-m5b-probe",\n  "private": true\n}\n';
+  const INDEX_HTML = "<!doctype html>\n<title>M5-B fixture</title>\n";
+  const SERVER_JS = "export {};\n";
 
   async function rootFixture(overrides: Parameters<typeof bootstrapM5BRunV2>[0] = {}) {
     return fixture({
@@ -783,6 +785,54 @@ describe("Ralph M5-B — root-level product scope end to end", () => {
     for (const controlRoot of CODEX_PROJECTION_EXCLUDED_ROOTS_V2) {
       expect(await readFile(join(current.projectRoot, controlRoot, "canary.txt"), "utf8")).toBe("control-plane canary\n");
     }
+  }, 120_000);
+
+  it("finalizes and publishes the real T001 shape while discarding empty runtime-like directories", async () => {
+    transport.stagingWrites = [
+      { path: "package.json", content: PACKAGE_JSON },
+      { path: "public/index.html", content: INDEX_HTML },
+      { path: "server.js", content: SERVER_JS },
+    ];
+    transport.finalOutput = '{"summary":"created the T001 application files"}';
+    transport.afterRunHook = async (cwd) => {
+      await mkdir(join(cwd, ".agents"));
+      await mkdir(join(cwd, ".codex"));
+    };
+    const current = await rootFixture({
+      scope: "package.json public/index.html server.js",
+      covers: "package.json public/index.html server.js",
+      scopePaths: ["package.json", "public/index.html", "server.js"],
+      coversPaths: ["package.json", "public/index.html", "server.js"],
+      title: "Create the T001 application files",
+      change: "Create package.json, public/index.html and server.js",
+      acceptanceCriteria: ["All three authorized application files exist"],
+      validation: ["`node -e 'for (const p of [\"package.json\",\"public/index.html\",\"server.js\"]) require(\"fs\").accessSync(p)'`"],
+      expectedEvidence: "A three-entry file delta and a successful terminal artifact",
+    });
+    const { admitted, executed, executor } = await executeOnce(current);
+    expect(executed.kind).toBe("EXECUTOR_FINISHED_READY_FOR_CAPTURE");
+
+    const artifacts = await readCodexInvocationArtifactSetV2(current.store, current.attemptId);
+    expect(artifacts.providerResult).toMatchObject({ classification: "SUCCEEDED", terminalKind: "TURN_COMPLETED", actualExitCode: 0 });
+    expect(artifacts.workspaceDelta?.entryCount).toBe(3);
+    expect(artifacts.workspaceDelta?.entries.map((entry) => `${entry.operation} ${entry.path}`)).toEqual([
+      "CREATE package.json",
+      "CREATE public/index.html",
+      "CREATE server.js",
+    ]);
+    expect(artifacts.terminal).toMatchObject({
+      status: "SUCCEEDED",
+      termination: "NORMAL",
+      quiescence: { processState: "ABSENT", processTreeState: "QUIESCENT" },
+    });
+    expect((await executor.observe(admitted.authorizedInvocation.descriptor.invocationId)).state).toBe("TERMINATED_QUIESCENT");
+
+    expect(await readFile(join(current.projectRoot, "package.json"), "utf8")).toBe(PACKAGE_JSON);
+    expect(await readFile(join(current.projectRoot, "public/index.html"), "utf8")).toBe(INDEX_HTML);
+    expect(await readFile(join(current.projectRoot, "server.js"), "utf8")).toBe(SERVER_JS);
+    expect(existsSync(join(current.projectRoot, ".agents"))).toBe(false);
+    expect(existsSync(join(current.projectRoot, ".codex"))).toBe(false);
+    expect((await readCodexPublicationReceiptV2(current.store, current.attemptId))?.appliedCount).toBe(3);
   }, 120_000);
 
   it("carries the whole Attempt to COMPLETE through Evidence, Validation and Audit", async () => {

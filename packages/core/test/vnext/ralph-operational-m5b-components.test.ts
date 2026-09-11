@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -514,17 +515,19 @@ describe("Ralph M5-B — host-derived provider delta", () => {
     ]);
   });
 
-  it("refuses an out-of-scope path, a control-plane path and a traversal", () => {
+  it("refuses an out-of-scope path, every control-plane path and a traversal", () => {
     const outOfScope = () => deriveCodexWorkspaceDeltaEntriesV2({
       stagingWorkspace: "/tmp/unused", baseline, scope: "src/status.js", covers: "src/status.js",
       final: [...baseline, { path: "src/unexpected.js", kind: "file", mode: 0o644, size: 1, contentHash: sha256("x") }],
     });
     expect(outOfScope).toThrow(/M5B_DELTA_OUT_OF_SCOPE/);
-    const controlPlane = () => deriveCodexWorkspaceDeltaEntriesV2({
-      stagingWorkspace: "/tmp/unused", baseline, scope: ".rb-harness/**", covers: ".rb-harness/**",
-      final: [...baseline, { path: ".rb-harness/injected.txt", kind: "file", mode: 0o644, size: 1, contentHash: sha256("x") }],
-    });
-    expect(controlPlane).toThrow(/M5B_DELTA_PATH_FORBIDDEN/);
+    for (const path of [".rb-harness/injected.txt", ".rb/injected.txt", ".git/config"]) {
+      const controlPlane = () => deriveCodexWorkspaceDeltaEntriesV2({
+        stagingWorkspace: "/tmp/unused", baseline, scope: "**", covers: "**",
+        final: [...baseline, { path, kind: "file" as const, mode: 0o644, size: 1, contentHash: sha256("x") }],
+      });
+      expect(controlPlane, path).toThrow(/M5B_DELTA_PATH_FORBIDDEN/);
+    }
     const traversal = () => deriveCodexWorkspaceDeltaEntriesV2({
       stagingWorkspace: "/tmp/unused", baseline, scope: "**", covers: "**",
       final: [...baseline, { path: "../escaped.js", kind: "file", mode: 0o644, size: 1, contentHash: sha256("x") }],
@@ -532,16 +535,112 @@ describe("Ralph M5-B — host-derived provider delta", () => {
     expect(traversal).toThrow(/M5B_PROJECTION_PATH_UNSAFE/);
   });
 
-  it("refuses a chmod-only mutation and an empty new directory", () => {
+  it("refuses a chmod-only mutation", () => {
     expect(() => deriveCodexWorkspaceDeltaEntriesV2({
       stagingWorkspace: "/tmp/unused", baseline, scope: "README.md", covers: "README.md",
       final: [{ path: "README.md", kind: "file", mode: 0o755, size: 9, contentHash: sha256("# fixture\n") }, baseline[1]!],
     })).toThrow(/M5B_DELTA_UNSUPPORTED_MUTATION/);
-    expect(() => deriveCodexWorkspaceDeltaEntriesV2({
-      stagingWorkspace: "/tmp/unused", baseline, scope: "**", covers: "**",
-      final: [...baseline, { path: "generated", kind: "directory", mode: 0o700, size: 0, contentHash: null }],
-    })).toThrow(/M5B_DELTA_UNSUPPORTED_MUTATION/);
   });
+
+  it("derives the exact real T001 file delta and ignores non-publishable directories", async () => {
+    const staging = await mkdtemp(resolve(tmpdir(), "rb-ralph-m5b-real-shape-"));
+    try {
+      await mkdir(join(staging, ".agents"));
+      await mkdir(join(staging, ".codex"));
+      await mkdir(join(staging, "public"));
+      await writeFile(join(staging, "package.json"), '{"name":"fixture"}\n', { mode: 0o664 });
+      await writeFile(join(staging, "public/index.html"), "<!doctype html>\n", { mode: 0o664 });
+      await writeFile(join(staging, "server.js"), "export {};\n", { mode: 0o664 });
+
+      const final = await readCodexProjectionStateV2(staging);
+      expect(final.filter((entry) => entry.kind === "file").map((entry) => entry.mode)).toEqual([0o644, 0o644, 0o644]);
+      const entries = deriveCodexWorkspaceDeltaEntriesV2({
+        stagingWorkspace: staging,
+        baseline: [],
+        final,
+        scope: "package.json public/index.html server.js",
+        covers: "R-002 R-003 R-005 R-007 R-009 R-013",
+      });
+      expect(entries).toHaveLength(3);
+      expect(entries.map((entry) => `${entry.operation} ${entry.path}`)).toEqual([
+        "CREATE package.json",
+        "CREATE public/index.html",
+        "CREATE server.js",
+      ]);
+      expect(entries.some((entry) => [".agents", ".codex", "public"].includes(entry.path))).toBe(false);
+    } finally {
+      await rm(staging, { recursive: true, force: true });
+    }
+  });
+
+  it("does not let an authorized file confer authority on an unowned sibling", async () => {
+    const staging = await mkdtemp(resolve(tmpdir(), "rb-ralph-m5b-unowned-sibling-"));
+    try {
+      await mkdir(join(staging, "public"));
+      await writeFile(join(staging, "public/index.html"), "authorized\n");
+      await writeFile(join(staging, "public/secret.txt"), "not authorized\n");
+      const final = await readCodexProjectionStateV2(staging);
+      expect(() => deriveCodexWorkspaceDeltaEntriesV2({
+        stagingWorkspace: staging,
+        baseline: [],
+        final,
+        scope: "public/index.html",
+        covers: "public/index.html",
+      })).toThrow(/M5B_DELTA_OUT_OF_SCOPE: public\/secret\.txt/);
+    } finally {
+      await rm(staging, { recursive: true, force: true });
+    }
+  });
+
+  it("treats arbitrarily nested parents as structural transport for an authorized file", async () => {
+    const staging = await mkdtemp(resolve(tmpdir(), "rb-ralph-m5b-nested-parents-"));
+    try {
+      await mkdir(join(staging, "src/features/tasks"), { recursive: true });
+      await writeFile(join(staging, "src/features/tasks/index.js"), "export {};\n");
+      const entries = deriveCodexWorkspaceDeltaEntriesV2({
+        stagingWorkspace: staging,
+        baseline: [],
+        final: await readCodexProjectionStateV2(staging),
+        scope: "src/features/tasks/index.js",
+        covers: "src/features/tasks/index.js",
+      });
+      expect(entries.map((entry) => `${entry.operation} ${entry.path}`)).toEqual([
+        "CREATE src/features/tasks/index.js",
+      ]);
+    } finally {
+      await rm(staging, { recursive: true, force: true });
+    }
+  });
+
+  it("treats an empty directory tree as a disposable projection no-op", async () => {
+    const staging = await mkdtemp(resolve(tmpdir(), "rb-ralph-m5b-empty-directories-"));
+    try {
+      await mkdir(join(staging, "tmp-empty/nested-empty"), { recursive: true });
+      const entries = deriveCodexWorkspaceDeltaEntriesV2({
+        stagingWorkspace: staging,
+        baseline: [],
+        final: await readCodexProjectionStateV2(staging),
+        scope: "tmp-empty/owned.txt",
+        covers: "tmp-empty/owned.txt",
+      });
+      expect(entries).toEqual([]);
+    } finally {
+      await rm(staging, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the existing projection file-count bound when empty directories are present", async () => {
+    const staging = await mkdtemp(resolve(tmpdir(), "rb-ralph-m5b-bounded-empty-directories-"));
+    try {
+      await mkdir(join(staging, "tmp-empty/nested-empty"), { recursive: true });
+      await mkdir(join(staging, "files"));
+      await Promise.all(Array.from({ length: M5B_LIMITS_V2.projectionMaxFiles + 1 }, (_, index) =>
+        writeFile(join(staging, "files", `${String(index).padStart(4, "0")}.txt`), "x")));
+      await expect(readCodexProjectionStateV2(staging)).rejects.toThrow(/M5B_PROJECTION_LIMIT_EXCEEDED: file count/);
+    } finally {
+      await rm(staging, { recursive: true, force: true });
+    }
+  }, 60_000);
 
   it("seals exact provider bytes and refuses a tampered payload", async () => {
     const staging = await mkdtemp(resolve(tmpdir(), "rb-ralph-m5b-delta-"));
@@ -840,6 +939,16 @@ describe("Ralph M5-B — boundary checks that must not be silently removable", (
       await writeFile(join(staging, "real.txt"), "real content\n");
       await symlink(join(staging, "real.txt"), join(staging, "alias.txt"));
       await expect(readCodexProjectionStateV2(staging)).rejects.toThrow(/M5B_PROJECTION_PATH_UNSAFE: symlink/);
+    } finally {
+      await rm(staging, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a FIFO in the provider result as a special file", async () => {
+    const staging = await mkdtemp(resolve(tmpdir(), "rb-ralph-m5b-fifo-"));
+    try {
+      execFileSync("mkfifo", [join(staging, "provider.pipe")]);
+      await expect(readCodexProjectionStateV2(staging)).rejects.toThrow(/M5B_PROJECTION_PATH_UNSAFE: special file provider\.pipe/);
     } finally {
       await rm(staging, { recursive: true, force: true });
     }
