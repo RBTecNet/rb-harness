@@ -37,7 +37,13 @@ import {
   type ValidationProcessPolicyV2,
   type ValidationProcessSupervisorV2Like,
 } from "../ralph-runtime/operational-d/index.js";
-import { createCodexCliExecutorV2, createM5BTimeoutPolicyV2, type M5BTimeoutPolicyV2 } from "../ralph-runtime/operational-m5b/index.js";
+import {
+  codexFinalizationDiagnosticRefV2,
+  createCodexCliExecutorV2,
+  createM5BTimeoutPolicyV2,
+  readCodexFinalizationDiagnosticV2,
+  type M5BTimeoutPolicyV2,
+} from "../ralph-runtime/operational-m5b/index.js";
 import { createCodexCliAuditorV2 } from "../ralph-runtime/operational-m5d/index.js";
 import type { AttemptStateV2, RalphRuntimeStateV2 } from "../ralph-runtime/operational-v2/index.js";
 import { acquireLeasedRunV2, releaseLeasedRunV2, type LeaseRuntimeInputV2 } from "../ralph-runtime/operational-b2/index.js";
@@ -252,10 +258,41 @@ async function driveBridgeRun(input: DriveBridgeRunV1Input): Promise<RalphBridge
         state = await commitTerminalWhileLeased(lease, "FAILED", hooks, `RALPH_BRIDGE_${lifecycle.kind}`);
         return resultFromState(authority, descriptor, state, "FAILED", publicationOccurred, `RALPH_BRIDGE_${lifecycle.kind}`);
       }
-      return resultFromState(authority, descriptor, state, "BLOCKED", publicationOccurred, `RALPH_BRIDGE_${lifecycle.kind}`, "Inspect the preserved durable evidence and workspace before recovery.");
+      const guidance = lifecycle.kind === "RECONCILIATION_REQUIRED"
+        ? await finalizationDiagnosticGuidanceV1(store, state, lifecycle.attempt?.attemptId)
+        : undefined;
+      return resultFromState(
+        authority,
+        descriptor,
+        state,
+        "BLOCKED",
+        publicationOccurred,
+        `RALPH_BRIDGE_${lifecycle.kind}`,
+        guidance ?? "Inspect the preserved durable evidence and workspace before recovery.",
+      );
     }
   }
   return resultFromState(authority, descriptor, state, "BLOCKED", publicationOccurred, "RALPH_BRIDGE_DRIVER_SAFETY_LIMIT");
+}
+
+async function finalizationDiagnosticGuidanceV1(
+  store: RalphEventStoreV2,
+  state: RalphRuntimeStateV2,
+  attemptId?: string,
+): Promise<string | undefined> {
+  if (state.hold !== "RECONCILIATION_REQUIRED") return undefined;
+  const candidates = Object.values(state.attempts).filter((attempt) =>
+    attempt.disposition === "OPEN" && attempt.stage === "RECONCILING" && (attemptId === undefined || attempt.attemptId === attemptId));
+  if (candidates.length !== 1) return undefined;
+  const attempt = candidates[0]!;
+  const diagnostic = await readCodexFinalizationDiagnosticV2(store, attempt.attemptId).catch(() => undefined);
+  if (!diagnostic
+    || diagnostic.runId !== state.runId
+    || diagnostic.phaseId !== attempt.phaseId
+    || diagnostic.taskId !== attempt.taskId
+    || diagnostic.attemptId !== attempt.attemptId
+    || diagnostic.invocationId !== attempt.invocation?.invocationId) return undefined;
+  return `M5-B host finalization failed: stage=${diagnostic.stage} code=${diagnostic.m5bCode} diagnostic=${codexFinalizationDiagnosticRefV2(diagnostic.attemptId)}. Inspect preserved evidence; do not redispatch.`;
 }
 
 async function publishAcceptedBridgeAttempt(input: {
@@ -496,6 +533,18 @@ async function existingRunResult(
   }
   if (publication?.rejected) {
     return resultFromState(authority, descriptor, opened.state, "FAILED", publication.publicationOccurred, publication.rejected.reason);
+  }
+  if (opened.state.hold === "RECONCILIATION_REQUIRED") {
+    const guidance = await finalizationDiagnosticGuidanceV1(store, opened.state);
+    return resultFromState(
+      authority,
+      descriptor,
+      opened.state,
+      "BLOCKED",
+      publication.publicationOccurred,
+      "RALPH_BRIDGE_RECONCILIATION_REQUIRED",
+      guidance ?? "Inspect the preserved durable evidence and workspace before recovery.",
+    );
   }
   const acceptedPendingPublication = opened.state.disposition === "COMPLETE" && !invocation.humanDecision
     ? await acceptedUnpublishedAttempt(store, opened.state)

@@ -10,7 +10,7 @@ import {
 import type { ExecutorStatus, ExecutorTermination } from "../operational-v2/contracts.js";
 import { EXECUTOR_STATUSES, EXECUTOR_TERMINATIONS } from "../operational-v2/contracts.js";
 import { type CodexObservedModelStateV2 } from "./contract.js";
-import { RalphM5BError } from "./contract-errors.js";
+import { M5B_ERROR_CODES, RalphM5BError, type M5BErrorCode } from "./contract-errors.js";
 import { CODEX_OBSERVED_MODEL_STATES_V2 } from "./contract.js";
 import { CODEX_TERMINAL_KINDS_V2, type CodexTerminalKindV2 } from "./codex-jsonl.js";
 import { validateCodexProjectionManifestV2, type CodexProjectionManifestV2 } from "./codex-projection.js";
@@ -32,6 +32,17 @@ export const RALPH_CODEX_THREAD_BINDING_SCHEMA_V2 = "rb-ralph-codex-thread-bindi
 export const RALPH_CODEX_PROMPT_SCHEMA_V2 = "rb-ralph-codex-prompt/v1" as const;
 export const RALPH_CODEX_PROVIDER_RESULT_SCHEMA_V2 = "rb-ralph-codex-provider-result/v1" as const;
 export const RALPH_CODEX_TERMINAL_SCHEMA_V2 = "rb-ralph-codex-terminal/v1" as const;
+export const RALPH_CODEX_FINALIZATION_DIAGNOSTIC_SCHEMA_V2 = "rb-ralph-codex-finalization-diagnostic/v1" as const;
+
+export const CODEX_FINALIZATION_STAGES_V2 = [
+  "SENTINEL_VERIFICATION",
+  "PROJECTION_OBSERVATION",
+  "DELTA_DERIVATION",
+  "DELTA_PERSISTENCE",
+  "WORKSPACE_PUBLICATION",
+  "TERMINAL_PERSISTENCE",
+] as const;
+export type CodexFinalizationStageV2 = typeof CODEX_FINALIZATION_STAGES_V2[number];
 
 export interface CodexCoreBindingV2 {
   readonly runId: string;
@@ -213,6 +224,16 @@ export interface CodexTerminalArtifactV2 extends CodexCoreBindingV2 {
   readonly terminalDigest: string;
 }
 
+/** Minimal sealed evidence for a typed failure after the provider result. */
+export interface CodexFinalizationDiagnosticV2 extends CodexCoreBindingV2 {
+  readonly schema: typeof RALPH_CODEX_FINALIZATION_DIAGNOSTIC_SCHEMA_V2;
+  readonly providerResultDigest: string;
+  readonly stage: CodexFinalizationStageV2;
+  readonly m5bCode: M5BErrorCode;
+  readonly recordedAt: string;
+  readonly diagnosticDigest: string;
+}
+
 export const codexProviderDescriptorRefV2 = (attemptId: string): string => attemptArtifactRefV2(attemptId, "codex-provider-descriptor.json");
 export const codexDispatchIntentRefV2 = (attemptId: string): string => attemptArtifactRefV2(attemptId, "codex-dispatch-intent.json");
 export const codexProcessReceiptRefV2 = (attemptId: string): string => attemptArtifactRefV2(attemptId, "codex-process-receipt.json");
@@ -220,6 +241,7 @@ export const codexThreadBindingRefV2 = (attemptId: string): string => attemptArt
 export const codexPromptRefV2 = (attemptId: string): string => attemptArtifactRefV2(attemptId, "codex-prompt.json");
 export const codexProviderResultRefV2 = (attemptId: string): string => attemptArtifactRefV2(attemptId, "codex-provider-result.json");
 export const codexTerminalRefV2 = (attemptId: string): string => attemptArtifactRefV2(attemptId, "codex-terminal.json");
+export const codexFinalizationDiagnosticRefV2 = (attemptId: string): string => attemptArtifactRefV2(attemptId, "codex-finalization-diagnostic.json");
 export const codexProjectionManifestRefV2 = (attemptId: string): string => attemptArtifactRefV2(attemptId, "codex-projection-manifest.json");
 export const codexWorkspaceDeltaRefV2 = (attemptId: string): string => attemptArtifactRefV2(attemptId, "codex-workspace-delta.json");
 
@@ -266,6 +288,10 @@ const TERMINAL_KEYS = [
   "processReceiptDigest", "threadBindingDigest", "status", "termination", "exitCode", "signal", "timedOut", "cancelled",
   "resultRef", "resultDigest", "deltaRef", "deltaDigest", "publicationReceiptRef", "publicationDigest", "quiescence",
   "finishedAt", "terminalDigest",
+] as const;
+const FINALIZATION_DIAGNOSTIC_KEYS = [
+  "schema", "runId", "phaseId", "taskId", "attemptId", "invocationId", "providerResultDigest", "stage", "m5bCode",
+  "recordedAt", "diagnosticDigest",
 ] as const;
 
 /** Seal an artifact by appending its own canonical digest field. */
@@ -374,6 +400,28 @@ export function validateCodexTerminalArtifactV2(value: unknown): asserts value i
   }
 }
 
+export function validateCodexFinalizationDiagnosticV2(value: unknown): asserts value is CodexFinalizationDiagnosticV2 {
+  assertCodexArtifactShapeV2(
+    value,
+    RALPH_CODEX_FINALIZATION_DIAGNOSTIC_SCHEMA_V2,
+    FINALIZATION_DIAGNOSTIC_KEYS,
+    "diagnosticDigest",
+  );
+  if (!isSha256Digest(value.providerResultDigest)) {
+    throw new RalphM5BError("M5B_PROVIDER_RESULT_INVALID", "M5B_FINALIZATION_DIAGNOSTIC_INVALID: provider result digest");
+  }
+  if (!(CODEX_FINALIZATION_STAGES_V2 as readonly string[]).includes(value.stage as string)) {
+    throw new RalphM5BError("M5B_PROVIDER_RESULT_INVALID", "M5B_FINALIZATION_DIAGNOSTIC_INVALID: stage");
+  }
+  if (!(M5B_ERROR_CODES as readonly string[]).includes(value.m5bCode as string)) {
+    throw new RalphM5BError("M5B_PROVIDER_RESULT_INVALID", "M5B_FINALIZATION_DIAGNOSTIC_INVALID: m5bCode");
+  }
+  if (typeof value.recordedAt !== "string" || value.recordedAt.length < 20 || value.recordedAt.length > 64
+    || !Number.isFinite(Date.parse(value.recordedAt)) || new Date(Date.parse(value.recordedAt)).toISOString() !== value.recordedAt) {
+    throw new RalphM5BError("M5B_PROVIDER_RESULT_INVALID", "M5B_FINALIZATION_DIAGNOSTIC_INVALID: recordedAt");
+  }
+}
+
 export async function persistCodexProviderDescriptorV2(store: RalphEventStoreV2, artifact: CodexProviderDescriptorV2, nonce: string): Promise<ArtifactPersistenceResultV2<CodexProviderDescriptorV2>> {
   validateCodexProviderDescriptorV2(artifact);
   await validateExactCodexCorrectionDescriptorV2({ store, descriptor: artifact });
@@ -423,6 +471,22 @@ export async function persistCodexProviderResultV2(store: RalphEventStoreV2, art
 }
 export const persistCodexTerminalArtifactV2 = (store: RalphEventStoreV2, artifact: CodexTerminalArtifactV2, nonce: string): Promise<ArtifactPersistenceResultV2<CodexTerminalArtifactV2>> =>
   persistImmutableJsonArtifactV2({ store, ref: codexTerminalRefV2(artifact.attemptId), artifact, validate: validateCodexTerminalArtifactV2, nonce });
+export async function persistCodexFinalizationDiagnosticV2(
+  store: RalphEventStoreV2,
+  artifact: CodexFinalizationDiagnosticV2,
+  nonce: string,
+): Promise<ArtifactPersistenceResultV2<CodexFinalizationDiagnosticV2>> {
+  validateCodexFinalizationDiagnosticV2(artifact);
+  const providerResult = await readCodexProviderResultV2(store, artifact.attemptId);
+  assertCodexFinalizationDiagnosticBindingV2(artifact, providerResult);
+  return persistImmutableJsonArtifactV2({
+    store,
+    ref: codexFinalizationDiagnosticRefV2(artifact.attemptId),
+    artifact,
+    validate: validateCodexFinalizationDiagnosticV2,
+    nonce,
+  });
+}
 export const persistCodexProjectionManifestV2 = (store: RalphEventStoreV2, artifact: CodexProjectionManifestV2, nonce: string): Promise<ArtifactPersistenceResultV2<CodexProjectionManifestV2>> =>
   persistImmutableJsonArtifactV2({ store, ref: codexProjectionManifestRefV2(artifact.attemptId), artifact, validate: validateCodexProjectionManifestV2, nonce });
 export const persistCodexWorkspaceDeltaV2 = (store: RalphEventStoreV2, artifact: CodexWorkspaceDeltaV2, nonce: string): Promise<ArtifactPersistenceResultV2<CodexWorkspaceDeltaV2>> =>
@@ -442,6 +506,20 @@ export const readCodexProviderResultV2 = (store: RalphEventStoreV2, attemptId: s
   readImmutableJsonArtifactV2({ store, ref: codexProviderResultRefV2(attemptId), validate: validateCodexProviderResultV2 });
 export const readCodexTerminalArtifactV2 = (store: RalphEventStoreV2, attemptId: string): Promise<CodexTerminalArtifactV2 | undefined> =>
   readImmutableJsonArtifactV2({ store, ref: codexTerminalRefV2(attemptId), validate: validateCodexTerminalArtifactV2 });
+export async function readCodexFinalizationDiagnosticV2(
+  store: RalphEventStoreV2,
+  attemptId: string,
+): Promise<CodexFinalizationDiagnosticV2 | undefined> {
+  const artifact = await readImmutableJsonArtifactV2({
+    store,
+    ref: codexFinalizationDiagnosticRefV2(attemptId),
+    validate: validateCodexFinalizationDiagnosticV2,
+  });
+  if (!artifact) return undefined;
+  const providerResult = await readCodexProviderResultV2(store, attemptId);
+  assertCodexFinalizationDiagnosticBindingV2(artifact, providerResult);
+  return artifact;
+}
 export const readCodexProjectionManifestV2 = (store: RalphEventStoreV2, attemptId: string): Promise<CodexProjectionManifestV2 | undefined> =>
   readImmutableJsonArtifactV2({ store, ref: codexProjectionManifestRefV2(attemptId), validate: validateCodexProjectionManifestV2 });
 export const readCodexWorkspaceDeltaV2 = (store: RalphEventStoreV2, attemptId: string): Promise<CodexWorkspaceDeltaV2 | undefined> =>
@@ -455,12 +533,13 @@ export interface CodexInvocationArtifactSetV2 {
   readonly prompt?: CodexPromptArtifactV2;
   readonly providerResult?: CodexProviderResultV2;
   readonly terminal?: CodexTerminalArtifactV2;
+  readonly finalizationDiagnostic?: CodexFinalizationDiagnosticV2;
   readonly projectionManifest?: CodexProjectionManifestV2;
   readonly workspaceDelta?: CodexWorkspaceDeltaV2;
 }
 
 export async function readCodexInvocationArtifactSetV2(store: RalphEventStoreV2, attemptId: string): Promise<CodexInvocationArtifactSetV2> {
-  const [descriptor, dispatchIntent, processReceipt, threadBinding, prompt, providerResult, terminal, projectionManifest, workspaceDelta] = await Promise.all([
+  const [descriptor, dispatchIntent, processReceipt, threadBinding, prompt, providerResult, terminal, finalizationDiagnostic, projectionManifest, workspaceDelta] = await Promise.all([
     readCodexProviderDescriptorV2(store, attemptId),
     readCodexDispatchIntentV2(store, attemptId),
     readCodexProcessReceiptV2(store, attemptId),
@@ -468,6 +547,7 @@ export async function readCodexInvocationArtifactSetV2(store: RalphEventStoreV2,
     readCodexPromptArtifactV2(store, attemptId),
     readCodexProviderResultV2(store, attemptId),
     readCodexTerminalArtifactV2(store, attemptId),
+    readCodexFinalizationDiagnosticV2(store, attemptId),
     readCodexProjectionManifestV2(store, attemptId),
     readCodexWorkspaceDeltaV2(store, attemptId),
   ]);
@@ -479,9 +559,25 @@ export async function readCodexInvocationArtifactSetV2(store: RalphEventStoreV2,
     ...(prompt === undefined ? {} : { prompt }),
     ...(providerResult === undefined ? {} : { providerResult }),
     ...(terminal === undefined ? {} : { terminal }),
+    ...(finalizationDiagnostic === undefined ? {} : { finalizationDiagnostic }),
     ...(projectionManifest === undefined ? {} : { projectionManifest }),
     ...(workspaceDelta === undefined ? {} : { workspaceDelta }),
   });
+}
+
+function assertCodexFinalizationDiagnosticBindingV2(
+  artifact: CodexFinalizationDiagnosticV2,
+  providerResult: CodexProviderResultV2 | undefined,
+): asserts providerResult is CodexProviderResultV2 {
+  if (!providerResult
+    || artifact.runId !== providerResult.runId
+    || artifact.phaseId !== providerResult.phaseId
+    || artifact.taskId !== providerResult.taskId
+    || artifact.attemptId !== providerResult.attemptId
+    || artifact.invocationId !== providerResult.invocationId
+    || artifact.providerResultDigest !== providerResult.resultDigest) {
+    throw new RalphM5BError("M5B_PROVIDER_RESULT_INVALID", "M5B_FINALIZATION_DIAGNOSTIC_BINDING_INVALID");
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

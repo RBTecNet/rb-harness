@@ -86,6 +86,7 @@ import { publishCodexWorkspaceDeltaV2 } from "./codex-publication.js";
 import { projectWorkUnitToCodexPromptV2 } from "./codex-prompt.js";
 import {
   RALPH_CODEX_DISPATCH_INTENT_SCHEMA_V2,
+  RALPH_CODEX_FINALIZATION_DIAGNOSTIC_SCHEMA_V2,
   RALPH_CODEX_PROCESS_RECEIPT_SCHEMA_V2,
   RALPH_CODEX_PROMPT_SCHEMA_V2,
   RALPH_CODEX_PROVIDER_DESCRIPTOR_SCHEMA_V2,
@@ -101,6 +102,7 @@ import {
   codexThreadBindingRefV2,
   codexWorkspaceDeltaRefV2,
   persistCodexDispatchIntentV2,
+  persistCodexFinalizationDiagnosticV2,
   persistCodexProcessReceiptV2,
   persistCodexProjectionManifestV2,
   persistCodexPromptArtifactV2,
@@ -112,6 +114,9 @@ import {
   readCodexInvocationArtifactSetV2,
   sealCodexArtifactV2,
   type CodexDispatchIntentV2,
+  type CodexCoreBindingV2,
+  type CodexFinalizationDiagnosticV2,
+  type CodexFinalizationStageV2,
   type CodexProcessReceiptV2,
   type CodexPromptArtifactV2,
   type CodexProviderDescriptorV2,
@@ -537,58 +542,65 @@ export class CodexCliExecutorV2 extends ExecutorRuntimeV2 {
       // before publication: a control-plane root that was deleted, renamed,
       // replaced, symlinked over or given a child fails the whole Attempt
       // closed rather than reaching the canonical workspace.
-      await verifyCodexRootSentinelsV2(stagingWorkspace, projection, sentinelPreimage);
-      const finalState = await readCodexProjectionStateV2(stagingWorkspace, projection.sentinels);
-      delta = await createCodexWorkspaceDeltaV2({
-        stagingWorkspace,
-        baseline: projection.entries,
-        final: finalState,
-        scope: workUnit.scope,
-        covers: workUnit.covers,
-        ...binding,
-        providerDescriptorDigest: descriptor.descriptorDigest,
-        threadBindingDigest: threadBinding!.bindingDigest,
-        threadId: threadBinding!.threadId,
-        baseWorkspaceFingerprint: workUnit.attemptBaseFingerprint,
-        projectionManifestDigest: projection.manifestDigest,
-        projectionBaselineDigest: projection.baselineDigest,
-        providerResultDigest: providerResult.resultDigest,
-        createdAt: internal.clock(),
-      });
-      await persistCodexWorkspaceDeltaV2(internal.store, delta, internal.nonceFactory());
-      const publication = await publishCodexWorkspaceDeltaV2({
-        store: internal.store,
-        delta,
-        workspacePolicy: snapshot.workspacePolicy,
-        clock: internal.clock,
-        nonceFactory: internal.nonceFactory,
-      });
+      await finalizeCodexHostStageV2(internal, binding, providerResult, "SENTINEL_VERIFICATION", () =>
+        verifyCodexRootSentinelsV2(stagingWorkspace, projection, sentinelPreimage));
+      const finalState = await finalizeCodexHostStageV2(internal, binding, providerResult, "PROJECTION_OBSERVATION", () =>
+        readCodexProjectionStateV2(stagingWorkspace, projection.sentinels));
+      delta = await finalizeCodexHostStageV2(internal, binding, providerResult, "DELTA_DERIVATION", () =>
+        createCodexWorkspaceDeltaV2({
+          stagingWorkspace,
+          baseline: projection.entries,
+          final: finalState,
+          scope: workUnit.scope,
+          covers: workUnit.covers,
+          ...binding,
+          providerDescriptorDigest: descriptor.descriptorDigest,
+          threadBindingDigest: threadBinding!.bindingDigest,
+          threadId: threadBinding!.threadId,
+          baseWorkspaceFingerprint: workUnit.attemptBaseFingerprint,
+          projectionManifestDigest: projection.manifestDigest,
+          projectionBaselineDigest: projection.baselineDigest,
+          providerResultDigest: providerResult.resultDigest,
+          createdAt: internal.clock(),
+        }));
+      await finalizeCodexHostStageV2(internal, binding, providerResult, "DELTA_PERSISTENCE", () =>
+        persistCodexWorkspaceDeltaV2(internal.store, delta!, internal.nonceFactory()));
+      const publication = await finalizeCodexHostStageV2(internal, binding, providerResult, "WORKSPACE_PUBLICATION", () =>
+        publishCodexWorkspaceDeltaV2({
+          store: internal.store,
+          delta: delta!,
+          workspacePolicy: snapshot.workspacePolicy,
+          clock: internal.clock,
+          nonceFactory: internal.nonceFactory,
+        }));
       publicationDigest = publication.receiptDigest;
     }
 
-    const terminal = sealCodexArtifactV2<CodexTerminalArtifactV2>({
-      schema: RALPH_CODEX_TERMINAL_SCHEMA_V2,
-      ...binding,
-      descriptorDigest: descriptor.descriptorDigest,
-      dispatchIntentDigest: (dispatchIntent as { intentDigest: string }).intentDigest,
-      processReceiptDigest: (await readCodexInvocationArtifactSetV2(internal.store, attemptId)).processReceipt?.receiptDigest ?? "",
-      threadBindingDigest: threadBinding?.bindingDigest ?? null,
-      status: classification,
-      termination,
-      exitCode: run.exitCode,
-      signal: run.signal,
-      timedOut: run.timedOut,
-      cancelled: run.cancelled,
-      resultRef: codexProviderResultRefV2(attemptId),
-      resultDigest: providerResult.resultDigest,
-      deltaRef: delta ? codexWorkspaceDeltaRefV2(attemptId) : null,
-      deltaDigest: delta?.deltaDigest ?? null,
-      publicationReceiptRef: publicationDigest === null ? null : `attempts/${attemptId}/codex-publication-receipt.json`,
-      publicationDigest,
-      quiescence,
-      finishedAt,
-    }, "terminalDigest");
-    await persistCodexTerminalArtifactV2(internal.store, terminal, internal.nonceFactory());
+    await finalizeCodexHostStageV2(internal, binding, providerResult, "TERMINAL_PERSISTENCE", async () => {
+      const terminal = sealCodexArtifactV2<CodexTerminalArtifactV2>({
+        schema: RALPH_CODEX_TERMINAL_SCHEMA_V2,
+        ...binding,
+        descriptorDigest: descriptor.descriptorDigest,
+        dispatchIntentDigest: (dispatchIntent as { intentDigest: string }).intentDigest,
+        processReceiptDigest: (await readCodexInvocationArtifactSetV2(internal.store, attemptId)).processReceipt?.receiptDigest ?? "",
+        threadBindingDigest: threadBinding?.bindingDigest ?? null,
+        status: classification,
+        termination,
+        exitCode: run.exitCode,
+        signal: run.signal,
+        timedOut: run.timedOut,
+        cancelled: run.cancelled,
+        resultRef: codexProviderResultRefV2(attemptId),
+        resultDigest: providerResult.resultDigest,
+        deltaRef: delta ? codexWorkspaceDeltaRefV2(attemptId) : null,
+        deltaDigest: delta?.deltaDigest ?? null,
+        publicationReceiptRef: publicationDigest === null ? null : `attempts/${attemptId}/codex-publication-receipt.json`,
+        publicationDigest,
+        quiescence,
+        finishedAt,
+      }, "terminalDigest");
+      await persistCodexTerminalArtifactV2(internal.store, terminal, internal.nonceFactory());
+    });
 
     return Object.freeze({
       invocationId,
@@ -612,6 +624,36 @@ export class CodexCliExecutorV2 extends ExecutorRuntimeV2 {
       settlementVerified: run.settlement.verified,
       observedAt: internal.clock(),
     });
+  }
+}
+
+async function finalizeCodexHostStageV2<T>(
+  internal: CodexExecutorInternalsV2,
+  binding: CodexCoreBindingV2,
+  providerResult: CodexProviderResultV2,
+  stage: CodexFinalizationStageV2,
+  operation: () => T | Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof RalphM5BError) {
+      // Diagnostic durability is best-effort with respect to the original
+      // ambiguity: persistence failure cannot replace or reinterpret the
+      // exact typed failure which B4 must observe.
+      try {
+        const diagnostic = sealCodexArtifactV2<CodexFinalizationDiagnosticV2>({
+          schema: RALPH_CODEX_FINALIZATION_DIAGNOSTIC_SCHEMA_V2,
+          ...binding,
+          providerResultDigest: providerResult.resultDigest,
+          stage,
+          m5bCode: error.m5bCode,
+          recordedAt: internal.clock(),
+        }, "diagnosticDigest");
+        await persistCodexFinalizationDiagnosticV2(internal.store, diagnostic, internal.nonceFactory());
+      } catch { /* original execution ambiguity remains authoritative */ }
+    }
+    throw error;
   }
 }
 

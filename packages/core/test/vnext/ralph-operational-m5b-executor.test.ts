@@ -26,6 +26,7 @@ const transport = vi.hoisted(() => ({
   exitCode: 0 as number | null,
   signal: null as string | null,
   timedOut: false,
+  cancelled: false,
   processAbsent: true,
   settlementObserved: true,
   settlementQuiescent: true,
@@ -182,7 +183,7 @@ vi.mock("../../src/vnext/ralph-runtime/operational-m5b/codex-process.js", async 
         exitCode: transport.exitCode,
         signal: transport.signal,
         timedOut: transport.timedOut,
-        cancelled: false,
+        cancelled: transport.cancelled,
         stdout,
         stderr: "",
         stdoutTruncated: false,
@@ -199,6 +200,7 @@ vi.mock("../../src/vnext/ralph-runtime/operational-m5b/codex-process.js", async 
   };
 });
 
+import { RalphEventStoreV2 } from "../../src/vnext/ralph-runtime/operational-b1/index.js";
 import { acquireLeasedRunV2 } from "../../src/vnext/ralph-runtime/operational-b2/index.js";
 import { executeAuthorizedInvocationV2 } from "../../src/vnext/ralph-runtime/operational-b4/index.js";
 import {
@@ -217,6 +219,7 @@ import { sha256 } from "../../src/vnext/ralph-runtime/hashing.js";
 import {
   CODEX_CLI_EXECUTOR_PROFILE_V2,
   CODEX_CLI_EXECUTOR_REQUESTED_MODEL_V2,
+  RalphM5BError,
 } from "../../src/vnext/ralph-runtime/operational-m5b/contract.js";
 import {
   CodexCliExecutorV2,
@@ -224,8 +227,15 @@ import {
   isTrustedCodexCliExecutorV2,
 } from "../../src/vnext/ralph-runtime/operational-m5b/codex-cli-executor.js";
 import {
+  RALPH_CODEX_FINALIZATION_DIAGNOSTIC_SCHEMA_V2,
+  codexFinalizationDiagnosticRefV2,
+  persistCodexFinalizationDiagnosticV2,
+  readCodexFinalizationDiagnosticV2,
   readCodexInvocationArtifactSetV2,
   readCodexProviderDescriptorV2,
+  sealCodexArtifactV2,
+  validateCodexFinalizationDiagnosticV2,
+  type CodexFinalizationDiagnosticV2,
 } from "../../src/vnext/ralph-runtime/operational-m5b/codex-artifacts.js";
 import { readCodexPublicationReceiptV2 } from "../../src/vnext/ralph-runtime/operational-m5b/codex-publication.js";
 import { CODEX_PROJECTION_EXCLUDED_ROOTS_V2 } from "../../src/vnext/ralph-runtime/operational-m5b/codex-projection.js";
@@ -234,9 +244,15 @@ import {
   bootstrapM5BRunV2,
   type M5BFixtureV2,
 } from "./fixtures/ralph-m5b-fixture.js";
+import {
+  runProgressiveRalphBridgeV1,
+  type BridgeRuntimeFactoriesV1,
+} from "../../src/vnext/ralph-bridge/index.js";
+import { createReadyBridgeFixture } from "./fixtures/progressive-ready-bridge-fixture.js";
 
 const STATUS_SOURCE = 'module.exports = "ready";\n';
 const disposable: M5BFixtureV2[] = [];
+const disposableBridgeRoots: string[] = [];
 
 async function fixture(options: Parameters<typeof bootstrapM5BRunV2>[0] = {}): Promise<M5BFixtureV2> {
   const created = await bootstrapM5BRunV2(options);
@@ -278,6 +294,7 @@ beforeEach(() => {
   transport.exitCode = 0;
   transport.signal = null;
   transport.timedOut = false;
+  transport.cancelled = false;
   transport.processAbsent = true;
   transport.settlementObserved = true;
   transport.settlementQuiescent = true;
@@ -292,6 +309,7 @@ afterEach(async () => {
     await rm(created.projectRoot, { recursive: true, force: true });
     await rm(created.stagingBase, { recursive: true, force: true });
   }
+  await Promise.all(disposableBridgeRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
 describe("Ralph M5-B — CodexCliExecutorV2 trust root", () => {
@@ -368,6 +386,7 @@ describe("Ralph M5-B — one fresh exec through the frozen Core", () => {
     expect(artifacts.processReceipt?.processGroupId).toBeGreaterThan(0);
     expect(artifacts.providerResult).toMatchObject({ classification: "SUCCEEDED", terminalKind: "TURN_COMPLETED", actualExitCode: 0, agentMessageCount: 2 });
     expect(artifacts.terminal).toMatchObject({ status: "SUCCEEDED", termination: "NORMAL" });
+    expect(artifacts.finalizationDiagnostic).toBeUndefined();
     expect(artifacts.workspaceDelta?.entries.map((entry) => `${entry.operation} ${entry.path}`)).toEqual(["CREATE src/status.js"]);
 
     const publication = await readCodexPublicationReceiptV2(current.store, current.attemptId);
@@ -553,12 +572,118 @@ describe("Ralph M5-B — delta and publication safety", () => {
       { path: "src/status.js", content: STATUS_SOURCE },
       { path: "src/unexpected.js", content: "module.exports = 0;\n" },
     ];
-    await executeOnce(current);
+    const { executed } = await executeOnce(current);
     const artifacts = await readCodexInvocationArtifactSetV2(current.store, current.attemptId);
+    expect(executed.kind).toBe("RECONCILIATION_REQUIRED");
+    expect(executed.state).toMatchObject({ disposition: "ACTIVE", hold: "RECONCILIATION_REQUIRED" });
+    expect(artifacts.providerResult).toMatchObject({ classification: "SUCCEEDED", terminalKind: "TURN_COMPLETED", actualExitCode: 0 });
+    expect(artifacts.finalizationDiagnostic).toMatchObject({
+      schema: RALPH_CODEX_FINALIZATION_DIAGNOSTIC_SCHEMA_V2,
+      stage: "DELTA_DERIVATION",
+      m5bCode: "M5B_DELTA_OUT_OF_SCOPE",
+      providerResultDigest: artifacts.providerResult?.resultDigest,
+    });
+    expect(artifacts.terminal).toBeUndefined();
     expect(artifacts.workspaceDelta).toBeUndefined();
     expect(await readCodexPublicationReceiptV2(current.store, current.attemptId)).toBeUndefined();
     expect(existsSync(join(current.projectRoot, "src/status.js"))).toBe(false);
     expect(existsSync(join(current.projectRoot, "src/unexpected.js"))).toBe(false);
+
+    const diagnostic = artifacts.finalizationDiagnostic!;
+    expect(Object.keys(diagnostic).sort()).toEqual([
+      "attemptId", "diagnosticDigest", "invocationId", "m5bCode", "phaseId", "providerResultDigest", "recordedAt", "runId", "schema", "stage", "taskId",
+    ]);
+    expect((await persistCodexFinalizationDiagnosticV2(current.store, diagnostic, "same-diagnostic")).publishDisposition).toBe("ALREADY_PRESENT");
+    const { diagnosticDigest: _ignored, ...base } = diagnostic;
+    const conflict = sealCodexArtifactV2<CodexFinalizationDiagnosticV2>({ ...base, recordedAt: "2026-09-08T00:00:06.000Z" }, "diagnosticDigest");
+    await expect(persistCodexFinalizationDiagnosticV2(current.store, conflict, "conflicting-diagnostic"))
+      .rejects.toMatchObject({ code: "B4_ARTIFACT_IMMUTABLE_CONFLICT" });
+  }, 60_000);
+
+  it("validates a closed diagnostic schema and rejects every malformed or foreign binding", async () => {
+    const current = await fixture();
+    transport.stagingWrites = [
+      { path: "src/status.js", content: STATUS_SOURCE },
+      { path: "src/unexpected.js", content: "module.exports = 0;\n" },
+    ];
+    await executeOnce(current);
+    const artifacts = await readCodexInvocationArtifactSetV2(current.store, current.attemptId);
+    const diagnostic = artifacts.finalizationDiagnostic!;
+    const { diagnosticDigest: _ignored, ...base } = diagnostic;
+    const reseal = (changes: Record<string, unknown>): CodexFinalizationDiagnosticV2 =>
+      sealCodexArtifactV2<CodexFinalizationDiagnosticV2>({ ...base, ...changes }, "diagnosticDigest");
+
+    expect(() => validateCodexFinalizationDiagnosticV2(diagnostic)).not.toThrow();
+    for (const malformed of [
+      reseal({ stage: "ARBITRARY_STAGE" }),
+      reseal({ m5bCode: "ARBITRARY_M5B_CODE" }),
+      reseal({ recordedAt: "not-an-iso-time" }),
+      sealCodexArtifactV2<CodexFinalizationDiagnosticV2>({ ...base, cause: "forbidden" }, "diagnosticDigest"),
+      { ...diagnostic, diagnosticDigest: `sha256:${"0".repeat(64)}` },
+      (() => {
+        const { stage: _missing, ...missing } = base;
+        return sealCodexArtifactV2<CodexFinalizationDiagnosticV2>(missing, "diagnosticDigest");
+      })(),
+    ]) expect(() => validateCodexFinalizationDiagnosticV2(malformed)).toThrow();
+
+    for (const foreign of [
+      reseal({ runId: "foreign-run" }),
+      reseal({ phaseId: "foreign-phase" }),
+      reseal({ taskId: "foreign-task" }),
+      reseal({ attemptId: "foreign-attempt" }),
+      reseal({ invocationId: "foreign-invocation" }),
+      reseal({ providerResultDigest: `sha256:${"f".repeat(64)}` }),
+    ]) await expect(persistCodexFinalizationDiagnosticV2(current.store, foreign, `foreign-${foreign.diagnosticDigest.slice(-8)}`)).rejects.toBeDefined();
+  }, 60_000);
+
+  it("rethrows the original typed failure while excluding its poisoned message from durable evidence", async () => {
+    const poison = "M5B_ERROR_MESSAGE_POISON_91c4";
+    const current = await fixture();
+    transport.stagingWrites = [
+      { path: "src/status.js", content: STATUS_SOURCE },
+      { path: `src/${poison}.js`, content: "module.exports = 0;\n" },
+    ];
+    const { admitted } = await admitM5BAttemptV2(current);
+    const executor = await createCodexCliExecutorV2({
+      store: current.store,
+      authorizedInvocation: admitted.authorizedInvocation,
+      timeoutPolicy: current.timeoutPolicy,
+      stagingBase: current.stagingBase,
+    });
+    const caught = await executor.invoke(admitted.authorizedInvocation).then(() => undefined, (error: unknown) => error);
+    expect(caught).toBeInstanceOf(RalphM5BError);
+    expect(caught).toMatchObject({ m5bCode: "M5B_DELTA_OUT_OF_SCOPE" });
+    expect((caught as Error).message).toContain(poison);
+
+    const diagnostic = await readCodexFinalizationDiagnosticV2(current.store, current.attemptId);
+    expect(diagnostic).toMatchObject({ stage: "DELTA_DERIVATION", m5bCode: "M5B_DELTA_OUT_OF_SCOPE" });
+    const diagnosticSource = await readFile(resolve(current.store.runDirectory, codexFinalizationDiagnosticRefV2(current.attemptId)), "utf8");
+    expect(diagnosticSource).not.toContain(poison);
+    expect(diagnosticSource).not.toContain("message");
+    expect(diagnosticSource).not.toContain("stack");
+    expect(diagnosticSource).not.toContain("cause");
+  }, 60_000);
+
+  it("does not replace the original typed ambiguity when diagnostic persistence fails", async () => {
+    const current = await fixture();
+    transport.stagingWrites = [
+      { path: "src/status.js", content: STATUS_SOURCE },
+      { path: "src/unexpected.js", content: "module.exports = 0;\n" },
+    ];
+    const { admitted } = await admitM5BAttemptV2(current);
+    const executor = await createCodexCliExecutorV2({
+      store: current.store,
+      authorizedInvocation: admitted.authorizedInvocation,
+      timeoutPolicy: current.timeoutPolicy,
+      stagingBase: current.stagingBase,
+      // The provider result has physical timestamps, but the diagnostic seal
+      // rejects this host timestamp and therefore cannot become durable.
+      clock: () => "not-an-iso-time",
+    });
+    const caught = await executor.invoke(admitted.authorizedInvocation).then(() => undefined, (error: unknown) => error);
+    expect(caught).toBeInstanceOf(RalphM5BError);
+    expect(caught).toMatchObject({ m5bCode: "M5B_DELTA_OUT_OF_SCOPE" });
+    expect(await readCodexFinalizationDiagnosticV2(current.store, current.attemptId)).toBeUndefined();
   }, 60_000);
 
   it("refuses a provider attempt to reach a Core-owned root through the projection", async () => {
@@ -583,9 +708,31 @@ describe("Ralph M5-B — delta and publication safety", () => {
     expect(executed.kind).toBe("RECONCILIATION_REQUIRED");
     const artifacts = await readCodexInvocationArtifactSetV2(current.store, current.attemptId);
     expect(artifacts.workspaceDelta).toBeDefined();
+    expect(artifacts.finalizationDiagnostic).toMatchObject({ stage: "WORKSPACE_PUBLICATION", m5bCode: "M5B_CANONICAL_DRIFT" });
     expect(await readCodexPublicationReceiptV2(current.store, current.attemptId)).toBeUndefined();
     expect(existsSync(join(current.projectRoot, "src/status.js"))).toBe(false);
   }, 60_000);
+
+  it("does not diagnose ordinary FAILED, TIMED_OUT or CANCELLED provider results", async () => {
+    const scenarios = [
+      { classification: "FAILED", setup: () => { transport.exitCode = 7; } },
+      { classification: "TIMED_OUT", setup: () => { transport.timedOut = true; } },
+      { classification: "CANCELLED", setup: () => { transport.cancelled = true; } },
+    ] as const;
+    for (const scenario of scenarios) {
+      const current = await fixture();
+      scenario.setup();
+      const { executed } = await executeOnce(current);
+      expect(executed.kind).toBe("EXECUTOR_FINISHED_READY_FOR_CAPTURE");
+      const artifacts = await readCodexInvocationArtifactSetV2(current.store, current.attemptId);
+      expect(artifacts.providerResult?.classification).toBe(scenario.classification);
+      expect(artifacts.terminal?.status).toBe(scenario.classification);
+      expect(artifacts.finalizationDiagnostic).toBeUndefined();
+      transport.exitCode = 0;
+      transport.timedOut = false;
+      transport.cancelled = false;
+    }
+  }, 120_000);
 });
 
 describe("Ralph M5-B — dispatch ordering, ambiguity and redispatch", () => {
@@ -862,14 +1009,23 @@ describe("Ralph M5-B — root-level product scope end to end", () => {
     // The WHOLE delta is refused rather than partially applied.
     transport.stagingWrites = [
       { path: "package.json", content: PACKAGE_JSON },
-      { path: "extra.txt", content: "not covered\n" },
+      { path: "secret.txt", content: "not covered\n" },
     ];
     transport.finalOutput = '{"summary":"created package.json"}';
     const current = await rootFixture();
     const { executed } = await executeOnce(current);
-    expect(executed.kind).not.toBe("EXECUTOR_FINISHED_READY_FOR_CAPTURE");
+    expect(executed.kind).toBe("RECONCILIATION_REQUIRED");
+    const artifacts = await readCodexInvocationArtifactSetV2(current.store, current.attemptId);
+    expect(artifacts.providerResult).toMatchObject({ classification: "SUCCEEDED", terminalKind: "TURN_COMPLETED", actualExitCode: 0 });
+    expect(artifacts.finalizationDiagnostic).toMatchObject({
+      stage: "DELTA_DERIVATION",
+      m5bCode: "M5B_DELTA_OUT_OF_SCOPE",
+      providerResultDigest: artifacts.providerResult?.resultDigest,
+    });
+    expect(artifacts.terminal).toBeUndefined();
+    expect(artifacts.workspaceDelta).toBeUndefined();
     expect(existsSync(join(current.projectRoot, "package.json"))).toBe(false);
-    expect(existsSync(join(current.projectRoot, "extra.txt"))).toBe(false);
+    expect(existsSync(join(current.projectRoot, "secret.txt"))).toBe(false);
     expect(await readCodexPublicationReceiptV2(current.store, current.attemptId)).toBeUndefined();
   }, 120_000);
 
@@ -885,7 +1041,15 @@ describe("Ralph M5-B — root-level product scope end to end", () => {
     };
     const current = await rootFixture();
     const { executed } = await executeOnce(current);
-    expect(executed.kind).not.toBe("EXECUTOR_FINISHED_READY_FOR_CAPTURE");
+    expect(executed.kind).toBe("RECONCILIATION_REQUIRED");
+    const artifacts = await readCodexInvocationArtifactSetV2(current.store, current.attemptId);
+    expect(artifacts.finalizationDiagnostic).toMatchObject({
+      stage: "SENTINEL_VERIFICATION",
+      m5bCode: "M5B_SENTINEL_VIOLATED",
+      providerResultDigest: artifacts.providerResult?.resultDigest,
+    });
+    expect(artifacts.terminal).toBeUndefined();
+    expect(artifacts.workspaceDelta).toBeUndefined();
     expect(existsSync(join(current.projectRoot, "package.json"))).toBe(false);
     expect(await readCodexPublicationReceiptV2(current.store, current.attemptId)).toBeUndefined();
     for (const controlRoot of CODEX_PROJECTION_EXCLUDED_ROOTS_V2) {
@@ -932,3 +1096,114 @@ describe("Ralph M5-B — root-level product scope end to end", () => {
     expect(transport.runs).toBe(callsAfterFirst);
   }, 120_000);
 });
+
+describe("Ralph M5-B — durable host-finalization diagnostics", () => {
+  it("surfaces only sealed diagnostic facts across a cold bridge reopen without redispatch", async () => {
+    const bridge = await createReadyBridgeFixture({ taskCount: 1 });
+    disposableBridgeRoots.push(bridge.root);
+    const runId = "finalization-diagnostic";
+    const bridgeRunRoot = resolve(bridge.root, ".rb-harness/ralph/bridge-runs", runId);
+    const workspaceRoot = resolve(bridgeRunRoot, "workspace");
+    const stagingBase = resolve(bridgeRunRoot, "provider-staging");
+    const poison = "M5B_POISON_NEVER_PERSIST_7f3a";
+    transport.stagingWrites = [
+      { path: "src/first.txt", content: "first\n" },
+      { path: `src/${poison}.txt`, content: "not authorized\n" },
+    ];
+    transport.finalOutput = '{"summary":"created src/first.txt"}';
+
+    let executorFactoryCalls = 0;
+    let auditorFactoryCalls = 0;
+    const first = await runProgressiveRalphBridgeV1(bridge.root, {
+      ...bridgeIds(runId),
+      runtimes: {
+        executor: async ({ store, authorizedInvocation, timeoutPolicy }) => {
+          executorFactoryCalls += 1;
+          return createCodexCliExecutorV2({ store, authorizedInvocation, timeoutPolicy, stagingBase });
+        },
+        auditor: () => {
+          auditorFactoryCalls += 1;
+          return new ScriptedAuditor({ defaultDecision: { verdict: "ACCEPT", rationale: "must not run" } });
+        },
+      },
+    });
+
+    expect(first).toMatchObject({
+      runId,
+      status: "BLOCKED",
+      errorCode: "RALPH_BRIDGE_RECONCILIATION_REQUIRED",
+      publicationOccurred: false,
+    });
+    expect(executorFactoryCalls).toBe(1);
+    expect(auditorFactoryCalls).toBe(0);
+    expect(transport.runs).toBe(1);
+
+    const store = new RalphEventStoreV2({ projectRoot: workspaceRoot, runId });
+    const statePath = resolve(store.runDirectory, "state/current.json");
+    const stateSource = await readFile(statePath, "utf8");
+    const stateEnvelope = JSON.parse(stateSource) as { readonly state: { readonly attempts: Readonly<Record<string, { readonly stage: string }>> } };
+    const attemptIds = Object.keys(stateEnvelope.state.attempts);
+    expect(attemptIds).toHaveLength(1);
+    const attemptId = attemptIds[0]!;
+    const artifacts = await readCodexInvocationArtifactSetV2(store, attemptId);
+    const diagnosticRef = codexFinalizationDiagnosticRefV2(attemptId);
+    const expectedGuidance = `M5-B host finalization failed: stage=DELTA_DERIVATION code=M5B_DELTA_OUT_OF_SCOPE diagnostic=${diagnosticRef}. Inspect preserved evidence; do not redispatch.`;
+    expect(first.guidance).toBe(expectedGuidance);
+    expect(artifacts.providerResult).toMatchObject({ classification: "SUCCEEDED", terminalKind: "TURN_COMPLETED", actualExitCode: 0 });
+    expect(artifacts.finalizationDiagnostic).toMatchObject({
+      runId,
+      taskId: "T001",
+      attemptId,
+      providerResultDigest: artifacts.providerResult?.resultDigest,
+      stage: "DELTA_DERIVATION",
+      m5bCode: "M5B_DELTA_OUT_OF_SCOPE",
+    });
+    expect(artifacts.terminal).toBeUndefined();
+    expect(artifacts.workspaceDelta).toBeUndefined();
+    expect(await readCodexPublicationReceiptV2(store, attemptId)).toBeUndefined();
+    const beforeEvents = (await store.inspect()).events;
+    const diagnosticSource = await readFile(resolve(store.runDirectory, diagnosticRef), "utf8");
+    for (const durableOrPublic of [diagnosticSource, JSON.stringify(first), first.guidance ?? "", JSON.stringify(beforeEvents), stateSource]) {
+      expect(durableOrPublic).not.toContain(poison);
+    }
+
+    let reopenedExecutorCalls = 0;
+    let reopenedAuditorCalls = 0;
+    const secondProcessRuntimes: BridgeRuntimeFactoriesV1 = {
+      executor: () => {
+        reopenedExecutorCalls += 1;
+        throw new Error("executor must not be constructed while inspecting reconciliation");
+      },
+      auditor: () => {
+        reopenedAuditorCalls += 1;
+        throw new Error("auditor must not be constructed while inspecting reconciliation");
+      },
+    };
+    const reopened = await runProgressiveRalphBridgeV1(bridge.root, { runtimes: secondProcessRuntimes });
+    const reopenedStore = new RalphEventStoreV2({ projectRoot: workspaceRoot, runId });
+    const reopenedArtifacts = await readCodexInvocationArtifactSetV2(reopenedStore, attemptId);
+    expect(reopened).toMatchObject({
+      runId,
+      status: "BLOCKED",
+      errorCode: "RALPH_BRIDGE_RECONCILIATION_REQUIRED",
+      guidance: expectedGuidance,
+      publicationOccurred: false,
+    });
+    expect(reopenedArtifacts.finalizationDiagnostic).toEqual(artifacts.finalizationDiagnostic);
+    expect((await reopenedStore.inspect()).events).toEqual(beforeEvents);
+    expect(reopenedExecutorCalls).toBe(0);
+    expect(reopenedAuditorCalls).toBe(0);
+    expect(transport.runs).toBe(1);
+    expect(await readdir(resolve(bridge.root, ".rb-harness/ralph/bridge-runs"))).toEqual([runId]);
+  }, 180_000);
+});
+
+function bridgeIds(runId: string) {
+  let ordinal = 0;
+  return {
+    runIdFactory: () => runId,
+    nonceFactory: () => `diagnostic-nonce-${++ordinal}`,
+    eventIdFactory: () => `diagnostic-event-${++ordinal}`,
+    attemptIdFactory: () => `diagnostic-attempt-${++ordinal}`,
+  };
+}
