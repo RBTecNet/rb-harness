@@ -1,6 +1,6 @@
 {
   "name": "@rb-harness/core",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Standalone provider-neutral documentation harness and deterministic artifact contracts",
   "license": "MIT",
   "repository": {

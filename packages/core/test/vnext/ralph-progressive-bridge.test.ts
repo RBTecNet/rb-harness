@@ -417,6 +417,105 @@ describe("Progressive READY -> Ralph execution bridge V1", () => {
     expect(state.state.hold).toBe("HUMAN_REQUIRED");
   }, 30_000);
 
+  it("resolves a completed COMMAND artifact behind the ValidationSet barrier before discovering the Human boundary", async () => {
+    const fixture = await ready({ taskCount: 4, humanValidationTask: 3, commandAndHumanValidationTask: 3 });
+    const firstExecutors: string[] = [];
+    const firstAuditors: string[] = [];
+    const first = await runProgressiveRalphBridgeV1(fixture.root, {
+      ...ids("human-command-barrier"),
+      runtimes: runtimes({
+        action: async (context) => {
+          firstExecutors.push(context.taskId);
+          await writeImplementation(workspaceFromContext(fixture.root, "human-command-barrier"), context.taskId);
+        },
+        decide: (auditPackage) => {
+          firstAuditors.push(auditPackage.taskId);
+          return accept();
+        },
+      }),
+      validationProcessSupervisor: successfulValidation(),
+    });
+    expect(first).toMatchObject({
+      status: "NEEDS_HUMAN",
+      runId: "human-command-barrier",
+      completedTaskCount: 2,
+      remainingTaskCount: 2,
+      errorCode: "RALPH_BRIDGE_HUMAN_EVIDENCE_REQUIRED",
+      pendingHuman: { taskId: "T003", validationSpecId: "T003:validation:2" },
+    });
+    expect(firstExecutors).toEqual(["T001", "T002", "T003"]);
+    expect(firstAuditors).toEqual(["T001", "T002"]);
+    const firstStore = new RalphEventStoreV2({ projectRoot: workspaceFromContext(fixture.root, "human-command-barrier"), runId: first.runId });
+    const firstBoundary = JSON.parse(await readFile(resolve(first.runPath, "state/current.json"), "utf8")) as { readonly state: any };
+    const heldT003 = Object.values(firstBoundary.state.attempts as Record<string, any>).find((attempt: any) => attempt.taskId === "T003" && attempt.disposition === "OPEN") as any;
+    expect(firstBoundary.state).toMatchObject({ hold: "HUMAN_REQUIRED" });
+    expect(heldT003).toMatchObject({ stage: "AWAITING_HUMAN", disposition: "OPEN" });
+    expect(heldT003.validationRuns).toEqual(expect.arrayContaining([
+      expect.objectContaining({ validationSpecId: "T003:validation:1", outcome: "PENDING" }),
+      expect.objectContaining({ validationSpecId: "T003:validation:2", outcome: "PENDING" }),
+    ]));
+    expect(await readValidationRunV2(firstStore, heldT003.attemptId, heldT003.validationRuns.find((run: any) => run.validationSpecId === "T003:validation:1").validationRunId)).toMatchObject({ kind: "COMMAND", outcome: "PASS", exitCode: 0 });
+    expect((await firstStore.inspect()).events.filter((event) => event.eventType === "validation.completed" && event.taskId === "T003")).toHaveLength(0);
+
+    const before = JSON.parse(await readFile(resolve(first.runPath, "state/current.json"), "utf8")) as { readonly state: any; readonly stateHash: string; readonly lastSequence: number };
+    const beforeEvents = await new RalphEventStoreV2({ projectRoot: workspaceFromContext(fixture.root, "human-command-barrier"), runId: first.runId }).inspect();
+    let coldExecutorCalls = 0;
+    let coldAuditorCalls = 0;
+    const cold = await runProgressiveRalphBridgeV1(fixture.root, {
+      runtimes: {
+        executor: () => { coldExecutorCalls += 1; return new ScriptedExecutor(); },
+        auditor: () => { coldAuditorCalls += 1; return new ScriptedAuditor({ defaultDecision: accept() }); },
+      },
+      validationProcessSupervisor: successfulValidation(),
+    });
+    expect(cold).toMatchObject({
+      status: "NEEDS_HUMAN",
+      runId: first.runId,
+      errorCode: "RALPH_BRIDGE_HUMAN_EVIDENCE_REQUIRED",
+      pendingHuman: { taskId: "T003", validationSpecId: "T003:validation:2" },
+    });
+    expect(coldExecutorCalls).toBe(0);
+    expect(coldAuditorCalls).toBe(0);
+    const after = JSON.parse(await readFile(resolve(first.runPath, "state/current.json"), "utf8")) as { readonly state: any; readonly stateHash: string; readonly lastSequence: number };
+    const afterEvents = await new RalphEventStoreV2({ projectRoot: workspaceFromContext(fixture.root, "human-command-barrier"), runId: first.runId }).inspect();
+    expect(after.stateHash).toBe(before.stateHash);
+    expect(after.lastSequence).toBe(before.lastSequence);
+    expect(after.state).toEqual(before.state);
+    expect(afterEvents.events).toHaveLength(beforeEvents.events.length);
+
+    const continuationExecutors: string[] = [];
+    const continuationAudits: string[] = [];
+    const continued = await runProgressiveRalphBridgeV1(fixture.root, {
+      runtimes: {
+        executor: ({ authorizedInvocation }) => {
+          continuationExecutors.push(authorizedInvocation.workUnit.taskId);
+          return new ScriptedExecutor({ defaultScenario: {
+            kind: "SUCCESS",
+            fixtureWorkspaceAction: async (context) => {
+              await writeImplementation(workspaceFromContext(fixture.root, "human-command-barrier"), context.taskId);
+            },
+          } });
+        },
+        auditor: () => new ScriptedAuditor({ decide: (auditPackage) => { continuationAudits.push(auditPackage.taskId); return accept(); } }),
+      },
+      validationProcessSupervisor: successfulValidation(),
+    }, { humanDecision: "PASS" });
+    expect(continued).toMatchObject({ status: "COMPLETE", runId: first.runId, completedTaskCount: 4, remainingTaskCount: 0 });
+    expect(continuationExecutors).toEqual(["T004"]);
+    expect(continuationAudits).toEqual(["T003", "T004"]);
+    const store = new RalphEventStoreV2({ projectRoot: workspaceFromContext(fixture.root, "human-command-barrier"), runId: first.runId });
+    const continuedState = JSON.parse(await readFile(resolve(continued.runPath, "state/current.json"), "utf8")) as { readonly state: any };
+    expect(continuedState.state.attempts[heldT003.attemptId]).toMatchObject({ disposition: "CLOSED", closureReason: "AUDIT_ACCEPTED", taskId: "T003" });
+    expect(continuedState.state.attempts[heldT003.attemptId].validationRuns).toEqual(expect.arrayContaining([
+      expect.objectContaining({ validationSpecId: "T003:validation:1", outcome: "PASS" }),
+      expect.objectContaining({ validationSpecId: "T003:validation:2", outcome: "PASS" }),
+    ]));
+    const events = (await store.inspect()).events;
+    expect(events.filter((event) => event.eventType === "validation.completed" && event.taskId === "T003")).toHaveLength(2);
+    expect(events.filter((event) => event.eventType === "audit.started" && event.taskId === "T003")).toHaveLength(1);
+    expect(events.filter((event) => event.eventType === "attempt.human-required" && event.taskId === "T003")).toHaveLength(1);
+  }, 60_000);
+
   it("continues the same durable run across processes with exact-bound OPERATOR_HUMAN PASS and still audits", async () => {
     const fixture = await ready({ taskCount: 4, humanValidationTask: 3 });
     const firstTrace: string[] = [];

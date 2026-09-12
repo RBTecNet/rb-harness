@@ -30,6 +30,7 @@ import {
   createHumanValidationRequestV2,
   createOperatorHumanValidationAuthorityV2,
   humanValidationRequestRefV2,
+  readValidationRunV2,
   readHumanValidationDecisionV2,
   type HumanValidationDecisionValueV2,
   type HumanValidationRequestV2,
@@ -392,24 +393,77 @@ async function acceptedUnpublishedAttempt(store: RalphEventStoreV2, state: Ralph
   return undefined;
 }
 
-interface DiscoveredPendingHumanV1 {
+export interface DiscoveredPendingHumanV1 {
   readonly request: HumanValidationRequestV2;
   readonly display: RalphBridgePendingHumanV1;
 }
 
-async function discoverPendingHuman(store: RalphEventStoreV2, state: RalphRuntimeStateV2, projectRoot: string): Promise<DiscoveredPendingHumanV1> {
-  const attempts = Object.values(state.attempts).filter((attempt) => attempt.disposition === "OPEN" && attempt.stage === "AWAITING_HUMAN");
-  if (state.hold !== "HUMAN_REQUIRED" || attempts.length !== 1) throw new Error("RALPH_BRIDGE_HUMAN_PENDING_BOUNDARY_AMBIGUOUS");
+export async function discoverPendingHuman(store: RalphEventStoreV2, state: RalphRuntimeStateV2, projectRoot: string): Promise<DiscoveredPendingHumanV1> {
+  const openAttempts = Object.values(state.attempts).filter((attempt) => attempt.disposition === "OPEN");
+  const attempts = openAttempts.filter((attempt) => attempt.stage === "AWAITING_HUMAN");
+  if (state.hold !== "HUMAN_REQUIRED" || openAttempts.length !== 1 || attempts.length !== 1) {
+    throw new Error("RALPH_BRIDGE_HUMAN_PENDING_BOUNDARY_AMBIGUOUS");
+  }
   const attempt = attempts[0]!;
-  const pending = attempt.validationRuns.filter((run) => run.outcome === "PENDING");
-  if (pending.length !== 1) throw new Error("RALPH_BRIDGE_HUMAN_PENDING_BOUNDARY_AMBIGUOUS");
   const workUnit = await readWorkUnitV2(store, attempt.attemptId);
-  if (!workUnit || workUnit.runId !== state.runId || workUnit.phaseId !== attempt.phaseId || workUnit.taskId !== attempt.taskId) {
+  if (!workUnit
+    || workUnit.runId !== state.runId
+    || workUnit.phaseId !== attempt.phaseId
+    || workUnit.taskId !== attempt.taskId
+    || workUnit.attemptId !== attempt.attemptId) {
     throw new Error("RALPH_BRIDGE_HUMAN_REQUEST_RECONSTRUCTION_FAILED");
   }
-  const validation = workUnit.validationSpecRefs.filter((spec) => spec.kind === "HUMAN" && spec.validationSpecId === pending[0]!.validationSpecId && spec.digest === pending[0]!.validationSpecDigest);
-  if (validation.length !== 1) throw new Error("RALPH_BRIDGE_HUMAN_REQUEST_RECONSTRUCTION_FAILED");
-  const spec = validation[0]!;
+
+  // Operational-D intentionally leaves reducer ValidationRunRefs at PENDING
+  // until the complete ValidationSet barrier is materialized.  Discovery must
+  // therefore resolve each started ref against its immutable result artifact
+  // before deciding which (if any) Human boundary is still open.
+  const unresolvedHumans: Array<{ readonly ref: typeof attempt.validationRuns[number]; readonly spec: typeof workUnit.validationSpecRefs[number] }> = [];
+  for (const ref of attempt.validationRuns) {
+    const matchingSpecs = workUnit.validationSpecRefs.filter((candidate) =>
+      candidate.validationSpecId === ref.validationSpecId && candidate.digest === ref.validationSpecDigest);
+    if (matchingSpecs.length !== 1) throw new Error("RALPH_BRIDGE_HUMAN_REQUEST_RECONSTRUCTION_FAILED");
+    const spec = matchingSpecs[0]!;
+
+    let artifact;
+    try { artifact = await readValidationRunV2(store, attempt.attemptId, ref.validationRunId); }
+    catch { throw new Error("RALPH_BRIDGE_HUMAN_PENDING_BOUNDARY_AMBIGUOUS"); }
+
+    if (!artifact) {
+      // A missing result is only an admissible unresolved boundary for a
+      // Human validation.  COMMAND and MANUAL refs must never be skipped or
+      // redispatched from this discovery path.
+      if (ref.outcome === "PENDING" && spec.kind === "HUMAN") {
+        unresolvedHumans.push({ ref, spec });
+        continue;
+      }
+      throw new Error("RALPH_BRIDGE_HUMAN_PENDING_BOUNDARY_AMBIGUOUS");
+    }
+
+    // Validate the complete immutable result binding.  In particular, a
+    // pending reducer ref may be materially resolved by this artifact, but a
+    // foreign, stale, or tampered artifact must fail closed.
+    if (artifact.runId !== state.runId
+      || artifact.phaseId !== attempt.phaseId
+      || artifact.taskId !== attempt.taskId
+      || artifact.attemptId !== attempt.attemptId
+      || artifact.validationRunId !== ref.validationRunId
+      || artifact.validationSpecId !== spec.validationSpecId
+      || artifact.validationSpecDigest !== spec.digest
+      || artifact.validationRunOrdinal !== ref.validationRunOrdinal
+      || artifact.kind !== spec.kind
+      || artifact.instruction !== spec.instruction
+      || artifact.startedAt !== ref.startedAt
+      || (ref.endedAt !== undefined && ref.endedAt !== artifact.finishedAt)
+      || (ref.exitCode !== undefined && ref.exitCode !== artifact.exitCode)
+      || (ref.resultDigest !== undefined && ref.resultDigest !== artifact.runDigest)
+      || (ref.outcome !== "PENDING" && (ref.outcome !== artifact.outcome || ref.resultDigest !== artifact.runDigest))) {
+      throw new Error("RALPH_BRIDGE_HUMAN_PENDING_BOUNDARY_AMBIGUOUS");
+    }
+  }
+
+  if (unresolvedHumans.length !== 1) throw new Error("RALPH_BRIDGE_HUMAN_PENDING_BOUNDARY_AMBIGUOUS");
+  const { spec } = unresolvedHumans[0]!;
   const request = createHumanValidationRequestV2({
     runId: state.runId,
     phaseId: attempt.phaseId,
@@ -420,6 +474,9 @@ async function discoverPendingHuman(store: RalphEventStoreV2, state: RalphRuntim
   });
   const inspected = await store.inspect();
   const proof = inspected.events.filter((event) => event.eventType === "attempt.human-required"
+    && event.runId === state.runId
+    && event.phaseId === attempt.phaseId
+    && event.taskId === attempt.taskId
     && event.attemptId === attempt.attemptId && event.payload.proofRef === request.humanRequestRef);
   if (proof.length !== 1 || request.humanRequestRef !== humanValidationRequestRefV2(state.runId, attempt.attemptId, spec.validationSpecId)) {
     throw new Error("RALPH_BRIDGE_HUMAN_REQUEST_PROOF_MISMATCH");

@@ -89,6 +89,7 @@ export async function createReadyBridgeFixture(options: {
   readonly taskCount?: 1 | 2 | 4;
   readonly humanValidation?: boolean;
   readonly humanValidationTask?: number;
+  readonly commandAndHumanValidationTask?: number;
   readonly nonCanonicalDeclarationOrder?: boolean;
 } = {}): Promise<ReadyBridgeFixture> {
   const taskCount = options.taskCount ?? 2;
@@ -150,6 +151,7 @@ export async function createReadyBridgeFixture(options: {
     profile,
     adapter: new FixtureAdapter([projectPhasesPayload(p4, taskCount, {
       humanValidationTask: options.humanValidationTask ?? (options.humanValidation ? 1 : undefined),
+      commandAndHumanValidationTask: options.commandAndHumanValidationTask,
       nonCanonicalDeclarationOrder: options.nonCanonicalDeclarationOrder,
     })]),
     auth,
@@ -224,7 +226,7 @@ function userStoriesPayload() {
 function projectPhasesPayload(
   authority: ProjectPhasesUpstreamProjection,
   taskCount: 1 | 2 | 4,
-  options: { readonly humanValidationTask?: number; readonly nonCanonicalDeclarationOrder?: boolean },
+  options: { readonly humanValidationTask?: number; readonly commandAndHumanValidationTask?: number; readonly nonCanonicalDeclarationOrder?: boolean },
 ): ProjectPhasesProposalWire {
   const subjects = deriveImplementationSubjects(authority).map((subject) => subject.key);
   const words = ["first", "second", "third", "fourth"] as const;
@@ -232,6 +234,7 @@ function projectPhasesPayload(
   for (let index = 0; index < taskCount; index += 1) {
     const word = words[index]!;
     const human = options.humanValidationTask === index + 1;
+    const commandAndHuman = options.commandAndHumanValidationTask === index + 1;
     tasks.push({
       key: `write-${word}`,
       title: `Write ${word} implementation slice`,
@@ -241,7 +244,10 @@ function projectPhasesPayload(
       coverageKeys: taskCount === 1 ? subjects : index === taskCount - 1 && subjects.length > 1 ? subjects.slice(1) : subjects.slice(0, 1),
       acceptance: [`The ${word} deterministic implementation file exists${index === 0 ? "" : " after its dependency"}.`],
       validation: human
-        ? [{ kind: "human", evidence: "A human confirms keyboard and touch flows on mobile and desktop viewports." }]
+        ? [
+          ...(commandAndHuman ? [{ kind: "command" as const, commandKey: "tests" }] : []),
+          { kind: "human" as const, evidence: "A human confirms keyboard and touch flows on mobile and desktop viewports." },
+        ]
         : [{ kind: "command", commandKey: "tests" }],
       expectedEvidence: human ? "An exact-bound operator Human decision." : "Passing output from the approved tests command.",
     });
