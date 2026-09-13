@@ -1,6 +1,7 @@
 import { dirname, join, resolve } from "node:path";
 import { sha256, sha256Canonical, isSha256Digest } from "../hashing.js";
 import { fingerprintWorkspace, type WorkspaceFingerprintPolicyInput } from "../fingerprint.js";
+import { isWorkspacePackageInfrastructurePathV1 } from "../package-infrastructure.js";
 import type { RalphEventStoreV2 } from "../operational-b1/index.js";
 import {
   attemptArtifactRefV2,
@@ -82,6 +83,7 @@ export function validateCodexPublicationIntentV2(value: unknown): asserts value 
     if (!isRecord(entry)) throw new RalphM5BError("M5B_PUBLICATION_INVALID", "M5B_PUBLICATION_INVALID: entry");
     assertExactKeys(entry, ["path", "operation", "preimageDigest", "postimageDigest", "mode"]);
     assertSafeRelativePathV2(entry.path);
+    if (isWorkspacePackageInfrastructurePathV1(entry.path as string)) throw new RalphM5BError("M5B_DELTA_PATH_FORBIDDEN", `M5B_DELTA_PATH_FORBIDDEN: ${String(entry.path)}`);
     if (isCodexProjectionExcludedPathV2(entry.path as string)) throw new RalphM5BError("M5B_DELTA_PATH_FORBIDDEN", `M5B_DELTA_PATH_FORBIDDEN: ${String(entry.path)}`);
   }
   if (!isSha256Digest(value.publicationIntentDigest)) throw new RalphM5BError("M5B_PUBLICATION_INVALID", "M5B_PUBLICATION_INVALID: digest");

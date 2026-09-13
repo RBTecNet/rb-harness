@@ -16,6 +16,7 @@ import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { scopeTokenCoversPath } from "../../path-ownership.js";
 import { canonicalJson } from "../ralph-runtime/canonical-json.js";
 import { sha256, sha256Canonical } from "../ralph-runtime/hashing.js";
+import { isWorkspacePackageInfrastructurePathV1 } from "../ralph-runtime/package-infrastructure.js";
 
 export const RALPH_BRIDGE_PUBLICATION_SCHEMA_V1 = "rb-ralph-host-publication/v1" as const;
 
@@ -343,6 +344,9 @@ async function snapshotTree(
       throw new RalphBridgeWorkspaceError("RALPH_BRIDGE_WORKSPACE_READ_FAILED", `${relativePath}: ${String(error)}`);
     });
     if (stats.isSymbolicLink()) throw new RalphBridgeWorkspaceError("RALPH_BRIDGE_SYMLINK_UNSAFE", relativePath || ".");
+    if (relativePath && options.plane === "workspace" && isWorkspacePackageInfrastructurePathV1(relativePath)) {
+      throw new RalphBridgeWorkspaceError("RALPH_BRIDGE_PACKAGE_INFRASTRUCTURE_FORBIDDEN", relativePath);
+    }
     if (relativePath && skipPath(relativePath, options)) return;
     if (stats.isDirectory()) {
       const names = (await readdir(absolute)).sort();
@@ -359,6 +363,7 @@ async function snapshotTree(
 function skipPath(path: string, options: { readonly plane: "host" | "workspace"; readonly allOwnedPaths: readonly string[] }): boolean {
   if (options.plane === "host" && isProtectedPath(path)) return true;
   if (options.plane === "workspace" && (path === ".rb-harness/ralph" || path.startsWith(".rb-harness/ralph/"))) return true;
+  if (options.plane === "host" && isWorkspacePackageInfrastructurePathV1(path)) return true;
   return GENERATED_ROOTS.some((root) => (path === root || path.startsWith(`${root}/`))
     && !options.allOwnedPaths.some((owned) => scopeTokenCoversPath(owned, path) || scopeTokenCoversPath(path, owned)));
 }

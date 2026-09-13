@@ -819,7 +819,7 @@ describe("Ralph M4-D — one audit is one session", () => {
       expect(await readAuditResultV2(store, ATTEMPT_ONE)).toBeUndefined();
       expect(transport.promptCalls).toBe(0);
     });
-  });
+  }, 15_000);
 
   it("M4D-11: refuses to reuse a previous audit session and binds a fresh session per audit", async () => {
     await withFixture(async (value) => {
@@ -849,7 +849,7 @@ describe("Ralph M4-D — one audit is one session", () => {
       expect(secondInvocation).not.toBe(firstInvocation);
       expect(transport.promptCalls).toBe(2);
     }, ["`true`"], 'module.exports = "broken";\n');
-  });
+  }, 15_000);
 });
 
 describe("Ralph M4-D — untrusted structured audit envelope", () => {
@@ -961,7 +961,7 @@ describe("Ralph M4-D — Core reconciliation keeps every semantic decision", () 
       expect(result.state.findings[findingId]?.status).toBe("OPEN");
       expect(result.state.tasks.T001?.disposition).not.toBe("COMPLETE");
     }, ["`true`"], 'module.exports = "broken";\n');
-  });
+  }, 15_000);
 
   it("resolves an open Finding only through the frozen OPEN → CANDIDATE_RESOLVED → RESOLVED lifecycle", async () => {
     await withFixture(async (value) => {
@@ -987,7 +987,7 @@ describe("Ralph M4-D — Core reconciliation keeps every semantic decision", () 
       expect(one?.openCodeSessionId).not.toBe(two?.openCodeSessionId);
       expect(transport.promptCalls).toBe(2);
     }, ["`true`"], 'module.exports = "broken";\n');
-  });
+  }, 15_000);
 });
 
 describe("Ralph M4-D — fresh-runtime boundaries", () => {

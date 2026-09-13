@@ -1,4 +1,5 @@
 import { sha256Canonical } from "../hashing.js";
+import { isWorkspacePackageInfrastructurePathV1 } from "../package-infrastructure.js";
 import { RalphM5BError } from "./contract-errors.js";
 import { tokenizeOwnership } from "./codex-delta.js";
 import {
@@ -85,6 +86,9 @@ export function deriveCodexWriteRootPlanV2(input: DeriveCodexWriteRootPlanInputV
       continue;
     }
     assertSafeRelativePathV2(root);
+    if (isWorkspacePackageInfrastructurePathV1(root)) {
+      throw new RalphM5BError("M5B_PERMISSION_PROFILE_INVALID", `M5B_PERMISSION_PROFILE_INVALID: package infrastructure write root ${root}`);
+    }
     if (isCodexProjectionExcludedPathV2(root)) {
       throw new RalphM5BError("M5B_PERMISSION_PROFILE_INVALID", `M5B_PERMISSION_PROFILE_INVALID: control-plane write root ${root}`);
     }

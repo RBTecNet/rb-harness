@@ -16,6 +16,7 @@ import {
 import {
   authorizePostExecutorObservationV2,
   prepareNextAuthorizedInvocationV2,
+  readWorkUnitV2,
   type AuthorizedInvocationV2,
 } from "../ralph-runtime/operational-b3/index.js";
 import {
@@ -45,6 +46,14 @@ import {
 } from "../ralph-runtime/operational-f/correction-context.js";
 import type { M5BTimeoutPolicyV2 } from "../ralph-runtime/operational-m5b/index.js";
 import {
+  emitRalphProgressV1,
+  RALPH_PROGRESS_SCHEMA_V1,
+  withRalphHeartbeatV1,
+  type RalphProgressEventV1,
+  type RalphProgressObserverV1,
+  type RalphRuntimePresentationFactsV1,
+} from "../ralph-runtime/progress.js";
+import {
   createRalphEventV2,
   V2_EVENT_ENTITY_KINDS,
   type AttemptStateV2,
@@ -53,7 +62,14 @@ import {
   type RalphEventV2,
   type RalphRuntimeStateV2,
   type UnsignedRalphEventV2,
+  type ValidationSpecRef,
 } from "../ralph-runtime/operational-v2/index.js";
+import {
+  NpmDependencyProvisionerV1,
+  RalphNpmDependencyProvisioningErrorV1,
+  type NpmDependencyProvisionerV1Like,
+  type NpmDependencyProvisioningSessionV1,
+} from "./dependency-provisioning.js";
 
 export const BRIDGE_OPERATION_STOP_REASONS_V1 = [
   "TASK_COMPLETE",
@@ -84,6 +100,10 @@ export interface BridgeAuditorFactoryInputV1 {
 export interface BridgeRuntimeFactoriesV1 {
   readonly executor: (input: BridgeExecutorFactoryInputV1) => TrustedExecutorRuntimeV2 | Promise<TrustedExecutorRuntimeV2>;
   readonly auditor: (input: BridgeAuditorFactoryInputV1) => TrustedAuditorRuntimeV2 | Promise<TrustedAuditorRuntimeV2>;
+  readonly presentation?: {
+    readonly executor?: RalphRuntimePresentationFactsV1;
+    readonly auditor?: RalphRuntimePresentationFactsV1;
+  };
 }
 
 export interface ContinueBridgeTaskV1Input {
@@ -96,7 +116,11 @@ export interface ContinueBridgeTaskV1Input {
   readonly runtimes: BridgeRuntimeFactoriesV1;
   readonly validationProcessSupervisor?: ValidationProcessSupervisorV2Like;
   readonly validationProcessPolicy?: ValidationProcessPolicyV2;
+  readonly dependencyProvisioner?: NpmDependencyProvisionerV1Like;
   readonly humanAuthority?: TrustedHumanValidationAuthorityV2;
+  readonly progress?: RalphProgressObserverV1;
+  readonly progressHeartbeatIntervalMs?: number;
+  readonly progressNow?: () => number;
   readonly safetyIterationLimit?: number;
   readonly clock?: () => string;
   readonly nonceFactory?: () => string;
@@ -134,6 +158,13 @@ export async function continueBridgeTaskV1(input: ContinueBridgeTaskV1Input): Pr
       humanAuthority = undefined;
       state = resumed.state;
       if (resumed.kind === "AUDIT_REJECTED") {
+        const maxAttempts = resumed.state.tasks[resumed.attempt.taskId]?.executorBudget?.limit ?? resumed.attempt.ordinal;
+        if (resumed.attempt.ordinal < maxAttempts) {
+          emitAttemptProgress(input, "correction.retry", resumed.attempt, {
+            nextAttempt: resumed.attempt.ordinal + 1,
+            maxAttempts,
+          });
+        }
         state = await establishCorrectionBaseline(input.lease, resumed.attempt.taskId, resumed.observation, clock, nonceFactory, eventIdFactory);
         continue;
       }
@@ -162,6 +193,10 @@ export async function continueBridgeTaskV1(input: ContinueBridgeTaskV1Input): Pr
     }
 
     const admittedAttempt = admitted.attempt.attempt;
+    emitAttemptProgress(input, "attempt.started", admittedAttempt, {
+      ordinal: admittedAttempt.ordinal,
+      maxAttempts: state.tasks[admittedAttempt.taskId]?.executorBudget?.limit ?? admittedAttempt.ordinal,
+    });
     const findings = openFindingsForTask(state, admittedAttempt.taskId);
     let correctionContext: CorrectionContextV2 | undefined;
     const executionLease = await acquireLeasedRunV2(input.lease);
@@ -178,21 +213,35 @@ export async function continueBridgeTaskV1(input: ContinueBridgeTaskV1Input): Pr
         ...(correctionContext ? { correctionContext } : {}),
       });
       assertTrustedExecutorRuntimeV2(runtime);
+      emitAttemptProgress(input, "executor.started", admittedAttempt, {
+        runtimeIdentity: runtime.runtimeIdentity,
+        ...(input.runtimes.presentation?.executor ?? {}),
+      });
       if (correctionContext && runtime instanceof ScriptedExecutor) {
         runtime.setCorrectionContext(admitted.invocation.invocationId, toScriptedCorrectionContext(correctionContext));
       }
-      executed = await executeAuthorizedInvocationV2({
-        leasedRun: executionLease,
-        plan: input.plan,
-        runtime,
-        attemptId: admittedAttempt.attemptId,
-        planIdentity: input.planIdentity,
-        planDigest: input.planDigest,
-        clock,
-        nonceFactory,
-        eventIdFactory,
+      const timed = await withRalphHeartbeatV1({
+        observer: input.progress,
+        intervalMs: input.progressHeartbeatIntervalMs,
+        now: input.progressNow,
+        wallClock: clock,
+        event: heartbeatEvent(input, admittedAttempt, "EXECUTOR"),
+        operation: () => executeAuthorizedInvocationV2({
+          leasedRun: executionLease,
+          plan: input.plan,
+          runtime,
+          attemptId: admittedAttempt.attemptId,
+          planIdentity: input.planIdentity,
+          planDigest: input.planDigest,
+          clock,
+          nonceFactory,
+          eventIdFactory,
+        }),
       });
+      executed = timed.value;
+      emitAttemptProgress(input, "executor.finished", admittedAttempt, { elapsedMs: timed.elapsedMs, outcome: executed.kind });
     } catch (error) {
+      emitAttemptProgress(input, "executor.finished", admittedAttempt, { elapsedMs: 0, outcome: errorCodeForProgress(error) });
       await releaseKnownOwnedLeaseBestEffort(executionLease);
       throw error;
     }
@@ -216,19 +265,7 @@ export async function continueBridgeTaskV1(input: ContinueBridgeTaskV1Input): Pr
     const validationLease = await acquireLeasedRunV2(input.lease);
     let validated: Awaited<ReturnType<typeof validateAttemptV2>>;
     try {
-      validated = await validateAttemptV2({
-        leasedRun: validationLease,
-        plan: input.plan,
-        planIdentity: input.planIdentity,
-        planDigest: input.planDigest,
-        executorObservation: executed.observation,
-        ...(humanAuthority ? { humanAuthority } : {}),
-        processSupervisor: input.validationProcessSupervisor,
-        processPolicy: input.validationProcessPolicy,
-        clock,
-        nonceFactory,
-        eventIdFactory,
-      });
+      validated = await validateWithDependencies(input, validationLease, captured.attempt, admitted.authorizedInvocation.workUnit.validationSpecRefs, executed.observation, humanAuthority, clock, nonceFactory, eventIdFactory);
     } catch (error) {
       await releaseKnownOwnedLeaseBestEffort(validationLease, executed.observation);
       throw error;
@@ -246,10 +283,24 @@ export async function continueBridgeTaskV1(input: ContinueBridgeTaskV1Input): Pr
     }
 
     const auditor = await input.runtimes.auditor({ store: input.store, auditPackage: validated.auditPackage, timeoutPolicy: input.timeoutPolicy });
+    emitAttemptProgress(input, "auditor.started", validated.attempt, {
+      runtimeIdentity: auditor.runtimeIdentity,
+      profileId: auditor.profileId,
+      ...(input.runtimes.presentation?.auditor ?? {}),
+    });
     const auditLease = await acquireLeasedRunV2(input.lease);
     let audited: AuditAttemptV2Result;
     try {
-      audited = await auditAttemptV2({ leasedRun: auditLease, plan: input.plan, auditor, executorObservation: executed.observation, clock, nonceFactory, eventIdFactory });
+      const timed = await withRalphHeartbeatV1({
+        observer: input.progress,
+        intervalMs: input.progressHeartbeatIntervalMs,
+        now: input.progressNow,
+        wallClock: clock,
+        event: heartbeatEvent(input, validated.attempt, "AUDITOR"),
+        operation: () => auditAttemptV2({ leasedRun: auditLease, plan: input.plan, auditor, executorObservation: executed.observation, clock, nonceFactory, eventIdFactory }),
+      });
+      audited = timed.value;
+      emitAuditFinished(input, audited, timed.elapsedMs);
     } catch (error) {
       await releaseKnownOwnedLeaseBestEffort(auditLease, executed.observation);
       throw error;
@@ -261,6 +312,13 @@ export async function continueBridgeTaskV1(input: ContinueBridgeTaskV1Input): Pr
     if (audited.kind !== "AUDIT_REJECTED") {
       const kind = audited.kind === "RECONCILIATION_REQUIRED" ? "RECONCILIATION_REQUIRED" : "NOT_AUDITABLE";
       return { kind, state, attempt: audited.attempt, audit: audited, correctionContexts: contexts };
+    }
+    const maxAttempts = audited.state.tasks[audited.attempt.taskId]?.executorBudget?.limit ?? audited.attempt.ordinal;
+    if (audited.attempt.ordinal < maxAttempts) {
+      emitAttemptProgress(input, "correction.retry", audited.attempt, {
+        nextAttempt: audited.attempt.ordinal + 1,
+        maxAttempts,
+      });
     }
     state = await establishCorrectionBaseline(input.lease, admittedAttempt.taskId, executed.observation, clock, nonceFactory, eventIdFactory);
   }
@@ -327,19 +385,9 @@ async function resumePostExecutorBoundary(
     const validationLease = retainedLease ?? await acquireLeasedRunV2(input.lease);
     let validated: Awaited<ReturnType<typeof validateAttemptV2>>;
     try {
-      validated = await validateAttemptV2({
-        leasedRun: validationLease,
-        plan: input.plan,
-        planIdentity: input.planIdentity,
-        planDigest: input.planDigest,
-        executorObservation: observation,
-        ...(humanAuthority ? { humanAuthority } : {}),
-        processSupervisor: input.validationProcessSupervisor,
-        processPolicy: input.validationProcessPolicy,
-        clock,
-        nonceFactory,
-        eventIdFactory,
-      });
+      const workUnit = await readWorkUnitV2(input.store, current.attemptId);
+      if (!workUnit) throw new Error("RALPH_BRIDGE_WORK_UNIT_REQUIRED");
+      validated = await validateWithDependencies(input, validationLease, current, workUnit.validationSpecRefs, observation, humanAuthority, clock, nonceFactory, eventIdFactory);
     } catch (error) {
       await releaseKnownOwnedLeaseBestEffort(validationLease, observation);
       throw error;
@@ -369,10 +417,24 @@ async function resumePostExecutorBoundary(
   const auditPackage = readyForAudit ?? await readAuditPackageV2(input.store, current.attemptId);
   if (!auditPackage) throw new Error("RALPH_BRIDGE_AUDIT_PACKAGE_REQUIRED");
   const auditor = await input.runtimes.auditor({ store: input.store, auditPackage, timeoutPolicy: input.timeoutPolicy });
+  emitAttemptProgress(input, "auditor.started", current, {
+    runtimeIdentity: auditor.runtimeIdentity,
+    profileId: auditor.profileId,
+    ...(input.runtimes.presentation?.auditor ?? {}),
+  });
   const auditLease = retainedLease ?? await acquireLeasedRunV2(input.lease);
   let audited: AuditAttemptV2Result;
   try {
-    audited = await auditAttemptV2({ leasedRun: auditLease, plan: input.plan, auditor, executorObservation: observation, clock, nonceFactory, eventIdFactory });
+    const timed = await withRalphHeartbeatV1({
+      observer: input.progress,
+      intervalMs: input.progressHeartbeatIntervalMs,
+      now: input.progressNow,
+      wallClock: clock,
+      event: heartbeatEvent(input, current, "AUDITOR"),
+      operation: () => auditAttemptV2({ leasedRun: auditLease, plan: input.plan, auditor, executorObservation: observation, clock, nonceFactory, eventIdFactory }),
+    });
+    audited = timed.value;
+    emitAuditFinished(input, audited, timed.elapsedMs);
   } catch (error) {
     await releaseKnownOwnedLeaseBestEffort(auditLease, observation);
     throw error;
@@ -498,6 +560,140 @@ async function releaseKnownOwnedLeaseBestEffort(leasedRun: LeasedRunV2, observat
   } catch {
     // Ambiguous executor/durability state intentionally remains recoverable.
   }
+}
+
+async function validateWithDependencies(
+  input: ContinueBridgeTaskV1Input,
+  validationLease: LeasedRunV2,
+  attempt: AttemptStateV2,
+  validationSpecs: readonly ValidationSpecRef[],
+  observation: TrustedExecutorObservationV2,
+  humanAuthority: TrustedHumanValidationAuthorityV2 | undefined,
+  clock: () => string,
+  nonceFactory: () => string,
+  eventIdFactory: () => string,
+): Promise<Awaited<ReturnType<typeof validateAttemptV2>>> {
+  const progressNow = input.progressNow ?? Date.now;
+  const started = progressNow();
+  emitAttemptProgress(input, "dependency.started", attempt, { manager: "npm" });
+  let session: NpmDependencyProvisioningSessionV1 | undefined;
+  try {
+    const provisioner = input.dependencyProvisioner ?? new NpmDependencyProvisionerV1({ validationSupervisor: input.validationProcessSupervisor });
+    const prepared = await withRalphHeartbeatV1({
+      observer: input.progress,
+      intervalMs: input.progressHeartbeatIntervalMs,
+      now: progressNow,
+      wallClock: clock,
+      event: heartbeatEvent(input, attempt, "DEPENDENCY_PROVISIONING"),
+      operation: () => provisioner.prepare({
+        workspaceRoot: validationLease.projectRoot,
+        validationSpecs: attempt.stage === "AWAITING_HUMAN" ? [] : validationSpecs,
+        residueAuthority: {
+          runId: validationLease.runId,
+          phaseId: attempt.phaseId,
+          taskId: attempt.taskId,
+          attemptId: attempt.attemptId,
+          validationSpecIds: (attempt.stage === "AWAITING_HUMAN" ? [] : validationSpecs).map((spec) => spec.validationSpecId),
+          pendingValidationRuns: attempt.validationRuns
+            .filter((run) => run.outcome === "PENDING" && attempt.stage !== "AWAITING_HUMAN" && validationSpecs.some((spec) => spec.validationSpecId === run.validationSpecId))
+            .map((run) => ({ validationSpecId: run.validationSpecId, validationRunId: run.validationRunId })),
+        },
+      }),
+    });
+    session = prepared.value;
+    emitAttemptProgress(input, "dependency.passed", attempt, {
+      manager: "npm",
+      elapsedMs: prepared.elapsedMs,
+      disposition: session.disposition,
+    });
+  } catch (error) {
+    emitAttemptProgress(input, "dependency.failed", attempt, {
+      manager: "npm",
+      elapsedMs: Math.max(0, progressNow() - started),
+      code: errorCodeForProgress(error),
+    });
+    throw error;
+  }
+
+  let result: Awaited<ReturnType<typeof validateAttemptV2>> | undefined;
+  let failure: unknown;
+  try {
+    result = await validateAttemptV2({
+      leasedRun: validationLease,
+      plan: input.plan,
+      planIdentity: input.planIdentity,
+      planDigest: input.planDigest,
+      executorObservation: observation,
+      ...(humanAuthority ? { humanAuthority } : {}),
+      processSupervisor: session.validationSupervisor,
+      processPolicy: input.validationProcessPolicy,
+      progress: input.progress,
+      progressHeartbeatIntervalMs: input.progressHeartbeatIntervalMs,
+      progressNow: input.progressNow,
+      clock,
+      nonceFactory,
+      eventIdFactory,
+    });
+  } catch (error) { failure = error; }
+  let cleanupFailure: unknown;
+  try { await session.cleanup(); }
+  catch (error) {
+    cleanupFailure = error;
+    emitAttemptProgress(input, "dependency.failed", attempt, {
+      manager: "npm",
+      elapsedMs: Math.max(0, progressNow() - started),
+      code: errorCodeForProgress(error),
+    });
+  }
+  if (failure && cleanupFailure) {
+    const code = errorCodeForProgress(failure);
+    throw Object.assign(new AggregateError([failure, cleanupFailure], code), { code, cleanupCode: errorCodeForProgress(cleanupFailure) });
+  }
+  if (failure) throw failure;
+  if (cleanupFailure) throw cleanupFailure;
+  if (result?.kind === "HUMAN_REQUIRED") emitAttemptProgress(input, "human.required", result.attempt, {});
+  return result!;
+}
+
+function emitAuditFinished(input: ContinueBridgeTaskV1Input, audited: AuditAttemptV2Result, elapsedMs: number): void {
+  const verdict = audited.kind === "AUDIT_ACCEPTED" ? "ACCEPT"
+    : audited.kind === "AUDIT_REJECTED" ? "REJECT"
+      : audited.kind === "NOT_AUDITABLE" ? "NOT_AUDITABLE"
+        : "RECONCILIATION_REQUIRED";
+  const findingCount = "auditResult" in audited ? audited.auditResult.proposedFindings.length : 0;
+  emitAttemptProgress(input, "auditor.finished", audited.attempt, { verdict, findingCount, elapsedMs });
+}
+
+function emitAttemptProgress<TKind extends Extract<RalphProgressEventV1, { readonly attemptId: string }>["kind"]>(
+  input: ContinueBridgeTaskV1Input,
+  kind: TKind,
+  attempt: AttemptStateV2,
+  payload: Omit<Extract<RalphProgressEventV1, { readonly kind: TKind }>, "schema" | "kind" | "runId" | "phaseId" | "taskId" | "attemptId" | "occurredAt">,
+): void {
+  emitRalphProgressV1(input.progress, {
+    schema: RALPH_PROGRESS_SCHEMA_V1,
+    kind,
+    runId: input.store.runId,
+    phaseId: attempt.phaseId,
+    taskId: attempt.taskId,
+    attemptId: attempt.attemptId,
+    occurredAt: (input.clock ?? (() => new Date().toISOString()))(),
+    ...payload,
+  } as RalphProgressEventV1);
+}
+
+function heartbeatEvent(
+  input: ContinueBridgeTaskV1Input,
+  attempt: AttemptStateV2,
+  operation: "EXECUTOR" | "DEPENDENCY_PROVISIONING" | "AUDITOR",
+): Omit<Extract<RalphProgressEventV1, { readonly kind: "heartbeat" }>, "schema" | "occurredAt" | "elapsedMs"> {
+  return { kind: "heartbeat", runId: input.store.runId, operation, phaseId: attempt.phaseId, taskId: attempt.taskId, attemptId: attempt.attemptId };
+}
+
+function errorCodeForProgress(error: unknown): string {
+  if (error instanceof RalphNpmDependencyProvisioningErrorV1) return error.code;
+  if (error && typeof error === "object" && "code" in error && typeof (error as { readonly code?: unknown }).code === "string") return (error as { readonly code: string }).code;
+  return error instanceof Error && /^[A-Z][A-Z0-9_:-]{2,160}$/.test(error.message) ? error.message : "RALPH_OPERATION_FAILED";
 }
 
 function toScriptedCorrectionContext(context: CorrectionContextV2): ScriptedExecutorCorrectionContextV2 {

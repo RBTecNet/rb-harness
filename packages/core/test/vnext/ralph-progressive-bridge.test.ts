@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, readdir, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, readFile, readdir, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { assertRalphRootCliArgs, harnessCommandSurface } from "../../src/cli-program.js";
@@ -6,6 +6,7 @@ import { parseExecutionMarkdown } from "../../src/execution-contract.js";
 import { assertExactProgressivePlanBinding } from "../../src/vnext/ralph-bridge/plan-authority.js";
 import {
   createIsolatedRalphWorkspace,
+  formatRalphBridgeResultV1,
   genesisFor,
   initializeBridgeRunV1,
   inspectHostPublicationOutcome,
@@ -19,7 +20,10 @@ import {
   assertExactReady,
   selectExactReadyExecutionPlan,
   type BridgeRuntimeFactoriesV1,
+  NpmDependencyProvisionerV1,
+  type NpmProvisioningProcessInputV1,
 } from "../../src/vnext/ralph-bridge/index.js";
+import { createRalphProgressBufferV1, emitRalphProgressV1, formatRalphProgressEventV1, type RalphProgressEventV1 } from "../../src/vnext/ralph-runtime/progress.js";
 import { RalphEventStoreV2 } from "../../src/vnext/ralph-runtime/operational-b1/index.js";
 import { sha256Canonical } from "../../src/vnext/ralph-runtime/hashing.js";
 import { readExecutorObservationReceiptV2, ScriptedExecutor, type ScriptedWorkspaceActionV2 } from "../../src/vnext/ralph-runtime/operational-b4/index.js";
@@ -372,6 +376,7 @@ describe("Progressive READY -> Ralph execution bridge V1", () => {
     const fixture = await ready({ taskCount: 1 });
     let executorCalls = 0;
     let auditorCalls = 0;
+    const progressChannel = createRalphProgressBufferV1();
     const result = await runProgressiveRalphBridgeV1(fixture.root, {
       ...ids("budget"),
       runtimes: runtimes({
@@ -389,10 +394,16 @@ describe("Progressive READY -> Ralph execution bridge V1", () => {
         },
       }),
       validationProcessSupervisor: successfulValidation(),
+      progress: progressChannel,
     });
+    const progress = progressChannel.drain();
     expect(result).toMatchObject({ status: "FAILED", publicationOccurred: false, errorCode: "RALPH_BRIDGE_BUDGET_EXHAUSTED" });
     expect(executorCalls).toBe(2);
     expect(auditorCalls).toBe(2);
+    expect(progress.filter((event) => event.kind === "correction.retry")).toEqual([
+      expect.objectContaining({ nextAttempt: 2, maxAttempts: 2 }),
+    ]);
+    expect(progress.at(-1)).toMatchObject({ kind: "run.terminal", status: "BUDGET_EXHAUSTED", code: "RALPH_BRIDGE_BUDGET_EXHAUSTED" });
     await expect(readFile(resolve(fixture.root, "src/first.txt"))).rejects.toMatchObject({ code: "ENOENT" });
     const events = (await new RalphEventStoreV2({ projectRoot: workspaceFromContext(fixture.root, "budget"), runId: "budget" }).inspect()).events;
     expect(events.filter((event) => event.eventType === "attempt.started")).toHaveLength(2);
@@ -893,6 +904,154 @@ describe("Progressive READY -> Ralph execution bridge V1", () => {
     expect(await inspectRalphBridgeStatusV1(fixture.root)).toEqual({ state: "no run" });
     const authority = await loadProgressiveExecutionAuthority(fixture.root);
     expect(authority.selectedPlan.id).toContain("execution");
+  }, 30_000);
+
+  it("emits ordered presentation-only progress while preserving the terminal result", async () => {
+    const fixture = await ready({ taskCount: 1 });
+    const progressChannel = createRalphProgressBufferV1();
+    const result = await runProgressiveRalphBridgeV1(fixture.root, {
+      ...ids("progress-order"),
+      runtimes: runtimes({ action: async (context) => writeImplementation(workspaceFromContext(fixture.root, "progress-order"), context.taskId), decide: accept }),
+      validationProcessSupervisor: successfulValidation(),
+      progress: progressChannel,
+    });
+    const progress = progressChannel.drain();
+    expect(result.status).toBe("COMPLETE");
+    expect(formatRalphBridgeResultV1(result)).toContain("Ralph: COMPLETE");
+    const kinds = progress.map((event) => event.kind);
+    for (const kind of [
+      "run.started", "task.started", "attempt.started", "executor.started", "executor.finished",
+      "dependency.started", "dependency.passed", "validation.started", "validation.finished",
+      "auditor.started", "auditor.finished", "publication.started", "publication.finished", "run.terminal",
+    ] as const) expect(kinds).toContain(kind);
+    expect(kinds.indexOf("executor.finished")).toBeLessThan(kinds.indexOf("dependency.started"));
+    expect(kinds.indexOf("dependency.passed")).toBeLessThan(kinds.indexOf("validation.started"));
+    expect(kinds.indexOf("validation.finished")).toBeLessThan(kinds.indexOf("auditor.started"));
+    expect(kinds.indexOf("auditor.finished")).toBeLessThan(kinds.indexOf("publication.started"));
+    expect(kinds.at(-1)).toBe("run.terminal");
+  }, 30_000);
+
+  it("provisions locked npm dependencies before bridge validation without extending Executor authority or publication", async () => {
+    const fixture = await ready({ taskCount: 1, npmValidation: true });
+    const progressChannel = createRalphProgressBufferV1();
+    const provisioning: NpmProvisioningProcessInputV1[] = [];
+    const result = await runProgressiveRalphBridgeV1(fixture.root, {
+      ...ids("npm-bridge"),
+      runtimes: runtimes({ action: async (context) => writeImplementation(workspaceFromContext(fixture.root, "npm-bridge"), context.taskId), decide: accept }),
+      dependencyProvisioner: new NpmDependencyProvisionerV1({
+        processRunner: {
+          run: async (input) => {
+            provisioning.push(input);
+            const bin = resolve(input.cwd, "node_modules/.bin");
+            await mkdir(bin, { recursive: true });
+            await writeFile(resolve(bin, "local-check"), "#!/bin/sh\necho BRIDGE_LOCAL_BINARY_FOUND\n");
+            await chmod(resolve(bin, "local-check"), 0o755);
+            return { exitCode: 0, signal: null, timedOut: false, supervisionFailed: false };
+          },
+        },
+      }),
+      progress: progressChannel,
+    });
+    const progress = progressChannel.drain();
+    expect(result, `${JSON.stringify(result)}\n${JSON.stringify(progress)}`).toMatchObject({ status: "COMPLETE", publicationOccurred: true });
+    expect(provisioning).toHaveLength(1);
+    expect(provisioning[0]?.executable).toBe(provisioning[0]?.runtime.nodeExecutablePath);
+    expect(provisioning[0]?.argv[0]).toBe(provisioning[0]?.runtime.npmCliPath);
+    expect(provisioning[0]?.argv.slice(1, 5)).toEqual(["ci", "--ignore-scripts", "--no-audit", "--no-fund"]);
+    expect(progress.findIndex((event) => event.kind === "dependency.passed")).toBeLessThan(progress.findIndex((event) => event.kind === "validation.started"));
+    await expect(readFile(resolve(fixture.root, "node_modules/.bin/local-check"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(resolve(fixture.root, ".npm"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(resolve(fixture.root, "lifecycle-ran"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(resolve(fixture.root, "dist/validation-only.js"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(resolve(workspaceFromContext(fixture.root, "npm-bridge"), "dist/validation-only.js"))).rejects.toMatchObject({ code: "ENOENT" });
+    const store = new RalphEventStoreV2({ projectRoot: workspaceFromContext(fixture.root, "npm-bridge"), runId: "npm-bridge" });
+    const snapshot = await store.verifyRunSnapshot();
+    expect(snapshot.executorCapabilities).toEqual({ requested: ["workspace.write"], granted: ["workspace.write"], verified: ["workspace.write", "control-plane.deny", "network.deny"], readOnlyEnforced: false });
+    const inspection = await store.inspect();
+    expect(inspection.events.find((event) => event.eventType === "attempt.audit-ready")?.payload.validationSummary.passed).toBe(1);
+  }, 30_000);
+
+  it("fails closed before validation and Auditor when npm provisioning fails", async () => {
+    const fixture = await ready({ taskCount: 1 });
+    let validationCalls = 0;
+    let auditorCalls = 0;
+    const progressChannel = createRalphProgressBufferV1();
+    const result = await runProgressiveRalphBridgeV1(fixture.root, {
+      ...ids("npm-failure"),
+      runtimes: {
+        executor: () => new ScriptedExecutor({ defaultScenario: { kind: "SUCCESS", fixtureWorkspaceAction: async (context) => writeImplementation(workspaceFromContext(fixture.root, "npm-failure"), context.taskId) } }),
+        auditor: () => { auditorCalls += 1; return new ScriptedAuditor({ defaultDecision: accept() }); },
+      },
+      dependencyProvisioner: { prepare: async () => { throw Object.assign(new Error("must remain hidden"), { code: "RALPH_BRIDGE_NPM_PROVISIONING_FAILED" }); } },
+      validationProcessSupervisor: { run: async () => { validationCalls += 1; throw new Error("must not validate"); } },
+      progress: progressChannel,
+    });
+    const progress = progressChannel.drain();
+    expect(result).toMatchObject({ status: "INCOMPLETE_RESUMABLE", errorCode: "RALPH_BRIDGE_NPM_PROVISIONING_FAILED", publicationOccurred: false });
+    expect(validationCalls).toBe(0);
+    expect(auditorCalls).toBe(0);
+    expect(progress).toContainEqual(expect.objectContaining({ kind: "dependency.failed", code: "RALPH_BRIDGE_NPM_PROVISIONING_FAILED" }));
+    expect(progress.at(-1)).toMatchObject({ kind: "run.terminal", status: "INCOMPLETE_RESUMABLE", code: "RALPH_BRIDGE_NPM_PROVISIONING_FAILED" });
+  }, 30_000);
+
+  it("keeps heartbeats and renderer failures outside durable state and redacts unsafe presentation values", async () => {
+    const fixture = await ready({ taskCount: 1 });
+    const progressChannel = createRalphProgressBufferV1();
+    const delayed = successfulValidation();
+    const result = await runProgressiveRalphBridgeV1(fixture.root, {
+      ...ids("progress-heartbeat"),
+      runtimes: runtimes({ action: async (context) => writeImplementation(workspaceFromContext(fixture.root, "progress-heartbeat"), context.taskId), decide: accept }),
+      validationProcessSupervisor: {
+        run: async (input) => {
+          await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 25));
+          return delayed.run(input);
+        },
+      },
+      progressHeartbeatIntervalMs: 5,
+      progress: progressChannel,
+    });
+    const progress = progressChannel.drain();
+    expect(result.status).toBe("COMPLETE");
+    expect(progress.some((event) => event.kind === "heartbeat" && event.operation === "VALIDATION")).toBe(true);
+    const store = new RalphEventStoreV2({ projectRoot: workspaceFromContext(fixture.root, "progress-heartbeat"), runId: "progress-heartbeat" });
+    const durable = await store.inspect();
+    expect(durable.events.some((event) => String(event.eventType).includes("heartbeat") || String(event.eventType).includes("progress"))).toBe(false);
+
+    const unsafe = formatRalphProgressEventV1({
+      schema: "rb-ralph-progress/v1", kind: "executor.started", runId: "run", phaseId: "P001", taskId: "T001", attemptId: "attempt",
+      runtimeIdentity: "safe-runtime", provider: "sk-super-secret-value", transport: "auth.json", model: "gpt-safe", effort: "xhigh", occurredAt: "2026-09-12T00:00:00.000Z",
+    });
+    expect(unsafe).not.toContain("super-secret");
+    expect(unsafe).not.toContain("auth.json");
+    expect(unsafe).toContain("[invalid]");
+
+    const second = await ready({ taskCount: 1 });
+    const blockingRenderer = { publish: () => {
+      const until = performance.now() + 600;
+      while (performance.now() < until) { /* adversarial untrusted renderer */ }
+      throw new Error("renderer must have zero authority");
+    } } as never;
+    const publishStarted = performance.now();
+    emitRalphProgressV1(blockingRenderer, {
+      schema: "rb-ralph-progress/v1", kind: "heartbeat", runId: "run", operation: "EXECUTOR", elapsedMs: 1,
+      occurredAt: "2026-09-12T00:00:00.000Z",
+    });
+    expect(performance.now() - publishStarted).toBeLessThan(50);
+    const loggerFailure = await runProgressiveRalphBridgeV1(second.root, {
+      ...ids("progress-throws"),
+      runtimes: runtimes({ action: async (context) => writeImplementation(workspaceFromContext(second.root, "progress-throws"), context.taskId), decide: accept }),
+      validationProcessSupervisor: successfulValidation(),
+      progress: blockingRenderer,
+    });
+    expect(loggerFailure.status).toBe("COMPLETE");
+
+    const bounded = createRalphProgressBufferV1(2);
+    for (let index = 0; index < 5; index += 1) bounded.publish({
+      schema: "rb-ralph-progress/v1", kind: "heartbeat", runId: "run", operation: "EXECUTOR", elapsedMs: index,
+      occurredAt: "2026-09-12T00:00:00.000Z",
+    });
+    expect(bounded.drain()).toHaveLength(2);
+    expect(bounded.droppedCount()).toBe(3);
   }, 30_000);
 });
 

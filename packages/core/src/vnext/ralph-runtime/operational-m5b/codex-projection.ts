@@ -7,6 +7,7 @@ import {
   WORKSPACE_FORBIDDEN_ROOTS,
   type WorkspaceFingerprint,
 } from "../fingerprint.js";
+import { isWorkspacePackageInfrastructurePathV1 } from "../package-infrastructure.js";
 import { M5B_LIMITS_V2 } from "./contract.js";
 import { RalphM5BError } from "./contract-errors.js";
 
@@ -195,6 +196,9 @@ export async function buildCodexProviderProjectionV2(input: BuildCodexProjection
 
   for (const entry of [...input.fingerprint.productWorkspaceEntries].sort((left, right) => comparePathsV2(left.path, right.path))) {
     const path = assertSafeRelativePathV2(entry.path);
+    if (isWorkspacePackageInfrastructurePathV1(path)) {
+      throw new RalphM5BError("M5B_PROJECTION_PATH_UNSAFE", `M5B_PROJECTION_PATH_UNSAFE: package infrastructure ${path}`);
+    }
     // A Core-owned root is never projected, even when the fingerprint policy
     // tracks it: the provider must not be able to see or write one at all.
     if (isCodexProjectionExcludedPathV2(path)) continue;
@@ -337,6 +341,9 @@ export async function readCodexProjectionStateV2(
         if (children.length > 0) throw new RalphM5BError("M5B_SENTINEL_VIOLATED", `M5B_SENTINEL_VIOLATED: ${path} gained ${children.length} entries`);
         continue;
       }
+      if (isWorkspacePackageInfrastructurePathV1(path)) {
+        throw new RalphM5BError("M5B_PROJECTION_PATH_UNSAFE", `M5B_PROJECTION_PATH_UNSAFE: provider created package infrastructure ${path}`);
+      }
       if (isCodexProjectionExcludedPathV2(path)) throw new RalphM5BError("M5B_PROJECTION_CONTROL_PLANE_PATH", `M5B_PROJECTION_CONTROL_PLANE_PATH: ${path}`);
       const stats = await safeLstatV2(join(root, path), path);
       if (stats.isSymbolicLink()) throw new RalphM5BError("M5B_PROJECTION_PATH_UNSAFE", `M5B_PROJECTION_PATH_UNSAFE: symlink ${path}`);
@@ -407,6 +414,7 @@ export function validateCodexProjectionManifestV2(value: unknown): asserts value
     if (!isRecord(entry)) throw new RalphM5BError("M5B_PROJECTION_INVALID", "M5B_PROJECTION_INVALID: entry");
     assertExactKeys(entry, ["path", "kind", "mode", "size", "contentHash"]);
     assertSafeRelativePathV2(entry.path as string);
+    if (isWorkspacePackageInfrastructurePathV1(entry.path as string)) throw new RalphM5BError("M5B_PROJECTION_PATH_UNSAFE", `M5B_PROJECTION_PATH_UNSAFE: package infrastructure ${String(entry.path)}`);
     if (isCodexProjectionExcludedPathV2(entry.path as string)) throw new RalphM5BError("M5B_PROJECTION_CONTROL_PLANE_PATH", `M5B_PROJECTION_CONTROL_PLANE_PATH: ${String(entry.path)}`);
     if (entry.kind !== "file" && entry.kind !== "directory") throw new RalphM5BError("M5B_PROJECTION_PATH_UNSAFE", "M5B_PROJECTION_PATH_UNSAFE: kind");
   }

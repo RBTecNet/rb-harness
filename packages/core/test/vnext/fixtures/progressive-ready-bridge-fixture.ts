@@ -91,18 +91,20 @@ export async function createReadyBridgeFixture(options: {
   readonly humanValidationTask?: number;
   readonly commandAndHumanValidationTask?: number;
   readonly nonCanonicalDeclarationOrder?: boolean;
+  readonly npmValidation?: boolean;
 } = {}): Promise<ReadyBridgeFixture> {
   const taskCount = options.taskCount ?? 2;
   const root = await mkdtemp(resolve(tmpdir(), "rb-progressive-ralph-bridge-"));
   await mkdir(resolve(root, "src"), { recursive: true });
   await writeFile(resolve(root, "README.md"), "fixture baseline\n");
+  if (options.npmValidation) await writeNpmValidationAuthority(root);
 
   await runProgressiveInit({
     projectRoot: root,
     originalRequest: BRIDGE_FIXTURE_REQUEST,
     selectedStage: "project-description",
     profile,
-    adapter: new FixtureAdapter([projectDescriptionPayload()]),
+    adapter: new FixtureAdapter([projectDescriptionPayload(options.npmValidation === true)]),
     auth,
     interview: { kind: "headless" },
   });
@@ -185,7 +187,7 @@ async function currentP4Upstream(root: string): Promise<ProjectPhasesUpstreamPro
   });
 }
 
-function projectDescriptionPayload() {
+function projectDescriptionPayload(npmValidation = false) {
   return {
     contract: "rb-project-description/v1",
     stage: "project-description",
@@ -196,9 +198,32 @@ function projectDescriptionPayload() {
     workflows: [{ key: "task-flow", statement: "A developer creates and inspects a local task.", actorKeys: ["developer"], capabilityKeys: ["manage-tasks"] }],
     constraints: [{ key: "deterministic-output", statement: "Implementation output must remain deterministic." }],
     determinations: [],
-    qualityCommands: [{ key: "tests", kind: "test", command: "test -f src/first.txt" }],
+    qualityCommands: [{ key: "tests", kind: "test", command: npmValidation ? "npm run typecheck" : "test -f src/first.txt" }],
     questions: [],
   };
+}
+
+async function writeNpmValidationAuthority(root: string): Promise<void> {
+  await writeFile(resolve(root, "package.json"), `${JSON.stringify({
+    name: "bridge-fixture",
+    version: "1.0.0",
+    private: true,
+    scripts: {
+      preinstall: "node -e \"require('node:fs').writeFileSync('lifecycle-ran', 'unsafe')\"",
+      typecheck: "local-check && node -e \"const f=require('node:fs');f.mkdirSync('dist',{recursive:true});f.writeFileSync('dist/validation-only.js','discarded\\n')\"",
+    },
+    devDependencies: { "local-check": "1.0.0" },
+  }, null, 2)}\n`);
+  await writeFile(resolve(root, "package-lock.json"), `${JSON.stringify({
+    name: "bridge-fixture",
+    version: "1.0.0",
+    lockfileVersion: 3,
+    requires: true,
+    packages: {
+      "": { name: "bridge-fixture", version: "1.0.0", devDependencies: { "local-check": "1.0.0" } },
+      "node_modules/local-check": { version: "1.0.0", resolved: "https://registry.npmjs.org/local-check/-/local-check-1.0.0.tgz", integrity: "sha512-YWJj" },
+    },
+  }, null, 2)}\n`);
 }
 
 function userStoriesQuestionsPayload() {

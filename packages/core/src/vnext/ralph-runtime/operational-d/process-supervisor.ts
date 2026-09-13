@@ -2,7 +2,17 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { lstat, realpath } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { sha256Canonical } from "../hashing.js";
+import {
+  prepareLinuxValidationSandboxLaunchV1,
+  type ValidationSandboxWritableMountV1,
+} from "../linux-validation-sandbox.js";
+import { inspectQualifiedNodeNpmRuntimeV1 } from "../node-npm-runtime.js";
+import { revalidateQualifiedNodeNpmRuntimeV1 } from "../node-npm-runtime.js";
 import { assertNoCredentialMaterial, RalphCredentialSafetyError } from "../operational-b1/secret-safety.js";
+import {
+  assertValidationProjectionRunAuthorityV1,
+  type ValidationProjectionRunAuthorityV1,
+} from "./validation-projection.js";
 
 export const VALIDATION_PROCESS_INFRASTRUCTURE_STATUSES = [
   "NONE",
@@ -54,6 +64,21 @@ export interface ValidationProcessInputV2 {
     readonly environment?: ValidationEnvironmentPolicyV2;
   };
   readonly signal?: AbortSignal;
+  /** Core-created infrastructure mounts. Providers cannot populate this field. */
+  readonly sandboxWritableMounts?: readonly ValidationSandboxWritableMountV1[];
+  /** Durable ValidationRun identity used only to bind ephemeral infrastructure. */
+  readonly validationBinding?: ValidationProcessBindingV2;
+  /** Nominal Core authority for the exact ephemeral Evidence projection. */
+  readonly validationProjection?: ValidationProjectionRunAuthorityV1;
+}
+
+export interface ValidationProcessBindingV2 {
+  readonly runId: string;
+  readonly phaseId: string;
+  readonly taskId: string;
+  readonly attemptId: string;
+  readonly validationSpecId: string;
+  readonly validationRunId: string;
 }
 
 export interface ValidationProcessResultV2 {
@@ -68,6 +93,8 @@ export interface ValidationProcessResultV2 {
   readonly cancelled: boolean;
   readonly startedAt: string;
   readonly finishedAt: string;
+  /** Secondary Core infrastructure diagnostic; never product stderr. */
+  readonly infrastructureDiagnostic?: string;
 }
 
 export interface ValidationProcessSupervisorV2Like {
@@ -193,17 +220,37 @@ export class ValidationProcessSupervisorV2 implements ValidationProcessSuperviso
     if (typeof input.command !== "string" || input.command.length === 0 || input.command.length > 4_096 || input.command.includes("\0")) {
       return protocolFailure(this.clock);
     }
-    const cwd = await verifyValidationCwdV2(input.cwd, input.expectedProjectRoot);
+    const projection = await assertValidationProjectionRunAuthorityV1({ authority: input.validationProjection, cwd: input.cwd, binding: input.validationBinding });
+    const cwd = await verifyValidationCwdV2(input.cwd, projection.projectionRoot);
+    if (input.expectedProjectRoot !== undefined && resolveProjectionExpectedRoot(input.expectedProjectRoot) !== projection.projectionRoot) {
+      throw new RalphValidationProcessError("D_VALIDATION_CWD_INVALID", "D_VALIDATION_CWD_INVALID: caller expected root is not the authorized projection");
+    }
     const environment = boundedEnvironment(policy.environment);
+    if (input.signal?.aborted) return cancelledResult(this.clock);
+    const runtime = await inspectQualifiedNodeNpmRuntimeV1();
+    const launch = await prepareLinuxValidationSandboxLaunchV1({
+      workspaceRoot: cwd,
+      shellExecutable: policy.shell.executable,
+      shellArgs: policy.shell.args,
+      command: input.command,
+      environment: definedEnvironment(environment),
+      runtime,
+      writableMounts: input.sandboxWritableMounts,
+    });
+    // Close the qualification-to-exec interval after all launch arguments have
+    // been derived. PATH and the npm shebang never choose this runtime.
+    await revalidateQualifiedNodeNpmRuntimeV1(runtime);
+    // The signal may have crossed while Core was qualifying the sandbox and
+    // runtime. Do not spawn after that cancellation boundary.
     if (input.signal?.aborted) return cancelledResult(this.clock);
     const startedAt = this.clock();
     let child: ChildProcess;
     try {
-      // The entire trusted command is exactly one argument after -c.  It is
-      // never split into argv by the Core boundary.
-      child = spawn(policy.shell.executable, [...policy.shell.args, input.command], {
-        cwd,
-        env: environment,
+      child = spawn(launch.executable, [...launch.argv], {
+        cwd: "/",
+        // bwrap constructs the child environment from --clearenv + --setenv.
+        // Its own parent receives no inherited credential-bearing values.
+        env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8", LC_ALL: "C.UTF-8" },
         detached: true,
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
@@ -214,6 +261,11 @@ export class ValidationProcessSupervisorV2 implements ValidationProcessSuperviso
 
     return superviseChild(child, policy, input.signal, startedAt, this.clock);
   }
+}
+
+function resolveProjectionExpectedRoot(value: string): string {
+  if (!isAbsolute(value) || value.includes("\0")) throw new RalphValidationProcessError("D_VALIDATION_CWD_INVALID");
+  return value;
 }
 
 export const runValidationCommandV2 = async (input: ValidationProcessInputV2 & { readonly supervisor?: ValidationProcessSupervisorV2Like }): Promise<ValidationProcessResultV2> => {
@@ -305,6 +357,9 @@ async function superviseChild(
         });
       });
     });
+    // Close the check/listener race if cancellation crossed immediately
+    // before the listener was installed.
+    if (signal?.aborted) abort();
   });
 }
 
@@ -317,6 +372,12 @@ function boundedEnvironment(policy: ValidationEnvironmentPolicyV2): NodeJS.Proce
   }
   for (const [key, value] of Object.entries(policy.explicit)) result[key] = value;
   return result;
+}
+
+function definedEnvironment(value: NodeJS.ProcessEnv): Readonly<Record<string, string>> {
+  const result: Record<string, string> = Object.create(null) as Record<string, string>;
+  for (const [key, item] of Object.entries(value)) if (item !== undefined) result[key] = item;
+  return Object.freeze(result);
 }
 
 function terminateProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {

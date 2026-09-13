@@ -56,6 +56,12 @@ import {
   type ValidationSpecRef,
 } from "../operational-v2/contracts.js";
 import {
+  emitRalphProgressV1,
+  RALPH_PROGRESS_SCHEMA_V1,
+  withRalphHeartbeatV1,
+  type RalphProgressObserverV1,
+} from "../progress.js";
+import {
   createRalphEventV2,
   type EventPayloadMapV2,
   type RalphEventTypeV2,
@@ -103,6 +109,11 @@ import {
   type ValidationProcessSupervisorV2Like,
 } from "./process-supervisor.js";
 import {
+  bindValidationProjectionRunV1,
+  createValidationProjectionV1,
+  type ValidationProjectionAuthorityV1,
+} from "./validation-projection.js";
+import {
   assertTrustedHumanValidationAuthorityV2,
   createHumanValidationRequestV2,
   humanValidationDecisionRefV2,
@@ -148,6 +159,9 @@ export interface ValidationRunnerOptionsV2 {
   readonly clock?: () => string;
   readonly nonceFactory?: () => string;
   readonly eventIdFactory?: () => string;
+  readonly progress?: RalphProgressObserverV1;
+  readonly progressHeartbeatIntervalMs?: number;
+  readonly progressNow?: () => number;
 }
 
 export interface ValidateAttemptV2Input extends ValidationRunnerOptionsV2 {
@@ -290,99 +304,134 @@ export async function validateAttemptV2(input: ValidateAttemptV2Input): Promise<
   const infrastructureRetryLimit = retryPolicy.validationInfrastructureRetryLimit;
   const processPolicy = input.processPolicy ?? createValidationProcessPolicyV2();
   const supervisor = input.processSupervisor;
+  const projectionSession = specs.some((spec) => spec.kind === "COMMAND")
+    ? await createValidationProjectionV1({
+      canonicalCandidateRoot: input.leasedRun.projectRoot,
+      boundaryManifest: boundary.after,
+      evidenceCaptureId: initialAttempt.evidenceCapture!.evidenceCaptureId,
+      evidenceDigest: boundary.evidence.evidenceDigest,
+      validationSpecs: specs.filter((spec) => spec.kind === "COMMAND"),
+    })
+    : undefined;
 
-  for (const spec of specs) {
-    attempt = input.leasedRun.state.attempts[attempt.attemptId] ?? attempt;
-    assertAttemptSpecBinding(attempt, spec);
-
-    const pending = latestPendingRun(attempt, spec.validationSpecId);
-    let recovered: ValidationRunV2 | undefined;
-    if (pending) {
-      recovered = await readValidationRunV2(input.leasedRun.store, attempt.attemptId, pending.validationRunId);
-      if (!recovered) {
-        // HUMAN is the one intentionally suspended validation boundary.  Its
-        // durable start is completed only after Core validates the external
-        // decision and the durable run.hold-cleared proof.  COMMAND/MANUAL
-        // boundaries, by contrast, are never rerun after a crash without
-        // their immutable result artifact.
-        if (spec.kind !== "HUMAN" && spec.kind !== "MANUAL") {
-          throw new RalphDValidationError("D_VALIDATION_RUN_RESULT_REQUIRED", "D_VALIDATION_RUN_RESULT_REQUIRED: a durable validation.started boundary cannot be rerun without its result artifact");
-        }
-      } else {
-        assertRunBinding(recovered, input.leasedRun.runId, attempt, spec, pending.validationRunOrdinal);
+  try {
+    if (projectionSession) {
+      // Copying is not an authority transition. Re-observe the canonical
+      // candidate before the first command so every projection is temporally
+      // bound to the exact Evidence boundary it claims to represent.
+      const projectedFrom = await observeStableManifest(input, attempt, boundary.invocation);
+      if (projectedFrom.controlPlaneFingerprint !== boundary.after.controlPlaneFingerprint) {
+        const closed = await commitControlPlaneViolation(input.leasedRun, attempt, clock, nonceFactory, eventIdFactory);
+        await releaseAfterExecutor(input.leasedRun, observation, closed, input);
+        return { kind: "CONTROL_PLANE_VIOLATION", outcome: "CONTROL_PLANE_VIOLATION", state: input.leasedRun.state, attempt: closed, leaseReleased: true };
+      }
+      if (workspaceManifestCoreJson(projectedFrom) !== workspaceManifestCoreJson(boundary.after)) {
+        return await reconcileValidation(input.leasedRun, attempt, "C_WORKSPACE_CHANGED_AFTER_EVIDENCE", clock, nonceFactory, eventIdFactory);
       }
     }
 
-    let latest = latestRun(attempt, spec.validationSpecId);
-    if (recovered) latest = validationRunToRef(recovered);
-    let infrastructureFailures = await countInfrastructureFailures(input.leasedRun, attempt, spec.validationSpecId);
-    if (latest?.outcome === "INFRASTRUCTURE_FAILURE") {
-      // A failed infrastructure run is immutable.  Only a new ValidationRun
-      // may retry it; the Executor and EvidenceCapture are never called here.
-      while (latest?.outcome === "INFRASTRUCTURE_FAILURE") {
-        if (infrastructureFailures > infrastructureRetryLimit) {
-          return await exhaustValidationInfrastructure(input, attempt, workUnit, boundary, observation, clock, nonceFactory, eventIdFactory);
-        }
-        const next = await executeValidationRun(input, attempt, spec, latest.validationRunOrdinal + 1, boundary.invocation, boundary.after, supervisor, processPolicy, observation, clock, nonceFactory, eventIdFactory, "RETRY");
-        if (next.kind === "RECONCILIATION_REQUIRED") return next;
-        if (next.kind === "HUMAN_REQUIRED") return next;
-        if (next.kind === "CONTROL_PLANE_VIOLATION") return next;
-        if (next.infrastructureStatus !== "NONE") {
-          infrastructureFailures += 1;
-          attempt = input.leasedRun.state.attempts[attempt.attemptId] ?? attempt;
-          latest = next.ref;
-          if (infrastructureFailures > infrastructureRetryLimit) {
-            return await exhaustValidationInfrastructure(input, attempt, workUnit, boundary, observation, clock, nonceFactory, eventIdFactory);
+    for (const spec of specs) {
+      attempt = input.leasedRun.state.attempts[attempt.attemptId] ?? attempt;
+      assertAttemptSpecBinding(attempt, spec);
+
+      const pending = latestPendingRun(attempt, spec.validationSpecId);
+      let recovered: ValidationRunV2 | undefined;
+      if (pending) {
+        recovered = await readValidationRunV2(input.leasedRun.store, attempt.attemptId, pending.validationRunId);
+        if (!recovered) {
+          // HUMAN is the one intentionally suspended validation boundary. Its
+          // durable start is completed only after Core validates the external
+          // decision and the durable run.hold-cleared proof. COMMAND/MANUAL
+          // boundaries, by contrast, are never rerun after a crash without
+          // their immutable result artifact.
+          if (spec.kind !== "HUMAN" && spec.kind !== "MANUAL") {
+            throw new RalphDValidationError("D_VALIDATION_RUN_RESULT_REQUIRED", "D_VALIDATION_RUN_RESULT_REQUIRED: a durable validation.started boundary cannot be rerun without its result artifact");
           }
-          continue;
+        } else {
+          assertRunBinding(recovered, input.leasedRun.runId, attempt, spec, pending.validationRunOrdinal);
         }
-        latest = next.ref;
-        attempt = input.leasedRun.state.attempts[attempt.attemptId] ?? attempt;
       }
-    } else if (!latest) {
-      if (spec.kind === "HUMAN") {
-        const started = pending
-          ? attempt
-          : await startValidation(input.leasedRun, attempt, spec, 1, clock, nonceFactory, eventIdFactory);
-        attempt = started;
-        const decision = await maybeMaterializeHumanDecision(input, attempt, spec, clock, nonceFactory, eventIdFactory);
-        if (decision.kind === "HUMAN_REQUIRED") return await releaseHumanRequired(input.leasedRun, decision.attempt, observation, input);
-        attempt = decision.attempt;
-        const materialized = await executeHumanValidationRun(input.leasedRun, attempt, spec, decision.decision, boundary.after, clock, nonceFactory, eventIdFactory);
-        attempt = materialized.attempt;
-      } else if (spec.kind === "MANUAL") {
-        const started = pending
-          ? attempt
-          : await startValidation(input.leasedRun, attempt, spec, 1, clock, nonceFactory, eventIdFactory);
-        const materialized = await executeManualValidationRun(input.leasedRun, started, spec, boundary.after, clock, nonceFactory, eventIdFactory);
-        attempt = materialized.attempt;
-      } else {
-        const executed = await executeValidationRun(input, attempt, spec, 1, boundary.invocation, boundary.after, supervisor, processPolicy, observation, clock, nonceFactory, eventIdFactory, "INITIAL");
-        if (executed.kind === "RECONCILIATION_REQUIRED" || executed.kind === "HUMAN_REQUIRED" || executed.kind === "CONTROL_PLANE_VIOLATION") return executed;
-        attempt = input.leasedRun.state.attempts[attempt.attemptId] ?? attempt;
-        if (executed.infrastructureStatus !== "NONE") {
-          infrastructureFailures += 1;
+
+      let latest = latestRun(attempt, spec.validationSpecId);
+      if (recovered) latest = validationRunToRef(recovered);
+      let infrastructureFailures = await countInfrastructureFailures(input.leasedRun, attempt, spec.validationSpecId);
+      if (latest?.outcome === "INFRASTRUCTURE_FAILURE") {
+        // A failed infrastructure run is immutable. Only a new ValidationRun
+        // may retry it; the Executor and EvidenceCapture are never called here.
+        while (latest?.outcome === "INFRASTRUCTURE_FAILURE") {
           if (infrastructureFailures > infrastructureRetryLimit) {
             return await exhaustValidationInfrastructure(input, attempt, workUnit, boundary, observation, clock, nonceFactory, eventIdFactory);
           }
-          // The loop above is intentionally entered through the immutable
-          // latest run; one fresh run is the only possible retry.
-          let retry = executed.ref;
-          while (retry.outcome === "INFRASTRUCTURE_FAILURE") {
-            const next = await executeValidationRun(input, attempt, spec, retry.validationRunOrdinal + 1, boundary.invocation, boundary.after, supervisor, processPolicy, observation, clock, nonceFactory, eventIdFactory, "RETRY");
-            if (next.kind === "RECONCILIATION_REQUIRED" || next.kind === "HUMAN_REQUIRED" || next.kind === "CONTROL_PLANE_VIOLATION") return next;
+          const next = await executeValidationRun(input, attempt, spec, latest.validationRunOrdinal + 1, boundary.invocation, boundary.after, projectionSession?.authority, supervisor, processPolicy, observation, clock, nonceFactory, eventIdFactory, "RETRY");
+          if (next.kind === "RECONCILIATION_REQUIRED") return next;
+          if (next.kind === "HUMAN_REQUIRED") return next;
+          if (next.kind === "CONTROL_PLANE_VIOLATION") return next;
+          if (next.infrastructureStatus !== "NONE") {
+            infrastructureFailures += 1;
             attempt = input.leasedRun.state.attempts[attempt.attemptId] ?? attempt;
-            retry = next.ref;
-            if (next.infrastructureStatus !== "NONE") {
-              infrastructureFailures += 1;
-              if (infrastructureFailures > infrastructureRetryLimit) {
-                return await exhaustValidationInfrastructure(input, attempt, workUnit, boundary, observation, clock, nonceFactory, eventIdFactory);
+            latest = next.ref;
+            if (infrastructureFailures > infrastructureRetryLimit) {
+              return await exhaustValidationInfrastructure(input, attempt, workUnit, boundary, observation, clock, nonceFactory, eventIdFactory);
+            }
+            continue;
+          }
+          latest = next.ref;
+          attempt = input.leasedRun.state.attempts[attempt.attemptId] ?? attempt;
+        }
+      } else if (!latest) {
+        if (spec.kind === "HUMAN") {
+          const started = pending
+            ? attempt
+            : await startValidation(input.leasedRun, attempt, spec, 1, clock, nonceFactory, eventIdFactory, input.progress);
+          attempt = started;
+          const decision = await maybeMaterializeHumanDecision(input, attempt, spec, clock, nonceFactory, eventIdFactory);
+          if (decision.kind === "HUMAN_REQUIRED") {
+            emitValidationFinished(input, decision.attempt, spec, "HUMAN_REQUIRED", 0);
+            return await releaseHumanRequired(input.leasedRun, decision.attempt, observation, input);
+          }
+          attempt = decision.attempt;
+          const materialized = await executeHumanValidationRun(input.leasedRun, attempt, spec, decision.decision, boundary.after, clock, nonceFactory, eventIdFactory);
+          attempt = materialized.attempt;
+          emitValidationFinished(input, attempt, spec, materialized.ref.outcome === "PASS" ? "PASS" : "FAIL", 0);
+        } else if (spec.kind === "MANUAL") {
+          const started = pending
+            ? attempt
+            : await startValidation(input.leasedRun, attempt, spec, 1, clock, nonceFactory, eventIdFactory, input.progress);
+          const materialized = await executeManualValidationRun(input.leasedRun, started, spec, boundary.after, clock, nonceFactory, eventIdFactory);
+          attempt = materialized.attempt;
+          emitValidationFinished(input, attempt, spec, "NOT_APPLICABLE", 0);
+        } else {
+          const executed = await executeValidationRun(input, attempt, spec, 1, boundary.invocation, boundary.after, projectionSession?.authority, supervisor, processPolicy, observation, clock, nonceFactory, eventIdFactory, "INITIAL");
+          if (executed.kind === "RECONCILIATION_REQUIRED" || executed.kind === "HUMAN_REQUIRED" || executed.kind === "CONTROL_PLANE_VIOLATION") return executed;
+          attempt = input.leasedRun.state.attempts[attempt.attemptId] ?? attempt;
+          if (executed.infrastructureStatus !== "NONE") {
+            infrastructureFailures += 1;
+            if (infrastructureFailures > infrastructureRetryLimit) {
+              return await exhaustValidationInfrastructure(input, attempt, workUnit, boundary, observation, clock, nonceFactory, eventIdFactory);
+            }
+            // The loop above is intentionally entered through the immutable
+            // latest run; one fresh run is the only possible retry.
+            let retry = executed.ref;
+            while (retry.outcome === "INFRASTRUCTURE_FAILURE") {
+              const next = await executeValidationRun(input, attempt, spec, retry.validationRunOrdinal + 1, boundary.invocation, boundary.after, projectionSession?.authority, supervisor, processPolicy, observation, clock, nonceFactory, eventIdFactory, "RETRY");
+              if (next.kind === "RECONCILIATION_REQUIRED" || next.kind === "HUMAN_REQUIRED" || next.kind === "CONTROL_PLANE_VIOLATION") return next;
+              attempt = input.leasedRun.state.attempts[attempt.attemptId] ?? attempt;
+              retry = next.ref;
+              if (next.infrastructureStatus !== "NONE") {
+                infrastructureFailures += 1;
+                if (infrastructureFailures > infrastructureRetryLimit) {
+                  return await exhaustValidationInfrastructure(input, attempt, workUnit, boundary, observation, clock, nonceFactory, eventIdFactory);
+                }
               }
             }
           }
         }
       }
     }
+  } finally {
+    // Cleanup removes the whole Core-owned infrastructure root. Product
+    // stdout/stderr are never amended with cleanup diagnostics.
+    await projectionSession?.cleanup();
   }
 
   attempt = input.leasedRun.state.attempts[attempt.attemptId] ?? attempt;
@@ -483,6 +532,7 @@ async function startValidation(
   clock: () => string,
   nonceFactory: () => string,
   eventIdFactory: () => string,
+  progress?: RalphProgressObserverV1,
 ): Promise<AttemptStateV2> {
   const validationRunId = validationRunIdV2(leasedRun.runId, attempt.attemptId, spec, ordinal);
   const event = coreEvent(leasedRun.state, "validation.started", {
@@ -494,6 +544,18 @@ async function startValidation(
   await commitValidationEvent(leasedRun, event, clock, nonceFactory);
   const next = leasedRun.state.attempts[attempt.attemptId];
   if (!next) throw new RalphDValidationError("D_EVENT_DURABILITY_UNKNOWN_REQUIRES_INSPECTION");
+  emitRalphProgressV1(progress, {
+    schema: RALPH_PROGRESS_SCHEMA_V1,
+    kind: "validation.started",
+    runId: leasedRun.runId,
+    phaseId: attempt.phaseId,
+    taskId: attempt.taskId,
+    attemptId: attempt.attemptId,
+    validationSpecId: spec.validationSpecId,
+    validationKind: spec.kind,
+    ordinal: spec.ordinal,
+    occurredAt: clock(),
+  });
   return next;
 }
 
@@ -504,6 +566,7 @@ async function executeValidationRun(
   ordinal: number,
   invocation: InvocationDescriptorV2,
   preManifest: WorkspaceManifestV2,
+  projectionAuthority: ValidationProjectionAuthorityV1 | undefined,
   supervisor: ValidationProcessSupervisorV2Like | undefined,
   processPolicy: ValidationProcessPolicyV2,
   observation: TrustedExecutorObservationV2,
@@ -518,7 +581,7 @@ async function executeValidationRun(
   | { readonly kind: "CONTROL_PLANE_VIOLATION"; readonly outcome: "CONTROL_PLANE_VIOLATION"; readonly state: RalphRuntimeStateV2; readonly attempt: AttemptStateV2; readonly leaseReleased: true }
 > {
   let currentAttempt = input.leasedRun.state.attempts[attempt.attemptId] ?? attempt;
-  if (!currentAttempt.validationRuns.some((run) => run.validationSpecId === spec.validationSpecId && run.validationRunOrdinal === ordinal)) currentAttempt = await startValidation(input.leasedRun, currentAttempt, spec, ordinal, clock, nonceFactory, eventIdFactory);
+  if (!currentAttempt.validationRuns.some((run) => run.validationSpecId === spec.validationSpecId && run.validationRunOrdinal === ordinal)) currentAttempt = await startValidation(input.leasedRun, currentAttempt, spec, ordinal, clock, nonceFactory, eventIdFactory, input.progress);
   const pending = currentAttempt.validationRuns.find((run) => run.validationSpecId === spec.validationSpecId && run.validationRunOrdinal === ordinal);
   if (!pending) throw new RalphDValidationError("D_VALIDATION_RUN_RESULT_REQUIRED");
   const existing = await readValidationRunV2(input.leasedRun.store, currentAttempt.attemptId, pending.validationRunId);
@@ -528,12 +591,49 @@ async function executeValidationRun(
   }
 
   let processResult: ValidationProcessResultV2;
+  const progressNow = input.progressNow ?? Date.now;
+  const progressStarted = progressNow();
   try {
-    await verifyValidationCwdV2(input.leasedRun.projectRoot, input.leasedRun.projectRoot);
-    processResult = normalizeProcessResult(await runValidationCommandV2({ command: spec.instruction, cwd: input.leasedRun.projectRoot, expectedProjectRoot: input.leasedRun.projectRoot, policy: processPolicy, signal: input.validationSignal, supervisor }), clock);
-  } catch {
+    if (!projectionAuthority) throw new RalphDValidationError("D_VALIDATION_RUN_RESULT_REQUIRED", "D_VALIDATION_RUN_RESULT_REQUIRED: COMMAND validation requires a Core projection");
+    const validationBinding = {
+      runId: input.leasedRun.runId,
+      phaseId: currentAttempt.phaseId,
+      taskId: currentAttempt.taskId,
+      attemptId: currentAttempt.attemptId,
+      validationSpecId: spec.validationSpecId,
+      validationRunId: pending.validationRunId,
+    };
+    const validationProjection = bindValidationProjectionRunV1(projectionAuthority, { ...validationBinding, validationSpecDigest: spec.digest });
+    await verifyValidationCwdV2(projectionAuthority.projectionRoot, projectionAuthority.projectionRoot);
+    const timed = await withRalphHeartbeatV1({
+      observer: input.progress,
+      intervalMs: input.progressHeartbeatIntervalMs,
+      now: progressNow,
+      wallClock: clock,
+      event: {
+        kind: "heartbeat",
+        runId: input.leasedRun.runId,
+        operation: "VALIDATION",
+        phaseId: currentAttempt.phaseId,
+        taskId: currentAttempt.taskId,
+        attemptId: currentAttempt.attemptId,
+        validationSpecId: spec.validationSpecId,
+      },
+      operation: () => runValidationCommandV2({
+        command: spec.instruction,
+        cwd: projectionAuthority.projectionRoot,
+        expectedProjectRoot: projectionAuthority.projectionRoot,
+        policy: processPolicy,
+        signal: input.validationSignal,
+        supervisor,
+        validationBinding,
+        validationProjection,
+      }),
+    });
+    processResult = normalizeProcessResult(timed.value, clock);
+  } catch (error) {
     const now = clock();
-    processResult = { stdout: "", stderr: "", stdoutTruncated: false, stderrTruncated: false, exitCode: null, signal: null, infrastructureStatus: "RUNNER_PROTOCOL_FAILURE", timedOut: false, cancelled: false, startedAt: now, finishedAt: now };
+    processResult = { stdout: "", stderr: validationInfrastructureDiagnostic(error), stdoutTruncated: false, stderrTruncated: false, exitCode: null, signal: null, infrastructureStatus: "RUNNER_PROTOCOL_FAILURE", timedOut: false, cancelled: false, startedAt: now, finishedAt: now };
   }
   const postManifest = await observeStableManifest(input, currentAttempt, invocation);
   if (postManifest.controlPlaneFingerprint !== preManifest.controlPlaneFingerprint) {
@@ -597,7 +697,17 @@ async function executeValidationRun(
   });
   await persistValidationRunV2(input.leasedRun.store, run, nonceFactory());
   const ref = validationRunToRef(run);
+  if (run.outcome === "PENDING") throw new RalphDValidationError("D_VALIDATION_RUN_RESULT_REQUIRED");
+  emitValidationFinished(input, currentAttempt, spec, run.outcome, Math.max(0, progressNow() - progressStarted), processResult.exitCode);
   return { kind: "COMPLETED", ref, infrastructureStatus };
+}
+
+function validationInfrastructureDiagnostic(error: unknown): string {
+  if (!error || typeof error !== "object" || !("code" in error)) return "D_VALIDATION_RUNNER_PROTOCOL_FAILURE";
+  const code = (error as { readonly code?: unknown }).code;
+  return typeof code === "string" && /^(?:D_VALIDATION_|RALPH_(?:BRIDGE_NPM_|NODE_NPM_))[A-Z0-9_]{1,160}$/.test(code)
+    ? code
+    : "D_VALIDATION_RUNNER_PROTOCOL_FAILURE";
 }
 
 async function executeHumanValidationRun(
@@ -1059,6 +1169,29 @@ async function releaseAfterExecutor(inputLeasedRun: LeasedRunV2, observation: Tr
   ];
   const proof = await deriveExecutorReleaseProofV2(inputLeasedRun, observation, refs);
   await releaseLeasedRunV2(inputLeasedRun, { proof });
+}
+
+function emitValidationFinished(
+  input: ValidateAttemptV2Input,
+  attempt: AttemptStateV2,
+  spec: ValidationSpecRef,
+  outcome: "PASS" | "FAIL" | "NOT_APPLICABLE" | "INFRASTRUCTURE_FAILURE" | "HUMAN_REQUIRED",
+  elapsedMs: number,
+  exitCode?: number | null,
+): void {
+  emitRalphProgressV1(input.progress, {
+    schema: RALPH_PROGRESS_SCHEMA_V1,
+    kind: "validation.finished",
+    runId: input.leasedRun.runId,
+    phaseId: attempt.phaseId,
+    taskId: attempt.taskId,
+    attemptId: attempt.attemptId,
+    validationSpecId: spec.validationSpecId,
+    outcome,
+    elapsedMs,
+    ...(exitCode === undefined ? {} : { exitCode }),
+    occurredAt: (input.clock ?? (() => new Date().toISOString()))(),
+  });
 }
 
 async function commitValidationEvent(leasedRun: LeasedRunV2, event: RalphEventV2, clock: () => string, nonceFactory: () => string): Promise<void> {

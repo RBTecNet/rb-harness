@@ -92,6 +92,7 @@ import {
   loadProgressiveExecutionAuthority,
   runProgressiveRalphBridgeV1,
 } from "./vnext/ralph-bridge/index.js";
+import { createRalphProgressStderrChannelV1 } from "./vnext/ralph-runtime/progress.js";
 
 configureCodexRuntimeVerifier({ verify: verifyManagedCodexRuntime });
 
@@ -1061,7 +1062,9 @@ export async function runHarnessCli(): Promise<void> {
       program.outputHelp();
       return;
     }
-    const result = await runProgressiveRalphBridgeV1(resolve(input.project), {}, input.humanDecision ? { humanDecision: input.humanDecision } : {});
+    const progress = createRalphProgressStderrChannelV1();
+    const result = await runProgressiveRalphBridgeV1(resolve(input.project), { progress }, input.humanDecision ? { humanDecision: input.humanDecision } : {})
+      .finally(() => progress.close().catch(() => undefined));
     process.stdout.write(input.json ? `${JSON.stringify(result, null, 2)}\n` : `${formatRalphBridgeResultV1(result)}\n`);
     if (result.status !== "COMPLETE") process.exitCode = result.status === "NEEDS_HUMAN" || result.status === "INCOMPLETE_RESUMABLE" ? 2 : 1;
     return;

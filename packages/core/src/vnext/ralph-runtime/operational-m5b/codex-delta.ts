@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { scopeTokenCoversPath } from "../../../path-ownership.js";
 import { sha256, sha256Canonical } from "../hashing.js";
+import { isWorkspacePackageInfrastructurePathV1 } from "../package-infrastructure.js";
 import { M5B_LIMITS_V2, RalphM5BError } from "./contract.js";
 import {
   assertSafeRelativePathV2,
@@ -174,6 +175,7 @@ export function validateCodexWorkspaceDeltaV2(value: unknown): asserts value is 
     if (!isRecord(entry)) throw new RalphM5BError("M5B_DELTA_INVALID", "M5B_DELTA_INVALID: entry");
     assertExactKeys(entry, ["path", "operation", "preimageDigest", "postimageDigest", "mode", "postimageSize", "postimageBase64"]);
     const path = assertSafeRelativePathV2(entry.path);
+    if (isWorkspacePackageInfrastructurePathV1(path)) throw new RalphM5BError("M5B_DELTA_PATH_FORBIDDEN", `M5B_DELTA_PATH_FORBIDDEN: ${path}`);
     if (isCodexProjectionExcludedPathV2(path)) throw new RalphM5BError("M5B_DELTA_PATH_FORBIDDEN", `M5B_DELTA_PATH_FORBIDDEN: ${path}`);
     if (path <= previous) throw new RalphM5BError("M5B_DELTA_INVALID", "M5B_DELTA_INVALID: entries must be sorted and unique");
     previous = path;
@@ -204,6 +206,7 @@ export function validateCodexWorkspaceDeltaV2(value: unknown): asserts value is 
 
 export function assertPublishablePathV2(path: string, ownership: readonly string[]): void {
   assertSafeRelativePathV2(path);
+  if (isWorkspacePackageInfrastructurePathV1(path)) throw new RalphM5BError("M5B_DELTA_PATH_FORBIDDEN", `M5B_DELTA_PATH_FORBIDDEN: ${path}`);
   if (isCodexProjectionExcludedPathV2(path)) throw new RalphM5BError("M5B_DELTA_PATH_FORBIDDEN", `M5B_DELTA_PATH_FORBIDDEN: ${path}`);
   if (!ownership.some((token) => scopeTokenCoversPath(token, path))) throw new RalphM5BError("M5B_DELTA_OUT_OF_SCOPE", `M5B_DELTA_OUT_OF_SCOPE: ${path}`);
 }

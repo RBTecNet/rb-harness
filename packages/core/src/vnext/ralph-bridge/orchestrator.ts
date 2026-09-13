@@ -11,6 +11,7 @@ import {
   type RalphBridgeRunDescriptorV1,
 } from "./genesis.js";
 import { continueBridgeTaskV1, type BridgeRuntimeFactoriesV1 } from "./operational-loop.js";
+import type { NpmDependencyProvisionerV1Like } from "./dependency-provisioning.js";
 import {
   createIsolatedRalphWorkspace,
   inspectHostPublicationOutcome,
@@ -48,6 +49,25 @@ import {
 import { createCodexCliAuditorV2 } from "../ralph-runtime/operational-m5d/index.js";
 import type { AttemptStateV2, RalphRuntimeStateV2 } from "../ralph-runtime/operational-v2/index.js";
 import { acquireLeasedRunV2, releaseLeasedRunV2, type LeaseRuntimeInputV2 } from "../ralph-runtime/operational-b2/index.js";
+import {
+  emitRalphProgressV1,
+  RALPH_PROGRESS_SCHEMA_V1,
+  withRalphHeartbeatV1,
+  type RalphProgressObserverV1,
+  type RalphProgressEventV1,
+} from "../ralph-runtime/progress.js";
+import {
+  CODEX_CLI_EXECUTOR_PROVIDER_V2,
+  CODEX_CLI_EXECUTOR_REASONING_EFFORT_V2,
+  CODEX_CLI_EXECUTOR_REQUESTED_MODEL_V2,
+  CODEX_CLI_EXECUTOR_TRANSPORT_V2,
+} from "../ralph-runtime/operational-m5b/contract.js";
+import {
+  CODEX_CLI_AUDITOR_PROVIDER_V2,
+  CODEX_CLI_AUDITOR_REASONING_EFFORT_V2,
+  CODEX_CLI_AUDITOR_REQUESTED_MODEL_V2,
+  CODEX_CLI_AUDITOR_TRANSPORT_V2,
+} from "../ralph-runtime/operational-m5d/contract.js";
 
 export const RALPH_BRIDGE_RESULT_STATUSES_V1 = ["COMPLETE", "FAILED", "BLOCKED", "NEEDS_HUMAN", "INCOMPLETE_RESUMABLE"] as const;
 export type RalphBridgeResultStatusV1 = typeof RALPH_BRIDGE_RESULT_STATUSES_V1[number];
@@ -89,6 +109,10 @@ export interface RalphBridgeRuntimeHooksV1 {
   readonly runtimes?: BridgeRuntimeFactoriesV1;
   readonly validationProcessSupervisor?: ValidationProcessSupervisorV2Like;
   readonly validationProcessPolicy?: ValidationProcessPolicyV2;
+  readonly dependencyProvisioner?: NpmDependencyProvisionerV1Like;
+  readonly progress?: RalphProgressObserverV1;
+  readonly progressHeartbeatIntervalMs?: number;
+  readonly progressNow?: () => number;
   readonly clock?: () => string;
   readonly nonceFactory?: () => string;
   readonly eventIdFactory?: () => string;
@@ -201,19 +225,32 @@ async function driveBridgeRun(input: DriveBridgeRunV1Input): Promise<RalphBridge
   let publicationOccurred = input.publicationOccurred;
   let humanAuthority = input.humanAuthority;
   const taskCount = authority.operationalPlan.phases.flatMap((phase) => phase.tasks).length;
+  emitRalphProgressV1(hooks.progress, {
+    schema: RALPH_PROGRESS_SCHEMA_V1,
+    kind: "run.started",
+    runId,
+    planId: authority.selectedPlan.id,
+    taskCount,
+    occurredAt: progressWallClock(hooks),
+  });
 
   for (let taskOrdinal = 0; taskOrdinal <= taskCount; taskOrdinal += 1) {
     const unpublished = await acceptedUnpublishedAttempt(store, state);
     if (unpublished) {
       if (hooks.stopAfterAcceptedTask) {
-        return resultFromState(authority, descriptor, state, "INCOMPLETE_RESUMABLE", publicationOccurred,
+        const result = resultFromState(authority, descriptor, state, "INCOMPLETE_RESUMABLE", publicationOccurred,
           "RALPH_BRIDGE_INTERRUPTED_AFTER_AUDIT", "Re-run the same command to publish the already-audited task; Executor and Auditor will not be repeated.");
+        emitTerminalProgress(hooks, result, "INCOMPLETE_RESUMABLE");
+        return result;
       }
       const publication = await publishAcceptedBridgeAttempt({
         root, authority, descriptor, store, lease, state, attempt: unpublished,
         hostBaseline, workspaceBaseline, publicationOccurred, hooks,
       });
-      if ("result" in publication) return publication.result;
+      if ("result" in publication) {
+        emitTerminalProgress(hooks, publication.result, "FAILED");
+        return publication.result;
+      }
       state = publication.state;
       hostBaseline = publication.hostBaseline;
       workspaceBaseline = publication.workspaceBaseline;
@@ -222,7 +259,25 @@ async function driveBridgeRun(input: DriveBridgeRunV1Input): Promise<RalphBridge
 
     if (state.taskIds.every((taskId) => state.tasks[taskId]?.disposition === "COMPLETE")) {
       if (state.disposition !== "COMPLETE") state = await commitTerminalWhileLeased(lease, "COMPLETE", hooks);
-      return resultFromState(authority, descriptor, state, "COMPLETE", publicationOccurred);
+      const result = resultFromState(authority, descriptor, state, "COMPLETE", publicationOccurred);
+      emitTerminalProgress(hooks, result, "COMPLETE");
+      return result;
+    }
+
+    const currentTaskId = state.taskIds.find((taskId) => state.tasks[taskId]?.disposition !== "COMPLETE");
+    if (currentTaskId) {
+      const task = authority.operationalPlan.phases.flatMap((phase) => phase.tasks.map((candidate) => ({ phaseId: phase.id, task: candidate })))
+        .find((candidate) => candidate.task.id === currentTaskId);
+      if (task) emitRalphProgressV1(hooks.progress, {
+        schema: RALPH_PROGRESS_SCHEMA_V1,
+        kind: "task.started",
+        runId,
+        phaseId: task.phaseId,
+        taskId: task.task.id,
+        ordinal: state.taskIds.indexOf(currentTaskId) + 1,
+        taskCount,
+        occurredAt: progressWallClock(hooks),
+      });
     }
 
     let lifecycle;
@@ -238,6 +293,10 @@ async function driveBridgeRun(input: DriveBridgeRunV1Input): Promise<RalphBridge
         ...(humanAuthority ? { humanAuthority } : {}),
         ...(hooks.validationProcessSupervisor ? { validationProcessSupervisor: hooks.validationProcessSupervisor } : {}),
         ...(hooks.validationProcessPolicy ? { validationProcessPolicy: hooks.validationProcessPolicy } : {}),
+        ...(hooks.dependencyProvisioner ? { dependencyProvisioner: hooks.dependencyProvisioner } : {}),
+        ...(hooks.progress ? { progress: hooks.progress } : {}),
+        ...(hooks.progressHeartbeatIntervalMs ? { progressHeartbeatIntervalMs: hooks.progressHeartbeatIntervalMs } : {}),
+        ...(hooks.progressNow ? { progressNow: hooks.progressNow } : {}),
         ...(hooks.clock ? { clock: hooks.clock } : {}),
         ...(hooks.nonceFactory ? { nonceFactory: hooks.nonceFactory } : {}),
         ...(hooks.eventIdFactory ? { eventIdFactory: hooks.eventIdFactory } : {}),
@@ -245,24 +304,34 @@ async function driveBridgeRun(input: DriveBridgeRunV1Input): Promise<RalphBridge
       });
       humanAuthority = undefined;
     } catch (error) {
-      return resultFromState(authority, descriptor, state, "INCOMPLETE_RESUMABLE", publicationOccurred, errorCode(error), "Inspect the durable run and re-run the same command; no second run will be created.");
+      const result = resultFromState(authority, descriptor, state, "INCOMPLETE_RESUMABLE", publicationOccurred, errorCode(error), "Inspect the durable run and re-run the same command; no second run will be created.");
+      emitTerminalProgress(hooks, result, "INCOMPLETE_RESUMABLE");
+      return result;
     }
     state = lifecycle.state;
     if (lifecycle.kind === "HUMAN_REQUIRED") {
       let pending: DiscoveredPendingHumanV1;
       try { pending = await discoverPendingHuman(store, state, root); }
-      catch (error) { return resultFromState(authority, descriptor, state, "BLOCKED", publicationOccurred, errorCode(error)); }
-      return humanRequiredResult(root, authority, descriptor, state, publicationOccurred, pending);
+      catch (error) {
+        const result = resultFromState(authority, descriptor, state, "BLOCKED", publicationOccurred, errorCode(error));
+        emitTerminalProgress(hooks, result, "BLOCKED");
+        return result;
+      }
+      const result = humanRequiredResult(root, authority, descriptor, state, publicationOccurred, pending);
+      emitTerminalProgress(hooks, result, "HUMAN_REQUIRED");
+      return result;
     }
     if (lifecycle.kind !== "TASK_COMPLETE" || !lifecycle.attempt || lifecycle.audit?.kind !== "AUDIT_ACCEPTED") {
       if (!hasOpenAttempt(state) && state.disposition === "ACTIVE") {
         state = await commitTerminalWhileLeased(lease, "FAILED", hooks, `RALPH_BRIDGE_${lifecycle.kind}`);
-        return resultFromState(authority, descriptor, state, "FAILED", publicationOccurred, `RALPH_BRIDGE_${lifecycle.kind}`);
+        const result = resultFromState(authority, descriptor, state, "FAILED", publicationOccurred, `RALPH_BRIDGE_${lifecycle.kind}`);
+        emitTerminalProgress(hooks, result, lifecycle.kind === "BUDGET_EXHAUSTED" ? "BUDGET_EXHAUSTED" : "FAILED");
+        return result;
       }
       const guidance = lifecycle.kind === "RECONCILIATION_REQUIRED"
         ? await finalizationDiagnosticGuidanceV1(store, state, lifecycle.attempt?.attemptId)
         : undefined;
-      return resultFromState(
+      const result = resultFromState(
         authority,
         descriptor,
         state,
@@ -271,9 +340,13 @@ async function driveBridgeRun(input: DriveBridgeRunV1Input): Promise<RalphBridge
         `RALPH_BRIDGE_${lifecycle.kind}`,
         guidance ?? "Inspect the preserved durable evidence and workspace before recovery.",
       );
+      emitTerminalProgress(hooks, result, lifecycle.kind === "BUDGET_EXHAUSTED" ? "BUDGET_EXHAUSTED" : "BLOCKED");
+      return result;
     }
   }
-  return resultFromState(authority, descriptor, state, "BLOCKED", publicationOccurred, "RALPH_BRIDGE_DRIVER_SAFETY_LIMIT");
+  const result = resultFromState(authority, descriptor, state, "BLOCKED", publicationOccurred, "RALPH_BRIDGE_DRIVER_SAFETY_LIMIT");
+  emitTerminalProgress(hooks, result, "BLOCKED");
+  return result;
 }
 
 async function finalizationDiagnosticGuidanceV1(
@@ -316,34 +389,48 @@ async function publishAcceptedBridgeAttempt(input: {
 } | { readonly result: RalphBridgeResultV1 }> {
   const { root, authority, descriptor, store, lease, attempt, hooks } = input;
   const allOwnedPaths = Object.values(authority.ownedPathsByTask).flat();
-  await hooks.beforePublication?.(attempt.taskId, descriptor.workspaceRoot);
+  emitAttemptProgress(hooks, descriptor.runId, attempt, "publication.started", {});
+  const progressNow = hooks.progressNow ?? Date.now;
+  const progressStarted = progressNow();
   try {
-    const published = await publishAcceptedTaskDelta({
-      projectRoot: root,
-      workspaceRoot: descriptor.workspaceRoot,
-      runDirectory: store.runDirectory,
-      runId: descriptor.runId,
-      planId: authority.selectedPlan.id,
-      taskId: attempt.taskId,
-      attemptId: attempt.attemptId,
-      taskOwnedPaths: authority.ownedPathsByTask[attempt.taskId] ?? [],
-      allOwnedPaths,
-      expectedHostBaseline: input.hostBaseline,
-      workspaceBaseline: input.workspaceBaseline,
-      revalidateReadiness: async () => {
-        await inspectExactProgressiveReadiness(root);
-        const tree = await validateManifestTree(root);
-        if (!tree.valid) throw new RalphBridgeAuthorityError("RALPH_BRIDGE_MANIFEST_STALE_BEFORE_PUBLICATION");
-        const current = await loadProgressiveExecutionAuthority(root);
-        if (current.semanticExecutionIdentity !== authority.semanticExecutionIdentity
-          || current.operationalPlanDigest !== authority.operationalPlanDigest
-          || current.selectedPlan.sha256 !== authority.selectedPlan.sha256) {
-          throw new RalphBridgeAuthorityError("RALPH_BRIDGE_AUTHORITY_CHANGED_BEFORE_PUBLICATION");
-        }
-        return current.readinessDigest;
+    const timed = await withRalphHeartbeatV1({
+      observer: hooks.progress,
+      intervalMs: hooks.progressHeartbeatIntervalMs,
+      now: progressNow,
+      wallClock: () => progressWallClock(hooks),
+      event: { kind: "heartbeat", runId: descriptor.runId, operation: "PUBLICATION", phaseId: attempt.phaseId, taskId: attempt.taskId, attemptId: attempt.attemptId },
+      operation: async () => {
+        await hooks.beforePublication?.(attempt.taskId, descriptor.workspaceRoot);
+        return publishAcceptedTaskDelta({
+          projectRoot: root,
+          workspaceRoot: descriptor.workspaceRoot,
+          runDirectory: store.runDirectory,
+          runId: descriptor.runId,
+          planId: authority.selectedPlan.id,
+          taskId: attempt.taskId,
+          attemptId: attempt.attemptId,
+          taskOwnedPaths: authority.ownedPathsByTask[attempt.taskId] ?? [],
+          allOwnedPaths,
+          expectedHostBaseline: input.hostBaseline,
+          workspaceBaseline: input.workspaceBaseline,
+          revalidateReadiness: async () => {
+            await inspectExactProgressiveReadiness(root);
+            const tree = await validateManifestTree(root);
+            if (!tree.valid) throw new RalphBridgeAuthorityError("RALPH_BRIDGE_MANIFEST_STALE_BEFORE_PUBLICATION");
+            const current = await loadProgressiveExecutionAuthority(root);
+            if (current.semanticExecutionIdentity !== authority.semanticExecutionIdentity
+              || current.operationalPlanDigest !== authority.operationalPlanDigest
+              || current.selectedPlan.sha256 !== authority.selectedPlan.sha256) {
+              throw new RalphBridgeAuthorityError("RALPH_BRIDGE_AUTHORITY_CHANGED_BEFORE_PUBLICATION");
+            }
+            return current.readinessDigest;
+          },
+          ...(hooks.clock ? { clock: hooks.clock } : {}),
+        });
       },
-      ...(hooks.clock ? { clock: hooks.clock } : {}),
     });
+    const published = timed.value;
+    emitAttemptProgress(hooks, descriptor.runId, attempt, "publication.finished", { outcome: "PASS", elapsedMs: timed.elapsedMs });
     return {
       state: input.state,
       hostBaseline: published.hostBaseline,
@@ -351,6 +438,7 @@ async function publishAcceptedBridgeAttempt(input: {
       publicationOccurred: input.publicationOccurred || published.receipt.delta.length > 0,
     };
   } catch (error) {
+    emitAttemptProgress(hooks, descriptor.runId, attempt, "publication.finished", { outcome: "FAIL", elapsedMs: Math.max(0, progressNow() - progressStarted), code: errorCode(error) });
     let state = input.state;
     const durable = await inspectOperationalRunV2({
       projectRoot: descriptor.workspaceRoot,
@@ -718,7 +806,59 @@ function realCodexFactories(bridgeRoot: string): BridgeRuntimeFactoriesV1 {
       timeoutPolicy,
       ioBase: resolve(bridgeRoot, "auditor-io"),
     }),
+    presentation: {
+      executor: {
+        provider: CODEX_CLI_EXECUTOR_PROVIDER_V2,
+        transport: CODEX_CLI_EXECUTOR_TRANSPORT_V2,
+        model: CODEX_CLI_EXECUTOR_REQUESTED_MODEL_V2,
+        effort: CODEX_CLI_EXECUTOR_REASONING_EFFORT_V2,
+      },
+      auditor: {
+        provider: CODEX_CLI_AUDITOR_PROVIDER_V2,
+        transport: CODEX_CLI_AUDITOR_TRANSPORT_V2,
+        model: CODEX_CLI_AUDITOR_REQUESTED_MODEL_V2,
+        effort: CODEX_CLI_AUDITOR_REASONING_EFFORT_V2,
+      },
+    },
   };
+}
+
+function emitAttemptProgress<TKind extends Extract<RalphProgressEventV1, { readonly attemptId: string }>["kind"]>(
+  hooks: RalphBridgeRuntimeHooksV1,
+  runId: string,
+  attempt: AttemptStateV2,
+  kind: TKind,
+  payload: Omit<Extract<RalphProgressEventV1, { readonly kind: TKind }>, "schema" | "kind" | "runId" | "phaseId" | "taskId" | "attemptId" | "occurredAt">,
+): void {
+  emitRalphProgressV1(hooks.progress, {
+    schema: RALPH_PROGRESS_SCHEMA_V1,
+    kind,
+    runId,
+    phaseId: attempt.phaseId,
+    taskId: attempt.taskId,
+    attemptId: attempt.attemptId,
+    occurredAt: progressWallClock(hooks),
+    ...payload,
+  } as RalphProgressEventV1);
+}
+
+function emitTerminalProgress(
+  hooks: RalphBridgeRuntimeHooksV1,
+  result: RalphBridgeResultV1,
+  status: Extract<RalphProgressEventV1, { readonly kind: "run.terminal" }>["status"],
+): void {
+  emitRalphProgressV1(hooks.progress, {
+    schema: RALPH_PROGRESS_SCHEMA_V1,
+    kind: "run.terminal",
+    runId: result.runId,
+    status,
+    ...(result.errorCode ? { code: result.errorCode } : {}),
+    occurredAt: progressWallClock(hooks),
+  });
+}
+
+function progressWallClock(hooks: RalphBridgeRuntimeHooksV1): string {
+  return hooks.clock?.() ?? new Date().toISOString();
 }
 
 function preflightFailure(error: unknown): RalphBridgeResultV1 {

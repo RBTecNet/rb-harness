@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile, mkdir, stat } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, rm, writeFile, mkdir, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -62,6 +62,8 @@ import {
 } from "../../src/vnext/ralph-runtime/operational-d/human.js";
 import { createWorkspacePolicy, fingerprintWorkspace } from "../../src/vnext/ralph-runtime/fingerprint.js";
 import { sha256, sha256Canonical } from "../../src/vnext/ralph-runtime/hashing.js";
+import { createWorkspaceManifestV2, readWorkspaceAfterManifestV2 } from "../../src/vnext/ralph-runtime/operational-b4/workspace-manifest.js";
+import { bindValidationProjectionRunV1, createValidationProjectionV1 } from "../../src/vnext/ralph-runtime/operational-d/validation-projection.js";
 
 const TEST_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const OWNER: ProcessIdentity = { pid: 58101, processStartIdentity: "d-start", hostIdentity: "d-host", bootSessionIdentity: "d-boot" };
@@ -75,14 +77,14 @@ function descriptor(schemaVersion: string, descriptorId: string) {
   return { ...base, descriptorDigest: sha256Canonical(base) };
 }
 
-function task(validation: readonly string[]): Task {
+function task(validation: readonly string[], scope = "src"): Task {
   return {
     id: "T001",
     title: "Validate fixture",
     done: false,
-    scope: "src",
+    scope,
     change: "make the fixture valid",
-    covers: "src",
+    covers: scope,
     dependsOn: [],
     parallelSafe: false,
     acceptanceCriteria: ["the fixture is valid"],
@@ -92,8 +94,8 @@ function task(validation: readonly string[]): Task {
   };
 }
 
-function plan(validation: readonly string[]): ExecutionDocument {
-  const phase: Phase = { number: 1, id: "P01", title: "Validation", goal: "validate", dependsOn: [], context: ["test"], tasks: [task(validation)], line: 1 };
+function plan(validation: readonly string[], scope = "src"): ExecutionDocument {
+  const phase: Phase = { number: 1, id: "P01", title: "Validation", goal: "validate", dependsOn: [], context: ["test"], tasks: [task(validation, scope)], line: 1 };
   return { contract: "rb-execution/v1", artifactId: "plan-d", title: "D", phases: [phase] };
 }
 
@@ -137,14 +139,18 @@ async function append(store: RalphEventStoreV2, state: RalphRuntimeStateV2, next
 }
 
 async function fixture(
-  validation: readonly string[],
+  validation: readonly string[] | ((root: string) => readonly string[]),
   action?: (root: string) => void | Promise<void>,
   allowCaptureFailure = false,
   retryLimits = { maxTaskAttemptsPerTask: TEST_MAX_TASK_ATTEMPTS, validationInfrastructureRetryLimit: TEST_VALIDATION_INFRA_RETRIES },
+  seed?: (root: string) => void | Promise<void>,
+  workspacePolicyInput: Parameters<typeof createWorkspacePolicy>[0] = {},
+  taskScope = "src",
 ) {
   const root = await mkdtemp(resolve(process.env.TMPDIR ?? "/tmp", "rb-ralph-d-validation-"));
-  const document = plan(validation);
-  const policy = createWorkspacePolicy();
+  await seed?.(root);
+  const document = plan(typeof validation === "function" ? validation(root) : validation, taskScope);
+  const policy = createWorkspacePolicy(workspacePolicyInput);
   const initialFingerprint = await fingerprintWorkspace(root, policy);
   const config = descriptor("rb-ralph-config/v2", "d-config");
   const snapshot: RunSnapshotV2 = {
@@ -200,6 +206,103 @@ async function runD(value: Awaited<ReturnType<typeof fixture>>, options: Partial
 }
 
 describe("Ralph Operational Core V2 — D Validation", () => {
+  it.each([
+    ["npm run build", "dist/index.js", "dist"],
+    ["npm run tsbuild", ".tsbuildinfo", ".tsbuildinfo"],
+    ["npm test", "coverage/coverage.json", "coverage"],
+    ["npm run tool", ".vite/cache.bin", ".vite"],
+    ["npm run tool", ".cache/cache.bin", ".cache"],
+  ] as const)("runs %s in an ephemeral projection and discards validation-only %s", async (command, generatedPath, generatedRoot) => {
+    const value = await fixture([`\`${command}\``], async (root) => {
+      await mkdir(join(root, "src"), { recursive: true });
+      await writeFile(join(root, "src/app.ts"), "export const authority = 'executor';\n");
+    }, false, undefined, seedMajor4NpmProject);
+    let projectionRoot = "";
+    let projectedBytes = "";
+    const delegate = new ValidationProcessSupervisorV2();
+    try {
+      const evidenceManifest = await readWorkspaceAfterManifestV2(value.store, "attempt-d-001");
+      if (!evidenceManifest) throw new Error("missing Evidence manifest");
+      const result = await runD(value, { processSupervisor: { run: async (input) => {
+        projectionRoot = input.cwd;
+        const processResult = await delegate.run(input);
+        projectedBytes = await readFile(join(input.cwd, generatedPath), "utf8");
+        return processResult;
+      } } });
+      expect(result.kind).toBe("VALIDATION_READY_FOR_AUDIT");
+      if (result.kind !== "VALIDATION_READY_FOR_AUDIT") throw new Error("Major-4 validation did not reach AuditPackage");
+      expect(projectedBytes.length).toBeGreaterThan(0);
+      expect(await readFile(join(value.root, "src/app.ts"), "utf8")).toBe("export const authority = 'executor';\n");
+      await expect(lstat(join(value.root, generatedRoot))).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(lstat(projectionRoot)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(result.auditPackage.workspaceFingerprint).toBe(evidenceManifest.fingerprintDigest);
+      expect(result.auditPackage.postExecutorFingerprint).toBe(evidenceManifest.fingerprintDigest);
+      expect((await fingerprintWorkspace(value.root)).fingerprintDigest).toBe(evidenceManifest.fingerprintDigest);
+      expect(evidenceManifest.productWorkspaceEntries.find((entry) => entry.path === "src/app.ts")?.contentHash).toBe(sha256("export const authority = 'executor';\n"));
+    } finally { await rm(value.root, { recursive: true, force: true }); }
+  }, 30_000);
+
+  it("keeps a validation rewrite in the projection and never promotes it into AuditPackage authority", async () => {
+    const value = await fixture(["`echo MALICIOUS > src/app.ts`"], async (root) => {
+      await mkdir(join(root, "src"), { recursive: true });
+      await writeFile(join(root, "src/app.ts"), "ORIGINAL\n");
+    });
+    let projected = "";
+    let projectionRoot = "";
+    const delegate = new ValidationProcessSupervisorV2();
+    try {
+      const result = await runD(value, { processSupervisor: { run: async (input) => {
+        projectionRoot = input.cwd;
+        const processResult = await delegate.run(input);
+        projected = await readFile(join(input.cwd, "src/app.ts"), "utf8");
+        return processResult;
+      } } });
+      expect(result.kind).toBe("VALIDATION_READY_FOR_AUDIT");
+      expect(projected).toBe("MALICIOUS\n");
+      expect(await readFile(join(value.root, "src/app.ts"), "utf8")).toBe("ORIGINAL\n");
+      await expect(lstat(projectionRoot)).rejects.toMatchObject({ code: "ENOENT" });
+      const evidenceManifest = await readWorkspaceAfterManifestV2(value.store, "attempt-d-001");
+      expect(evidenceManifest?.productWorkspaceEntries.find((entry) => entry.path === "src/app.ts")?.contentHash).toBe(sha256("ORIGINAL\n"));
+      expect((await fingerprintWorkspace(value.root)).fingerprintDigest).toBe(evidenceManifest?.fingerprintDigest);
+      if (result.kind === "VALIDATION_READY_FOR_AUDIT") expect(result.auditPackage.workspaceFingerprint).toBe(evidenceManifest?.fingerprintDigest);
+    } finally { await rm(value.root, { recursive: true, force: true }); }
+  }, 30_000);
+
+  it("makes the real canonical candidate path inaccessible inside validation", async () => {
+    const value = await fixture((root) => [`\`if test -e '${root}'; then exit 41; fi; (printf MALICIOUS > '${root}/src/app.ts') 2>/dev/null && exit 42 || true\``], async (root) => {
+      await mkdir(join(root, "src"), { recursive: true });
+      await writeFile(join(root, "src/app.ts"), "ORIGINAL\n");
+    });
+    try {
+      const result = await runD(value);
+      expect(result.kind).toBe("VALIDATION_READY_FOR_AUDIT");
+      expect(await readFile(join(value.root, "src/app.ts"), "utf8")).toBe("ORIGINAL\n");
+    } finally { await rm(value.root, { recursive: true, force: true }); }
+  }, 30_000);
+
+  it("preserves Executor-created dist while validation rewrites only its disposable projection", async () => {
+    const value = await fixture(["`printf validation-version > dist/index.js`"], async (root) => {
+      await mkdir(join(root, "src"), { recursive: true });
+      await mkdir(join(root, "dist"), { recursive: true });
+      await writeFile(join(root, "src/app.ts"), "source\n");
+      await writeFile(join(root, "dist/index.js"), "executor-version\n");
+    }, false, undefined, undefined, { scopePaths: ["dist/index.js"] }, "src dist");
+    let projected = "";
+    const delegate = new ValidationProcessSupervisorV2();
+    try {
+      const result = await runD(value, { processSupervisor: { run: async (input) => {
+        const processResult = await delegate.run(input);
+        projected = await readFile(join(input.cwd, "dist/index.js"), "utf8");
+        return processResult;
+      } } });
+      expect(result.kind).toBe("VALIDATION_READY_FOR_AUDIT");
+      expect(projected).toBe("validation-version");
+      expect(await readFile(join(value.root, "dist/index.js"), "utf8")).toBe("executor-version\n");
+      const publicationCandidate = await fingerprintWorkspace(value.root, { scopePaths: ["dist/index.js"] });
+      if (result.kind === "VALIDATION_READY_FOR_AUDIT") expect(publicationCandidate.fingerprintDigest).toBe(result.auditPackage.workspaceFingerprint);
+    } finally { await rm(value.root, { recursive: true, force: true }); }
+  }, 30_000);
+
   it("runs trusted COMMAND text as one shell command and produces a durable ValidationSet/AuditPackage", async () => {
     const value = await fixture(["`test -f src/a.ts`"], async (root) => {
       await mkdir(join(root, "src"), { recursive: true });
@@ -454,7 +557,7 @@ describe("Ralph Operational Core V2 — D Validation", () => {
     const root = await mkdtemp(resolve(process.env.TMPDIR ?? "/tmp", "rb-ralph-d-process-"));
     try {
       const supervisor = new ValidationProcessSupervisorV2({ policy: createValidationProcessPolicyV2({ maxOutputBytes: 32, timeoutMs: 2_000 }) });
-      const output = await runValidationCommandV2({ command: "printf '0123456789012345678901234567890123456789'", cwd: root, supervisor });
+      const output = await runDirectValidationCommand(root, "printf '0123456789012345678901234567890123456789'", { supervisor });
       expect(output.infrastructureStatus).toBe("NONE");
       expect(output.stdout.length).toBeLessThanOrEqual(32);
       expect(output.stdoutTruncated).toBe(true);
@@ -465,21 +568,23 @@ describe("Ralph Operational Core V2 — D Validation", () => {
   it("classifies timeout and cancellation as bounded infrastructure outcomes and never treats either as semantic FAIL", async () => {
     const root = await mkdtemp(resolve(process.env.TMPDIR ?? "/tmp", "rb-ralph-d-termination-"));
     try {
-      const timeout = await runValidationCommandV2({ command: "sleep 1", cwd: root, supervisor: new ValidationProcessSupervisorV2({ policy: createValidationProcessPolicyV2({ timeoutMs: 30, killGraceMs: 20, maxOutputBytes: 64 }) }) });
+      const timeout = await runDirectValidationCommand(root, "sleep 1", { supervisor: new ValidationProcessSupervisorV2({ policy: createValidationProcessPolicyV2({ timeoutMs: 30, killGraceMs: 20, maxOutputBytes: 64 }) }) });
       expect(timeout.infrastructureStatus).toBe("TIMEOUT");
       expect(timeout.timedOut).toBe(true);
       expect(timeout.cancelled).toBe(false);
       const controller = new AbortController();
-      const pending = runValidationCommandV2({ command: "sleep 1", cwd: root, signal: controller.signal, supervisor: new ValidationProcessSupervisorV2({ policy: createValidationProcessPolicyV2({ timeoutMs: 2_000, killGraceMs: 20, maxOutputBytes: 64 }) }) });
+      const pending = runDirectValidationCommand(root, "sleep 1", { signal: controller.signal, supervisor: new ValidationProcessSupervisorV2({ policy: createValidationProcessPolicyV2({ timeoutMs: 2_000, killGraceMs: 20, maxOutputBytes: 64 }) }) });
       setTimeout(() => controller.abort(), 20);
       const cancelled = await pending;
       expect(cancelled.infrastructureStatus).toBe("CANCELLED");
       expect(cancelled.timedOut).toBe(false);
       expect(cancelled.cancelled).toBe(true);
-      const nonQuiescent = await runValidationCommandV2({ command: "sleep 5 >/dev/null 2>&1 & exit 0", cwd: root, supervisor: new ValidationProcessSupervisorV2({ policy: createValidationProcessPolicyV2({ timeoutMs: 2_000, killGraceMs: 50, maxOutputBytes: 64 }) }) });
-      expect(nonQuiescent.infrastructureStatus).toBe("PROCESS_SUPERVISION_FAILURE");
+      const nonQuiescent = await runDirectValidationCommand(root, "(sleep 0.2; printf leaked > descendant-leak) >/dev/null 2>&1 & exit 0", { supervisor: new ValidationProcessSupervisorV2({ policy: createValidationProcessPolicyV2({ timeoutMs: 2_000, killGraceMs: 50, maxOutputBytes: 64 }) }) });
+      expect(nonQuiescent.infrastructureStatus).toBe("NONE");
       expect(nonQuiescent.timedOut).toBe(false);
       expect(nonQuiescent.cancelled).toBe(false);
+      await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 300));
+      await expect(readFile(resolve(root, "descendant-leak"))).rejects.toMatchObject({ code: "ENOENT" });
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
@@ -568,7 +673,7 @@ describe("Ralph Operational Core V2 — D Validation", () => {
     } finally { await rm(value.root, { recursive: true, force: true }); }
   });
 
-  it("fails closed on product workspace mutation and closes on .rb control-plane mutation during COMMAND validation", async () => {
+  it("fails closed when an adversarial supervisor reaches product or control-plane paths on the canonical candidate", async () => {
     const product = await fixture(["`true`"]);
     try {
       const productResult = await runD(product, { processSupervisor: { run: async () => {
@@ -578,9 +683,13 @@ describe("Ralph Operational Core V2 — D Validation", () => {
       expect(productResult.kind).toBe("RECONCILIATION_REQUIRED");
       await rm(product.root, { recursive: true, force: true });
 
-      const control = await fixture(["`mkdir -p .rb && touch .rb/validation-mutated`"]);
+      const control = await fixture(["`true`"]);
       try {
-        const controlResult = await runD(control);
+        const controlResult = await runD(control, { processSupervisor: { run: async () => {
+          await mkdir(join(control.root, ".rb"), { recursive: true });
+          await writeFile(join(control.root, ".rb/validation-mutated"), "mutation");
+          return { stdout: "", stderr: "", stdoutTruncated: false, stderrTruncated: false, exitCode: 0, signal: null, infrastructureStatus: "NONE" as const, timedOut: false, cancelled: false, startedAt: "2026-09-06T07:00:05.000Z", finishedAt: "2026-09-06T07:00:05.100Z" };
+        } } });
         expect(controlResult.kind).toBe("CONTROL_PLANE_VIOLATION");
         expect(controlResult.attempt.closureReason).toBe("CONTROL_PLANE_VIOLATION");
         expect((await control.store.inspect()).events.map((candidate) => candidate.eventType)).not.toContain("attempt.audit-ready");
@@ -588,7 +697,7 @@ describe("Ralph Operational Core V2 — D Validation", () => {
     } finally {
       await rm(product.root, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   it("closes fail-closed after a durable validation.started boundary has no result", async () => {
     const value = await fixture(["`test -f src/a.ts`"], undefined, false, { maxTaskAttemptsPerTask: 4, validationInfrastructureRetryLimit: 0 });
@@ -604,3 +713,77 @@ describe("Ralph Operational Core V2 — D Validation", () => {
     } finally { await rm(value.root, { recursive: true, force: true }); }
   });
 });
+
+async function seedMajor4NpmProject(root: string): Promise<void> {
+  const packageJson = {
+    name: "major-4-validation-projection",
+    version: "1.0.0",
+    private: true,
+    packageManager: "npm@10.8.2",
+    scripts: {
+      build: "node -e \"const f=require('node:fs');f.mkdirSync('dist',{recursive:true});f.writeFileSync('dist/index.js','validation-dist\\n')\"",
+      tsbuild: "node -e \"require('node:fs').writeFileSync('.tsbuildinfo','validation-tsbuild\\n')\"",
+      test: "node -e \"const f=require('node:fs');f.mkdirSync('coverage',{recursive:true});f.writeFileSync('coverage/coverage.json','{}\\n')\"",
+      tool: "node -e \"const f=require('node:fs');for(const d of ['.vite','.cache']){f.mkdirSync(d,{recursive:true});f.writeFileSync(d+'/cache.bin','cache\\n')}\"",
+    },
+  };
+  await writeFile(join(root, "package.json"), `${JSON.stringify(packageJson, null, 2)}\n`);
+  await writeFile(join(root, "package-lock.json"), `${JSON.stringify({
+    name: packageJson.name,
+    version: packageJson.version,
+    lockfileVersion: 3,
+    requires: true,
+    packages: { "": { name: packageJson.name, version: packageJson.version } },
+  }, null, 2)}\n`);
+}
+
+async function runDirectValidationCommand(
+  candidateRoot: string,
+  command: string,
+  options: { readonly supervisor?: ValidationProcessSupervisorV2; readonly signal?: AbortSignal },
+) {
+  const binding = {
+    runId: "direct-validation-run",
+    phaseId: "direct-validation-phase",
+    taskId: "direct-validation-task",
+    attemptId: `direct-validation-attempt-${++nonceOrdinal}`,
+    invocationId: `direct-validation-invocation-${nonceOrdinal}`,
+  } as const;
+  const spec = {
+    validationSpecId: `direct-validation-spec-${nonceOrdinal}`,
+    ordinal: 1,
+    kind: "COMMAND" as const,
+    instruction: command,
+    digest: sha256Canonical({ command, ordinal: nonceOrdinal }),
+    sourceTaskId: binding.taskId,
+    sourcePlanIdentity: "direct-validation-plan",
+  };
+  const fingerprint = await fingerprintWorkspace(candidateRoot);
+  const manifest = createWorkspaceManifestV2(binding, fingerprint);
+  const projection = await createValidationProjectionV1({
+    canonicalCandidateRoot: candidateRoot,
+    boundaryManifest: manifest,
+    evidenceCaptureId: `direct-validation-evidence-${nonceOrdinal}`,
+    evidenceDigest: sha256Canonical({ evidence: nonceOrdinal }),
+    validationSpecs: [spec],
+  });
+  const validationBinding = {
+    runId: binding.runId,
+    phaseId: binding.phaseId,
+    taskId: binding.taskId,
+    attemptId: binding.attemptId,
+    validationSpecId: spec.validationSpecId,
+    validationRunId: `direct-validation-result-${nonceOrdinal}`,
+  };
+  try {
+    return await runValidationCommandV2({
+      command,
+      cwd: projection.authority.projectionRoot,
+      expectedProjectRoot: projection.authority.projectionRoot,
+      signal: options.signal,
+      supervisor: options.supervisor,
+      validationBinding,
+      validationProjection: bindValidationProjectionRunV1(projection.authority, { ...validationBinding, validationSpecDigest: spec.digest }),
+    });
+  } finally { await projection.cleanup(); }
+}
